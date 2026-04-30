@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "metadata": {
     "repo": "github.com/google/leveldb (fabricated)",
     "base_commit": "a5394e1...",
@@ -68,6 +68,15 @@
                   { "line_num": 78, "content": "  // Includes both encoded entry bytes and skiplist node overhead.", "change": "added" },
                   { "line_num": 79, "content": "  size_t tracked_bytes_;", "change": "added" },
                   { "line_num": 80, "content": "};", "change": "unchanged" }
+                ],
+
+                "walkthrough": [
+                  {
+                    "line_start": 77,
+                    "line_end": 79,
+                    "chunk_role": "the change · field declaration",
+                    "explanation": "Adds a plain size_t (not atomic) counter alongside the other private members. The two-line comment is precise about what this counter accumulates: encoded entry bytes plus skiplist node overhead. The non-atomic choice is intentional — MemTable::Add is only called under the DB write lock (single writer). Placement after table_ follows the existing rough 'order of construction' layout."
+                  }
                 ]
               }
             ],
@@ -190,6 +199,46 @@
                   { "line_num": 95, "content": "  // Track size: entry bytes + an estimate of skiplist node overhead.", "change": "added" },
                   { "line_num": 96, "content": "  tracked_bytes_ += encoded_len + kApproxSkipListNodeOverhead;", "change": "added" },
                   { "line_num": 97, "content": "}", "change": "unchanged" }
+                ],
+
+                "function_purpose": {
+                  "function_name": "MemTable::Add",
+                  "structure": "single",
+                  "problem_solved": "Inserts a single key/value entry into the in-memory write buffer. This is the only path by which writes land in the MemTable; everything else (DBImpl::Write, WriteBatchInternal) ultimately routes here. The function is responsible for encoding the entry into a single contiguous arena allocation and inserting a pointer into the SkipList.",
+                  "without_it": "Without MemTable::Add, callers would either need to manually encode the entry layout (varint sizes + key + tag + value) and manage arena allocation themselves, or the SkipList would have to expose a richer Insert API that handled encoding. Either route would leak MemTable's internal layout to callers, breaking the abstraction that lets MemTable evolve its on-disk-equivalent format independently."
+                },
+
+                "walkthrough": [
+                  {
+                    "line_start": 78,
+                    "line_end": 83,
+                    "chunk_role": "sizing",
+                    "explanation": "Compute the total encoded length for the entry — varint(internal_key_size) + internal_key_size + varint(val_size) + val_size — before allocating. Doing it in one pass avoids a copy or realloc later. internal_key_size is key_size + 8 because the trailing 8 bytes pack sequence number and value type."
+                  },
+                  {
+                    "line_start": 84,
+                    "line_end": 84,
+                    "chunk_role": "allocation",
+                    "explanation": "Single contiguous arena allocation for the whole entry. Note the SkipList node itself is allocated separately inside table_.Insert(buf) below — this is why the size-accounting change in this PR (line 96) adds an explicit estimate for node overhead rather than relying on encoded_len alone."
+                  },
+                  {
+                    "line_start": 85,
+                    "line_end": 92,
+                    "chunk_role": "encoding",
+                    "explanation": "Lay out the bytes into the buffer: varint internal_key_size, then the user key, then the 8-byte (seq << 8) | type tag, then varint val_size, then the value. The assert at line 92 checks the encoder consumed exactly the budgeted space."
+                  },
+                  {
+                    "line_start": 93,
+                    "line_end": 93,
+                    "chunk_role": "insertion",
+                    "explanation": "Hand the buffer off to the SkipList. Insert takes the buffer pointer; the comparator embedded in the SkipList knows how to decode it for ordering."
+                  },
+                  {
+                    "line_start": 95,
+                    "line_end": 96,
+                    "chunk_role": "the change · accumulator update",
+                    "explanation": "The change in this PR. Increment tracked_bytes_ by encoded entry bytes plus a fixed conservative skiplist-node overhead estimate. Three things to notice: (1) placement is after table_.Insert(), so failure paths wouldn't desync the counter (Insert is currently infallible, but this is correct anyway); (2) += is non-atomic — relies on the single-writer property of the DB write lock; (3) the overhead constant is a magic number (96), not derived from sizeof(Node) + kMaxHeight*sizeof(void*) — see concerns section for the implication."
+                  }
                 ]
               }
             ],
@@ -350,6 +399,116 @@
                   { "line_num": 37, "content": "  }", "change": "unchanged" }
                 ],
                 "why_included": "The previous implementation called this. Critical: arena_.MemoryUsage() is already O(1) — it returns a relaxed atomic load, not iterating blocks. This contradicts the PR description's performance claim."
+              },
+              {
+                "file": "db/db_impl.cc",
+                "language": "cpp",
+                "context_start_line": 1240,
+                "context_end_line": 1290,
+                "lines": [
+                  { "line_num": 1240, "content": "Status DBImpl::MakeRoomForWrite(bool force) {", "change": "unchanged" },
+                  { "line_num": 1241, "content": "  mutex_.AssertHeld();", "change": "unchanged" },
+                  { "line_num": 1242, "content": "  assert(!writers_.empty());", "change": "unchanged" },
+                  { "line_num": 1243, "content": "  bool allow_delay = !force;", "change": "unchanged" },
+                  { "line_num": 1244, "content": "  Status s;", "change": "unchanged" },
+                  { "line_num": 1245, "content": "  while (true) {", "change": "unchanged" },
+                  { "line_num": 1246, "content": "    if (!bg_error_.ok()) {", "change": "unchanged" },
+                  { "line_num": 1247, "content": "      // Yield previous error", "change": "unchanged" },
+                  { "line_num": 1248, "content": "      s = bg_error_;", "change": "unchanged" },
+                  { "line_num": 1249, "content": "      break;", "change": "unchanged" },
+                  { "line_num": 1250, "content": "    } else if (allow_delay &&", "change": "unchanged" },
+                  { "line_num": 1251, "content": "               versions_->NumLevelFiles(0) >=", "change": "unchanged" },
+                  { "line_num": 1252, "content": "                   config::kL0_SlowdownWritesTrigger) {", "change": "unchanged" },
+                  { "line_num": 1253, "content": "      // We are getting close to hitting a hard limit on the number of", "change": "unchanged" },
+                  { "line_num": 1254, "content": "      // L0 files. Rather than delaying a single write by several", "change": "unchanged" },
+                  { "line_num": 1255, "content": "      // seconds when we hit the hard limit, start delaying each", "change": "unchanged" },
+                  { "line_num": 1256, "content": "      // individual write by 1ms to reduce latency variance.", "change": "unchanged" },
+                  { "line_num": 1257, "content": "      mutex_.Unlock();", "change": "unchanged" },
+                  { "line_num": 1258, "content": "      env_->SleepForMicroseconds(1000);", "change": "unchanged" },
+                  { "line_num": 1259, "content": "      allow_delay = false;  // Do not delay a single write more than once", "change": "unchanged" },
+                  { "line_num": 1260, "content": "      mutex_.Lock();", "change": "unchanged" },
+                  { "line_num": 1261, "content": "    } else if (!force &&", "change": "unchanged" },
+                  { "line_num": 1262, "content": "               (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {", "change": "unchanged" },
+                  { "line_num": 1263, "content": "      // There is room in current memtable", "change": "unchanged" },
+                  { "line_num": 1264, "content": "      break;", "change": "unchanged" },
+                  { "line_num": 1265, "content": "    } else if (imm_ != nullptr) {", "change": "unchanged" },
+                  { "line_num": 1266, "content": "      // We have filled up the current memtable, but the previous", "change": "unchanged" },
+                  { "line_num": 1267, "content": "      // one is still being compacted, so we wait.", "change": "unchanged" },
+                  { "line_num": 1268, "content": "      background_work_finished_signal_.Wait();", "change": "unchanged" },
+                  { "line_num": 1269, "content": "    } else if (versions_->NumLevelFiles(0) >=", "change": "unchanged" },
+                  { "line_num": 1270, "content": "               config::kL0_StopWritesTrigger) {", "change": "unchanged" },
+                  { "line_num": 1271, "content": "      // There are too many level-0 files.", "change": "unchanged" },
+                  { "line_num": 1272, "content": "      Log(options_.info_log, \"waiting...\\n\");", "change": "unchanged" },
+                  { "line_num": 1273, "content": "      background_work_finished_signal_.Wait();", "change": "unchanged" },
+                  { "line_num": 1274, "content": "    } else {", "change": "unchanged" },
+                  { "line_num": 1275, "content": "      // Attempt to switch to a new memtable and trigger compaction of old", "change": "unchanged" },
+                  { "line_num": 1276, "content": "      assert(versions_->PrevLogNumber() == 0);", "change": "unchanged" },
+                  { "line_num": 1277, "content": "      uint64_t new_log_number = versions_->NewFileNumber();", "change": "unchanged" },
+                  { "line_num": 1278, "content": "      WritableFile* lfile = nullptr;", "change": "unchanged" },
+                  { "line_num": 1279, "content": "      s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);", "change": "unchanged" },
+                  { "line_num": 1280, "content": "      if (!s.ok()) {", "change": "unchanged" },
+                  { "line_num": 1281, "content": "        versions_->ReuseFileNumber(new_log_number);", "change": "unchanged" },
+                  { "line_num": 1282, "content": "        break;", "change": "unchanged" },
+                  { "line_num": 1283, "content": "      }", "change": "unchanged" },
+                  { "line_num": 1284, "content": "      delete log_;", "change": "unchanged" },
+                  { "line_num": 1285, "content": "      delete logfile_;", "change": "unchanged" },
+                  { "line_num": 1286, "content": "      logfile_ = lfile;", "change": "unchanged" },
+                  { "line_num": 1287, "content": "      logfile_number_ = new_log_number;", "change": "unchanged" },
+                  { "line_num": 1288, "content": "      log_ = new log::Writer(lfile);", "change": "unchanged" },
+                  { "line_num": 1289, "content": "      imm_ = mem_;", "change": "unchanged" },
+                  { "line_num": 1290, "content": "      has_imm_.store(true, std::memory_order_release);", "change": "unchanged" },
+                  { "line_num": 1291, "content": "      mem_ = new MemTable(internal_comparator_);", "change": "unchanged" },
+                  { "line_num": 1292, "content": "      mem_->Ref();", "change": "unchanged" },
+                  { "line_num": 1293, "content": "      force = false;  // Do not force another compaction if have room", "change": "unchanged" },
+                  { "line_num": 1294, "content": "      MaybeScheduleCompaction();", "change": "unchanged" },
+                  { "line_num": 1295, "content": "    }", "change": "unchanged" },
+                  { "line_num": 1296, "content": "  }", "change": "unchanged" },
+                  { "line_num": 1297, "content": "  return s;", "change": "unchanged" },
+                  { "line_num": 1298, "content": "}", "change": "unchanged" }
+                ],
+                "why_included": "Primary consumer of ApproximateMemoryUsage(). Line 1262 is the decision point affected by this PR's semantic change: the threshold comparison now uses entry-byte counting instead of arena-byte counting.",
+
+                "function_purpose": {
+                  "function_name": "DBImpl::MakeRoomForWrite",
+                  "structure": "multi_section",
+                  "sections": [
+                    {
+                      "line_start": 1246,
+                      "line_end": 1249,
+                      "section_name": "background error propagation",
+                      "problem_solved": "If a background compaction has failed, no new writes should proceed — they would pile up in a MemTable that can never flush. This section propagates the error to the caller so the write fails fast.",
+                      "without_it": "Writers would silently succeed into a MemTable that will never be compacted, eventually exhausting memory or producing a database that can't recover."
+                    },
+                    {
+                      "line_start": 1250,
+                      "line_end": 1260,
+                      "section_name": "L0 write slowdown",
+                      "problem_solved": "When L0 file count approaches the hard stop trigger, this section introduces a 1ms sleep per write to create backpressure. The goal is to smooth latency: instead of one write hitting a wall and blocking for seconds while compaction catches up, all writes slow down slightly.",
+                      "without_it": "Without graduated backpressure, write latency would be bimodal: near-zero until the hard limit, then seconds-long stalls. This is the classic 'stall cliff' problem in LSM-trees."
+                    },
+                    {
+                      "line_start": 1261,
+                      "line_end": 1264,
+                      "section_name": "memtable capacity check",
+                      "problem_solved": "Checks whether the current MemTable still has room by comparing ApproximateMemoryUsage() against write_buffer_size. This is the gate that decides whether a write can proceed without rotation. This is the line (1262) directly affected by the PR's semantic change.",
+                      "without_it": "Without this check, the MemTable would grow unbounded until something else (OOM, arena exhaustion) stopped it. The write_buffer_size knob would have no effect."
+                    },
+                    {
+                      "line_start": 1265,
+                      "line_end": 1273,
+                      "section_name": "compaction backpressure waits",
+                      "problem_solved": "Two wait conditions: (1) if the previous MemTable is still being compacted (imm_ != nullptr), wait for it to finish before creating another; (2) if L0 file count hits the hard stop, wait. Both prevent the system from getting too far ahead of compaction.",
+                      "without_it": "Multiple immutable MemTables could pile up (the current design only supports one at a time). Or L0 could grow without bound, making reads expensive and compaction unable to keep up."
+                    },
+                    {
+                      "line_start": 1274,
+                      "line_end": 1295,
+                      "section_name": "memtable rotation",
+                      "problem_solved": "When the current MemTable is full and conditions allow, this section performs the rotation: creates a new WAL file, moves the current MemTable to immutable (imm_), creates a fresh MemTable, and schedules a background compaction to flush imm_ to L0.",
+                      "without_it": "Without rotation, writes would either fail or the single MemTable would grow forever. Rotation is the mechanism that converts in-memory writes into on-disk sorted runs, which is the core of the LSM-tree architecture."
+                    }
+                  ]
+                }
               }
             ]
           },

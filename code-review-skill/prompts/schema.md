@@ -1,15 +1,15 @@
-# Review JSON Schema (v0.2)
+# Review JSON Schema (v0.3)
 
 This is the JSON contract between the analysis prompt and the HTML template.
-v0.2 adds rich context fields (behavior delta, usage context, test coverage,
-codebase patterns, alternative approaches) at the step level, and architectural
-+ purpose context at the storyline level.
+v0.3 adds `function_purpose` and `walkthrough` to FileView, enabling
+inline code-attached annotations and function-level rationale.
+(v0.2 added rich context fields and storyline-level context; those are unchanged.)
 
 ## Top level
 
 ```jsonc
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "metadata": { ... },
   "summary": { ... },
   "storylines": [ ... ]
@@ -168,13 +168,70 @@ codebase patterns, alternative approaches) at the step level, and architectural
   "context_end_line":   "int",
   "lines": [
     { "line_num": "int", "content": "string", "change": "added | removed | unchanged" }
+  ],
+
+  // NEW in v0.3 — function-level rationale (optional; omit if not function-scoped)
+  "function_purpose": {
+    "function_name": "string | null",   // e.g. "MemTable::Add"; null if not function-scoped
+    "structure":     "single | multi_section",
+
+    // when structure == "single"
+    "problem_solved": "string (what problem this function exists to solve — motivation, not description)",
+    "without_it":     "string (what would happen / what callers would do if this didn't exist)",
+
+    // when structure == "multi_section" — function does multiple things
+    "sections": [
+      {
+        "line_start":     "int",
+        "line_end":       "int",
+        "section_name":   "string (e.g. 'input validation', 'main execution loop')",
+        "problem_solved": "string",
+        "without_it":     "string"
+      }
+    ]
+  },
+
+  // NEW in v0.3 — code-attached walk-through annotations (optional)
+  "walkthrough": [
+    {
+      "line_start":  "int",
+      "line_end":    "int",
+      "chunk_role":  "string (e.g. 'validation', 'main logic', 'error handling', 'the change')",
+      "explanation": "string (substantial paragraph: what this chunk does AND why this way)"
+    }
   ]
 }
 ```
 
+#### Walk-through scope heuristic
+
+Walk-through annotations are **change-centric with related unchanged code included**.
+For each candidate chunk, the agent asks: "Does understanding this chunk help the
+reader understand the change?"
+
+- **Yes** (chunk is a +/- change, OR unchanged code the change interacts with) → annotate
+- **No** (surrounding context unrelated to the change's logic) → skip
+
+This makes walk-through **sparse**, not exhaustive. A 30-line function with a 5-line
+change might have 2-3 annotations. Avoid both failure modes:
+- "Annotate every line" → noise, dilutes attention
+- "Annotate only +/- lines" → reader still can't connect change to surrounding logic
+
+#### `function_purpose` design notes
+
+- `problem_solved` is **motivation** ("the system needs Y; this function provides Y").
+  `without_it` is **counter-factual** ("if this didn't exist, callers would pay cost /
+  risk error / be unable to do thing"). Together they force articulation of non-obvious value.
+- For `multi_section`, sections reflect the agent's reading of the function's logical
+  structure (not necessarily aligned with diff hunks). E.g. a 200-line function with
+  parsing in lines 1-80 and execution in 81-200 gets two sections.
+- Use `single` when the function has one coherent purpose. Use `multi_section` for
+  long, historically-merged, or multi-concern functions.
+
 ### FileViewWithReason
 
-Same as FileView, plus `why_included: "string"`.
+Same as FileView (including optional `function_purpose` and `walkthrough`),
+plus `why_included: "string"`.
 
 ### Prerequisite
 
@@ -212,6 +269,8 @@ only what's substantive for each step.
 
 **Populate when relevant** (may be empty/null):
 - code_view.supporting_definitions
+- FileView.function_purpose (when the code block is function-scoped)
+- FileView.walkthrough (when the code is non-trivial and annotations aid understanding)
 - test_coverage
 - codebase_patterns
 - alternative_approaches

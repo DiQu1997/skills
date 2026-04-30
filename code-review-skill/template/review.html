@@ -201,6 +201,99 @@
     overflow-x: auto; word-break: normal; vertical-align: top;
   }
 
+  /* ========== v0.3: Function purpose block ========== */
+  .fn-purpose {
+    padding: 10px 14px;
+    background: #f0f6ff;
+    border-bottom: 1px solid #d0d7de;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .fn-purpose-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .fn-purpose-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12px; color: #0550ae;
+  }
+  .fn-purpose-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px;
+    background: #ddf4ff; color: #0969da;
+  }
+  .fn-purpose .fp-label {
+    font-size: 10px; font-weight: 700; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 2px; margin-top: 8px;
+  }
+  .fn-purpose .fp-label:first-of-type { margin-top: 0; }
+  .fn-purpose-section {
+    padding: 8px 12px; margin-top: 8px;
+    background: rgba(255,255,255,0.6);
+    border-left: 3px solid #b6e3ff;
+    border-radius: 0 4px 4px 0;
+  }
+  .fn-purpose-section .fp-section-name {
+    font-weight: 600; font-size: 11px; color: #0550ae;
+    margin-bottom: 4px;
+  }
+  .fn-purpose-section .fp-section-range {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #656d76;
+    margin-left: 6px; font-weight: 400;
+  }
+
+  /* ========== v0.3: Walkthrough annotations ========== */
+  .wt-annotation {
+    background: #f8f5ff;
+    border-left: 3px solid #c9b8ff;
+    padding: 8px 14px 8px 16px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  .wt-annotation-header {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+  }
+  .wt-toggle {
+    cursor: pointer; user-select: none;
+    color: #8250df; font-size: 11px; flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .wt-toggle.collapsed { transform: rotate(-90deg); }
+  .wt-chunk-role {
+    font-size: 10px; font-weight: 700;
+    color: #6f42c1;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .wt-line-range {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #656d76;
+  }
+  .wt-explanation {
+    font-size: 12.5px; color: #24292f;
+    line-height: 1.55;
+  }
+  .wt-annotation.wt-collapsed .wt-explanation { display: none; }
+
+  .wt-controls {
+    padding: 4px 12px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #eaeef2;
+    display: flex; justify-content: flex-end; gap: 8px;
+  }
+  .wt-controls button {
+    font-size: 10px; font-family: inherit;
+    background: none; border: 1px solid #d0d7de;
+    border-radius: 4px; padding: 2px 8px;
+    cursor: pointer; color: #656d76;
+  }
+  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
+
+  .wt-annotation-cell { padding: 0 !important; border: none !important; }
+
   /* ========== Step navigation footer ========== */
   .step-nav {
     position: sticky; bottom: 0;
@@ -921,31 +1014,135 @@
     `;
   }
 
+  // v0.3: Generate a unique ID per file-block for walkthrough toggle scoping
+  let _fileBlockSeq = 0;
+
+  function renderFunctionPurpose(fp) {
+    if (!fp) return '';
+    const nameLabel = fp.function_name ? escapeHtml(fp.function_name) : '(anonymous block)';
+    if (fp.structure === 'multi_section' && fp.sections && fp.sections.length > 0) {
+      const secs = fp.sections.map(s => `
+        <div class="fn-purpose-section">
+          <div class="fp-section-name">${escapeHtml(s.section_name)}<span class="fp-section-range">lines ${s.line_start}–${s.line_end}</span></div>
+          <div class="fp-label">Problem solved</div>
+          <div>${renderInlineMarkdown(s.problem_solved)}</div>
+          <div class="fp-label">Without it</div>
+          <div>${renderInlineMarkdown(s.without_it)}</div>
+        </div>
+      `).join('');
+      return `
+        <div class="fn-purpose">
+          <div class="fn-purpose-header">
+            <span class="fn-purpose-name">${nameLabel}</span>
+            <span class="fn-purpose-tag">multi-section</span>
+          </div>
+          ${secs}
+        </div>`;
+    }
+    // single structure
+    return `
+      <div class="fn-purpose">
+        <div class="fn-purpose-header">
+          <span class="fn-purpose-name">${nameLabel}</span>
+          <span class="fn-purpose-tag">function purpose</span>
+        </div>
+        <div class="fp-label">Problem solved</div>
+        <div>${renderInlineMarkdown(fp.problem_solved)}</div>
+        <div class="fp-label">Without it</div>
+        <div>${renderInlineMarkdown(fp.without_it)}</div>
+      </div>`;
+  }
+
   function renderFileBlock(fv, isReference) {
+    const blockId = 'fb-' + (++_fileBlockSeq);
     const klass = isReference ? 'file-block reference' : 'file-block';
     const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
     const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
     const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
-    const rows = fv.lines.map(line => {
+
+    // v0.3: function_purpose before code
+    const fpHtml = renderFunctionPurpose(fv.function_purpose);
+
+    // v0.3: Build walkthrough index keyed by line_end for insertion after that line
+    const wt = fv.walkthrough || [];
+    const wtByEnd = {};
+    wt.forEach(a => { wtByEnd[a.line_end] = a; });
+    const hasWt = wt.length > 0;
+
+    // v0.3: walkthrough controls bar (only if annotations exist)
+    const wtControls = hasWt ? `
+      <div class="wt-controls">
+        <button onclick="toggleAllAnnotations('${blockId}', false)">Hide all</button>
+        <button onclick="toggleAllAnnotations('${blockId}', true)">Show all</button>
+      </div>` : '';
+
+    // Build code rows, interleaving walkthrough annotations after the corresponding line_end
+    const parts = [];
+    for (const line of fv.lines) {
       const cls = `line-${line.change}`;
       const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
-      return `<tr class="${cls}">
+      parts.push(`<tr class="${cls}">
         <td class="line-num">${line.line_num}</td>
         <td class="change-marker">${marker}</td>
         <td class="line-content">${escapeHtml(line.content)}</td>
-      </tr>`;
-    }).join('');
+      </tr>`);
+
+      // Insert walkthrough annotation after line_end
+      const ann = wtByEnd[line.line_num];
+      if (ann) {
+        const rangeLabel = ann.line_start === ann.line_end
+          ? `Line ${ann.line_start}`
+          : `Lines ${ann.line_start}–${ann.line_end}`;
+        parts.push(`<tr><td colspan="3" class="wt-annotation-cell">
+          <div class="wt-annotation" data-block-id="${blockId}">
+            <div class="wt-annotation-header">
+              <span class="wt-toggle" onclick="toggleAnnotation(this)">▾</span>
+              <span class="wt-line-range">${rangeLabel}</span>
+              <span class="wt-chunk-role">${escapeHtml(ann.chunk_role)}</span>
+            </div>
+            <div class="wt-explanation">${renderInlineMarkdown(ann.explanation)}</div>
+          </div>
+        </td></tr>`);
+      }
+    }
+
     return `
-      <div class="${klass}">
+      <div class="${klass}" id="${blockId}">
         <div class="file-header">
           <span class="file-path">${escapeHtml(fv.file)}</span>
           <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
           ${refLabel}
         </div>
         ${why}
-        <table class="code-table">${rows}</table>
+        ${fpHtml}
+        ${wtControls}
+        <table class="code-table">${parts.join('')}</table>
       </div>
     `;
+  }
+
+  // v0.3: Toggle individual walkthrough annotation
+  function toggleAnnotation(toggleEl) {
+    const ann = toggleEl.closest('.wt-annotation');
+    ann.classList.toggle('wt-collapsed');
+    toggleEl.classList.toggle('collapsed');
+    toggleEl.textContent = ann.classList.contains('wt-collapsed') ? '▸' : '▾';
+  }
+
+  // v0.3: Show/hide all annotations in a file-block
+  function toggleAllAnnotations(blockId, show) {
+    const block = document.getElementById(blockId);
+    if (!block) return;
+    block.querySelectorAll('.wt-annotation').forEach(ann => {
+      const toggle = ann.querySelector('.wt-toggle');
+      if (show) {
+        ann.classList.remove('wt-collapsed');
+        if (toggle) { toggle.classList.remove('collapsed'); toggle.textContent = '▾'; }
+      } else {
+        ann.classList.add('wt-collapsed');
+        if (toggle) { toggle.classList.add('collapsed'); toggle.textContent = '▸'; }
+      }
+    });
   }
 
   // ========== Right pane ==========
@@ -1175,6 +1372,7 @@
   }
 
   function rerender() {
+    _fileBlockSeq = 0;
     const center = document.getElementById('center-pane');
     if (state.view === 'pr_overview') {
       center.innerHTML = renderPROverview();
