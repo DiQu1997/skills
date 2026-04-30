@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Processor"
+  short_description: "Generate AI agent documentation for repos"
+  default_prompt: "Use $repo-processor to generate ai_doc.md files for this repository."

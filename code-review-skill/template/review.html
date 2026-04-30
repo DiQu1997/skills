@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Review — Narrative</title>
+<style>
+  /* ========== Reset & base ========== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #1a1a1a;
+    background: #ffffff;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* ========== Layout ========== */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr) 400px;
+    height: 100vh;
+  }
+  .pane { overflow-y: auto; height: 100vh; }
+  .left-pane   { background: #f6f8fa; border-right: 1px solid #d0d7de; }
+  .center-pane { background: #ffffff; }
+  .right-pane  { background: #fafbfc; border-left: 1px solid #d0d7de; }
+
+  /* ========== Left pane: navigation ========== */
+  .pr-header {
+    padding: 16px;
+    border-bottom: 1px solid #d0d7de;
+    background: #ffffff;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .pr-title    { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; word-wrap: break-word; }
+  .pr-subtitle { font-size: 11px; color: #656d76; word-wrap: break-word; }
+  .nav-tree    { padding: 8px 0; }
+
+  .nav-overview-link {
+    padding: 8px 14px;
+    margin: 4px 8px 8px 8px;
+    border: 1px dashed #d0d7de;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    color: #656d76;
+    text-align: center;
+    user-select: none;
+  }
+  .nav-overview-link:hover { background: #eaeef2; color: #1a1a1a; }
+  .nav-overview-link.active { background: #ddf4ff; border-color: #0969da; color: #0969da; border-style: solid; }
+
+  .storyline-node { margin-bottom: 4px; }
+  .storyline-header {
+    display: flex; align-items: flex-start; gap: 6px;
+    padding: 8px 12px; cursor: pointer;
+    font-weight: 600; font-size: 13px; color: #1a1a1a;
+    user-select: none;
+  }
+  .storyline-header:hover { background: #eaeef2; }
+  .storyline-header.active-storyline { background: #ddf4ff; border-left: 2px solid #0969da; padding-left: 10px; }
+  .storyline-toggle { flex-shrink: 0; width: 12px; color: #656d76; font-size: 10px; margin-top: 4px; }
+  .storyline-title-block { flex: 1; min-width: 0; }
+  .storyline-title { word-wrap: break-word; }
+  .storyline-meta {
+    font-size: 11px; font-weight: 400; color: #656d76;
+    margin-top: 2px; display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .storyline-overview-link {
+    margin-left: 18px;
+    padding: 4px 12px 4px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #0969da;
+    user-select: none;
+    font-style: italic;
+  }
+  .storyline-overview-link:hover { background: #eaeef2; }
+  .storyline-overview-link.active {
+    background: #ddf4ff;
+    border-left: 2px solid #0969da;
+    padding-left: 12px;
+    font-weight: 500;
+  }
+
+  .step-list { list-style: none; margin-left: 18px; padding: 4px 0; }
+  .step-item {
+    padding: 5px 12px 5px 14px;
+    margin: 1px 0;
+    cursor: pointer;
+    font-size: 13px;
+    color: #1a1a1a;
+    border-left: 2px solid transparent;
+    user-select: none;
+    word-wrap: break-word;
+  }
+  .step-item:hover { background: #eaeef2; }
+  .step-item.active {
+    background: #ddf4ff;
+    border-left-color: #0969da;
+    font-weight: 500;
+  }
+  .step-id { font-size: 11px; color: #656d76; margin-right: 6px; font-family: ui-monospace, monospace; }
+
+  /* ========== Center pane: header & content ========== */
+  .step-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #d0d7de;
+    background: #ffffff;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .breadcrumb { font-size: 12px; color: #656d76; margin-bottom: 6px; font-family: ui-monospace, monospace; }
+  .step-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; word-wrap: break-word; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 12px;
+    font-weight: 500; border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .badge-track-core      { background: #ddf4ff; color: #0969da; border-color: #b6e3ff; }
+  .badge-track-supporting{ background: #f0e7ff; color: #6f42c1; border-color: #ddc3ff; }
+  .badge-track-test      { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+  .badge-track-config    { background: #fff8c5; color: #9a6700; border-color: #f8e57b; }
+  .badge-confidence-high  { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+  .badge-confidence-medium{ background: #fff8c5; color: #9a6700; border-color: #f8e57b; }
+  .badge-confidence-low   { background: #ffebe9; color: #82071e; border-color: #ffcecb; }
+  .badge-kind { background: #ffffff; color: #656d76; border-color: #d0d7de; }
+
+  .step-body { padding: 16px 24px 80px 24px; }
+
+  .section-label {
+    font-size: 11px; font-weight: 600;
+    color: #656d76;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px; margin-top: 24px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  /* ========== Code blocks ========== */
+  .file-block {
+    margin: 12px 0 24px 0;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .file-block.reference { border-color: #d0d7de; border-style: dashed; }
+  .file-header {
+    padding: 8px 12px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #d0d7de;
+    font-family: ui-monospace, monospace;
+    font-size: 12px; color: #1a1a1a;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .file-block.reference .file-header { background: #fafbfc; }
+  .file-path { font-weight: 600; word-break: break-all; }
+  .reference-label {
+    font-size: 10px; background: #f0e7ff; color: #6f42c1;
+    padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .why-included {
+    font-size: 11px; color: #656d76;
+    padding: 6px 12px; background: #fafbfc;
+    border-bottom: 1px solid #eaeef2; font-style: italic;
+  }
+  .file-block.reference .why-included { background: #f6f3ff; }
+
+  .code-table {
+    width: 100%; border-collapse: collapse;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.5;
+  }
+  .code-table tr.line-added    { background: #e6ffec; }
+  .code-table tr.line-added .change-marker { color: #1a7f37; background: #aceebb; }
+  .code-table tr.line-removed  { background: #ffebe9; }
+  .code-table tr.line-removed .change-marker { color: #82071e; background: #ffcecb; }
+  .code-table tr.line-removed .line-content { text-decoration: line-through; opacity: 0.85; }
+  .code-table td.line-num {
+    width: 1%; min-width: 40px;
+    color: #656d76; text-align: right;
+    padding: 0 8px; user-select: none;
+    border-right: 1px solid #eaeef2; vertical-align: top;
+  }
+  .code-table td.change-marker {
+    width: 1%; min-width: 16px;
+    text-align: center; user-select: none;
+    color: #656d76; vertical-align: top; font-weight: 600;
+  }
+  .code-table td.line-content {
+    padding: 0 12px; white-space: pre;
+    overflow-x: auto; word-break: normal; vertical-align: top;
+  }
+
+  /* ========== Step navigation footer ========== */
+  .step-nav {
+    position: sticky; bottom: 0;
+    padding: 12px 24px;
+    background: #ffffff;
+    border-top: 1px solid #d0d7de;
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .nav-button {
+    padding: 6px 12px;
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    color: #1a1a1a;
+  }
+  .nav-button:hover:not(:disabled) {
+    background: #f6f8fa;
+    border-color: #1a1a1a;
+  }
+  .nav-button:disabled { color: #afb8c1; cursor: not-allowed; }
+
+  /* ========== Right pane: collapsible sections ========== */
+  .analysis-section {
+    border-bottom: 1px solid #eaeef2;
+    border-left: 4px solid transparent;
+  }
+  .analysis-section .section-header {
+    padding: 12px 16px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .analysis-section .section-header:hover { background: rgba(0,0,0,0.03); }
+  .section-title-row {
+    display: flex; align-items: center; gap: 6px;
+    flex: 1; min-width: 0;
+  }
+  .section-title {
+    font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    word-wrap: break-word;
+  }
+  .section-toggle {
+    color: #656d76; font-size: 11px;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .analysis-section.collapsed .section-toggle { transform: rotate(-90deg); }
+  .analysis-section .section-body {
+    font-size: 13px; color: #1a1a1a;
+    padding: 0 16px 14px 16px;
+    line-height: 1.55; word-wrap: break-word;
+    overflow: hidden;
+  }
+  .analysis-section.collapsed .section-body { display: none; }
+  .analysis-section .section-body p { margin-bottom: 8px; }
+  .analysis-section .section-body p:last-child { margin-bottom: 0; }
+  .analysis-section .section-body ul, .analysis-section .section-body ol {
+    margin-left: 20px; margin-bottom: 8px;
+  }
+  .analysis-section .section-body li { margin-bottom: 4px; }
+
+  /* Section types — left border + header bg color */
+  .analysis-section.prereq      { border-left-color: #0969da; }
+  .analysis-section.prereq .section-title { color: #0550ae; }
+  .analysis-section.prereq .section-header { background: #f6fbff; }
+  .analysis-section.summary     { border-left-color: #6e7781; }
+  .analysis-section.summary .section-title { color: #1a1a1a; }
+  .analysis-section.behavior    { border-left-color: #1f6feb; }
+  .analysis-section.behavior .section-title { color: #0550ae; }
+  .analysis-section.behavior .section-header { background: #f6fbff; }
+  .analysis-section.usage       { border-left-color: #8250df; }
+  .analysis-section.usage .section-title { color: #6f42c1; }
+  .analysis-section.usage .section-header { background: #faf7ff; }
+  .analysis-section.tests       { border-left-color: #1a7f37; }
+  .analysis-section.tests .section-title { color: #1a7f37; }
+  .analysis-section.tests .section-header { background: #f6fff8; }
+  .analysis-section.patterns    { border-left-color: #9a6700; }
+  .analysis-section.patterns .section-title { color: #9a6700; }
+  .analysis-section.patterns .section-header { background: #fffbf3; }
+  .analysis-section.alternatives{ border-left-color: #cf222e; }
+  .analysis-section.alternatives .section-title { color: #82071e; }
+  .analysis-section.alternatives .section-header { background: #fff5f5; }
+  .analysis-section.evaluation  { border-left-color: #bf8700; }
+  .analysis-section.evaluation .section-title { color: #9a6700; }
+  .analysis-section.evaluation .section-header { background: #fffbf3; }
+  .analysis-section.suggestions { border-left-color: #1f883d; }
+  .analysis-section.suggestions .section-title { color: #1a7f37; }
+  .analysis-section.suggestions .section-header { background: #f6fff8; }
+  .analysis-section.analysis    { border-left-color: #6f42c1; }
+  .analysis-section.analysis .section-title { color: #6f42c1; }
+  .analysis-section.analysis .section-header { background: #faf7ff; }
+  .analysis-section.concerns    { border-left-color: #cf222e; }
+  .analysis-section.concerns .section-title { color: #82071e; }
+  .analysis-section.concerns .section-header { background: #fff5f5; }
+
+  .tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+    background: rgba(0,0,0,0.06);
+    color: inherit; flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ========== Right pane content blocks ========== */
+  .ba-block {
+    margin-bottom: 10px;
+  }
+  .ba-block:last-child { margin-bottom: 0; }
+  .ba-label {
+    font-size: 10px; font-weight: 700;
+    color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 3px;
+  }
+  .ba-content {
+    font-size: 12.5px;
+  }
+
+  .prereq-item {
+    margin-bottom: 10px; padding-bottom: 10px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .prereq-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .prereq-kind {
+    font-size: 10px; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 4px;
+  }
+  .prereq-ref {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: #0969da;
+    cursor: pointer; margin-left: 4px;
+  }
+  .prereq-ref:hover { text-decoration: underline; }
+
+  .caller-item {
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .caller-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .caller-loc {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: #656d76;
+    margin-bottom: 4px;
+  }
+  .caller-snippet {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    background: #f6f8fa;
+    padding: 4px 8px; border-radius: 4px;
+    margin-bottom: 4px;
+    white-space: pre-wrap; word-break: break-all;
+    color: #24292f;
+  }
+
+  .test-item {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.03);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .test-item:last-child { margin-bottom: 0; }
+  .test-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+  .test-loc {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: #656d76;
+  }
+
+  ul.bullet-list {
+    list-style: none; padding: 0; margin: 0;
+  }
+  ul.bullet-list li {
+    padding-left: 16px; position: relative;
+    margin-bottom: 6px; font-size: 13px;
+  }
+  ul.bullet-list li:last-child { margin-bottom: 0; }
+  ul.bullet-list li::before {
+    content: '▸'; position: absolute; left: 0;
+    color: #656d76;
+  }
+
+  .alt-item {
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .alt-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .alt-approach { font-weight: 600; margin-bottom: 4px; }
+  .alt-evidence-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    margin-left: 4px;
+    text-transform: uppercase; font-weight: 700;
+  }
+  .alt-evidence-tag.evidenced { background: #dafbe1; color: #1a7f37; }
+  .alt-evidence-tag.analytical { background: #fff8c5; color: #9a6700; }
+
+  .concern-item {
+    margin-bottom: 12px; padding: 8px 10px;
+    border-radius: 4px;
+    border-left: 3px solid;
+  }
+  .concern-item:last-child { margin-bottom: 0; }
+  .concern-item.severity-high { background: #ffebe9; border-left-color: #cf222e; }
+  .concern-item.severity-medium { background: #fff8c5; border-left-color: #bf8700; }
+  .concern-item.severity-low { background: #f6f8fa; border-left-color: #656d76; }
+  .concern-item.severity-informational { background: #f6f8fa; border-left-color: #afb8c1; }
+  .concern-text { margin-bottom: 4px; }
+  .concern-evidence {
+    font-size: 11px; color: #656d76; font-style: italic;
+  }
+  .concern-severity {
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-left: 6px;
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .concern-severity.severity-high { background: #cf222e; color: white; }
+  .concern-severity.severity-medium { background: #bf8700; color: white; }
+  .concern-severity.severity-low { background: #afb8c1; color: white; }
+  .concern-severity.severity-informational { background: #d0d7de; color: #1a1a1a; }
+
+  /* Inline markdown */
+  .section-body strong { font-weight: 600; }
+  .section-body code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.92em;
+    background: rgba(0,0,0,0.05);
+    padding: 1px 4px; border-radius: 3px;
+  }
+
+  /* ========== Empty state & overview pages ========== */
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: #656d76; font-size: 13px;
+  }
+
+  .pr-overview, .storyline-overview {
+    padding: 24px 32px 80px 32px;
+    max-width: 800px;
+  }
+  .pr-overview h1 { font-size: 22px; margin-bottom: 12px; word-wrap: break-word; }
+  .storyline-overview h1 { font-size: 20px; margin-bottom: 12px; word-wrap: break-word; }
+  .pr-overview h2, .storyline-overview h2 {
+    font-size: 14px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    color: #656d76;
+    margin-top: 28px; margin-bottom: 12px;
+    padding-bottom: 4px; border-bottom: 1px solid #d0d7de;
+  }
+  .pr-overview .one-liner, .storyline-overview .one-liner {
+    font-size: 15px; color: #1a1a1a; margin-bottom: 12px;
+  }
+  .pr-overview .description, .storyline-overview .description {
+    color: #1a1a1a; font-size: 14px;
+    padding: 12px 16px;
+    background: #f6f8fa;
+    border-left: 3px solid #d0d7de;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 8px;
+  }
+  .pr-overview .storyline-summary {
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.1s;
+  }
+  .pr-overview .storyline-summary:hover { border-color: #0969da; }
+  .pr-overview .ss-title { font-weight: 600; margin-bottom: 6px; }
+  .pr-overview .ss-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .pr-overview .ss-summary { font-size: 13px; color: #656d76; }
+  .pr-overview .ss-confidence { font-size: 11px; color: #656d76; font-style: italic; margin-top: 6px; }
+
+  .storyline-overview .purpose-block, .storyline-overview .arch-block {
+    margin-bottom: 14px;
+  }
+  .storyline-overview .purpose-block .label,
+  .storyline-overview .arch-block .label {
+    font-size: 11px; font-weight: 700;
+    color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 4px;
+  }
+  .storyline-overview .discrepancy {
+    background: #fff8c5; border-left: 3px solid #bf8700;
+    padding: 10px 14px; border-radius: 0 6px 6px 0;
+    margin-top: 8px;
+  }
+  .storyline-overview .discrepancy .label { color: #9a6700; }
+
+  .storyline-overview .modules-list {
+    list-style: none; padding: 0;
+  }
+  .storyline-overview .modules-list li {
+    padding: 6px 10px; margin-bottom: 4px;
+    background: #f6f8fa; border-radius: 4px;
+    font-size: 13px;
+  }
+  .storyline-overview .module-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+
+  .storyline-overview .diagram-box {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 14px;
+    overflow-x: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    white-space: pre;
+    line-height: 1.5;
+  }
+
+  .storyline-overview .step-list-roadmap {
+    list-style: none; padding: 0;
+    margin-top: 8px;
+  }
+  .storyline-overview .step-list-roadmap li {
+    padding: 8px 12px;
+    margin-bottom: 4px;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  .storyline-overview .step-list-roadmap li:hover {
+    border-color: #0969da; background: #f6fbff;
+  }
+  .storyline-overview .step-list-roadmap .step-id-roadmap {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: #656d76;
+    margin-right: 10px;
+  }
+  .storyline-overview .step-list-roadmap .step-track-roadmap {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .storyline-overview .start-reading-btn {
+    display: inline-block;
+    padding: 8px 16px;
+    background: #1a7f37; color: white;
+    border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; margin-top: 16px;
+    font-family: inherit;
+  }
+  .storyline-overview .start-reading-btn:hover { background: #1f883d; }
+
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ============ LEFT PANE ============ -->
+  <aside class="pane left-pane">
+    <div class="pr-header">
+      <div class="pr-title" id="pr-title">Loading...</div>
+      <div class="pr-subtitle" id="pr-subtitle"></div>
+    </div>
+    <div class="nav-overview-link" id="pr-overview-link" onclick="goToPROverview()">📋 PR Overview</div>
+    <div class="nav-tree" id="nav-tree"></div>
+  </aside>
+
+  <!-- ============ CENTER PANE ============ -->
+  <main class="pane center-pane" id="center-pane">
+    <div class="empty-state">Loading...</div>
+  </main>
+
+  <!-- ============ RIGHT PANE ============ -->
+  <aside class="pane right-pane" id="right-pane">
+    <div class="empty-state">Select a step to see analysis.</div>
+  </aside>
+
+</div>
+
+<script>
+  // ========== Data injection point ==========
+  const REVIEW_DATA = /*REVIEW_DATA_PLACEHOLDER*/;
+
+  // ========== State ==========
+  const state = {
+    view: 'pr_overview',     // 'pr_overview' | 'storyline_overview' | 'step'
+    currentStorylineId: null,
+    currentStepId: null,
+    // Right-pane section collapse state, keyed by section name
+    sectionCollapsed: {},
+  };
+
+  // Default-collapsed sections (others default-expanded)
+  const DEFAULT_COLLAPSED = new Set([
+    'usage_context',
+    'test_coverage',
+    'codebase_patterns',
+    'alternative_approaches',
+    'analysis',
+  ]);
+
+  function isCollapsed(name) {
+    if (state.sectionCollapsed[name] !== undefined) return state.sectionCollapsed[name];
+    return DEFAULT_COLLAPSED.has(name);
+  }
+
+  function toggleSection(name) {
+    state.sectionCollapsed[name] = !isCollapsed(name);
+    // Find the section element and toggle its class — avoids full re-render
+    const sec = document.querySelector(`.analysis-section[data-section="${name}"]`);
+    if (sec) sec.classList.toggle('collapsed');
+  }
+
+  // ========== Helpers ==========
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Minimal inline-markdown: **bold**, `code`, paragraph breaks (\n\n)
+  function renderInlineMarkdown(s) {
+    if (s == null) return '';
+    let out = escapeHtml(s);
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Paragraph splits on double-newline
+    if (out.indexOf('\n\n') !== -1) {
+      out = out.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+    } else {
+      out = out.replace(/\n/g, '<br>');
+    }
+    return out;
+  }
+
+  function findStep(stepId) {
+    for (const sl of REVIEW_DATA.storylines) {
+      for (const st of sl.steps) {
+        if (st.id === stepId) return { storyline: sl, step: st };
+      }
+    }
+    return null;
+  }
+
+  function findStoryline(slId) {
+    return REVIEW_DATA.storylines.find(s => s.id === slId);
+  }
+
+  function getAllSteps() {
+    const result = [];
+    for (const sl of REVIEW_DATA.storylines) {
+      for (const st of sl.steps) {
+        result.push({ storyline: sl, step: st });
+      }
+    }
+    return result;
+  }
+
+  function getAdjacentStep(stepId, direction) {
+    const all = getAllSteps();
+    const idx = all.findIndex(x => x.step.id === stepId);
+    if (idx === -1) return null;
+    const target = idx + direction;
+    if (target < 0 || target >= all.length) return null;
+    return all[target].step.id;
+  }
+
+  // ========== Left nav ==========
+  function renderNav() {
+    const root = document.getElementById('nav-tree');
+    const sls = REVIEW_DATA.storylines;
+    const html = sls.map(sl => `
+      <div class="storyline-node">
+        <div class="storyline-header" onclick="toggleStoryline('${sl.id}')">
+          <span class="storyline-toggle" id="toggle-${sl.id}">▼</span>
+          <div class="storyline-title-block">
+            <div class="storyline-title">${escapeHtml(sl.title)}</div>
+            <div class="storyline-meta">
+              <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+              <span class="badge badge-confidence-${sl.confidence}">${escapeHtml(sl.confidence)}</span>
+              <span>${sl.steps.length} step${sl.steps.length === 1 ? '' : 's'}</span>
+            </div>
+          </div>
+        </div>
+        <div id="content-${sl.id}">
+          <div class="storyline-overview-link" data-storyline-id="${sl.id}" onclick="event.stopPropagation(); goToStorylineOverview('${sl.id}')">
+            ↪ Storyline overview
+          </div>
+          <ul class="step-list" id="steps-${sl.id}">
+            ${sl.steps.map(st => `
+              <li class="step-item" data-step-id="${st.id}" onclick="navigateToStep('${st.id}')">
+                <span class="step-id">${escapeHtml(st.id)}</span>${escapeHtml(st.title)}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      </div>
+    `).join('');
+    root.innerHTML = html;
+  }
+
+  function toggleStoryline(slId) {
+    const content = document.getElementById('content-' + slId);
+    const toggle = document.getElementById('toggle-' + slId);
+    if (content.style.display === 'none') {
+      content.style.display = '';
+      toggle.textContent = '▼';
+    } else {
+      content.style.display = 'none';
+      toggle.textContent = '▶';
+    }
+  }
+
+  function highlightCurrentNav() {
+    document.querySelectorAll('.step-item').forEach(el => {
+      el.classList.toggle('active', state.view === 'step' && el.dataset.stepId === state.currentStepId);
+    });
+    document.querySelectorAll('.storyline-overview-link').forEach(el => {
+      el.classList.toggle('active', state.view === 'storyline_overview' && el.dataset.storylineId === state.currentStorylineId);
+    });
+    document.getElementById('pr-overview-link').classList.toggle('active', state.view === 'pr_overview');
+    // Active storyline highlight
+    document.querySelectorAll('.storyline-header').forEach(el => el.classList.remove('active-storyline'));
+  }
+
+  // ========== Header ==========
+  function renderHeader() {
+    document.getElementById('pr-title').textContent = REVIEW_DATA.metadata.title;
+    document.getElementById('pr-subtitle').textContent =
+      `${REVIEW_DATA.metadata.repo} · ${REVIEW_DATA.metadata.base_commit}…${REVIEW_DATA.metadata.head_commit}`;
+  }
+
+  // ========== Center: PR overview ==========
+  function renderPROverview() {
+    const m = REVIEW_DATA.metadata;
+    const s = REVIEW_DATA.summary;
+    const sls = REVIEW_DATA.storylines.map(sl => `
+      <div class="storyline-summary" onclick="goToStorylineOverview('${sl.id}')">
+        <div class="ss-title">${escapeHtml(sl.title)}</div>
+        <div class="ss-meta">
+          <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+          <span class="badge badge-confidence-${sl.confidence}">${escapeHtml(sl.confidence)} confidence</span>
+          <span class="badge" style="background:#f6f8fa; color:#656d76; border-color:#d0d7de;">${sl.steps.length} step${sl.steps.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="ss-summary">${escapeHtml(sl.summary)}</div>
+        <div class="ss-confidence">Why this grouping: ${escapeHtml(sl.confidence_reasoning)}</div>
+      </div>
+    `).join('');
+    return `
+      <div class="pr-overview">
+        <h1>${escapeHtml(m.title)}</h1>
+        <div class="one-liner">${escapeHtml(s.one_line)}</div>
+        <div class="description">${renderInlineMarkdown(s.description)}</div>
+        <h2>Storylines (${REVIEW_DATA.storylines.length})</h2>
+        ${sls}
+      </div>
+    `;
+  }
+
+  // ========== Center: storyline overview ==========
+  function renderStorylineOverview(sl) {
+    if (!sl) return '<div class="empty-state">Storyline not found.</div>';
+
+    const purpose = sl.purpose || {};
+    const arch = sl.architectural_context || {};
+
+    let purposeBlocks = '';
+    if (purpose.stated || purpose.evident) {
+      purposeBlocks = `
+        ${purpose.stated ? `
+          <div class="purpose-block">
+            <div class="label">As stated (PR description / commits)</div>
+            <div>${renderInlineMarkdown(purpose.stated)}</div>
+          </div>` : ''}
+        ${purpose.evident ? `
+          <div class="purpose-block">
+            <div class="label">As evident from the code</div>
+            <div>${renderInlineMarkdown(purpose.evident)}</div>
+          </div>` : ''}
+        ${purpose.discrepancy ? `
+          <div class="discrepancy">
+            <div class="label">⚠ Discrepancy</div>
+            <div>${renderInlineMarkdown(purpose.discrepancy)}</div>
+          </div>` : ''}
+      `;
+    }
+
+    let archBlocks = '';
+    if (arch.system_role) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">System role</div>
+          <div>${renderInlineMarkdown(arch.system_role)}</div>
+        </div>`;
+    }
+    if (arch.involved_modules && arch.involved_modules.length > 0) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">Involved modules</div>
+          <ul class="modules-list">
+            ${arch.involved_modules.map(m => `
+              <li><span class="module-name">${escapeHtml(m.module)}</span> — ${escapeHtml(m.role_in_storyline)}</li>
+            `).join('')}
+          </ul>
+        </div>`;
+    }
+    if (arch.data_flow) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">Data flow</div>
+          <div>${renderInlineMarkdown(arch.data_flow)}</div>
+        </div>`;
+    }
+    if (arch.diagram && arch.diagram.type !== 'none' && arch.diagram.content) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">Diagram (${escapeHtml(arch.diagram.type)})</div>
+          <div class="diagram-box">${escapeHtml(arch.diagram.content)}</div>
+        </div>`;
+    }
+
+    const stepsRoadmap = sl.steps.map(st => `
+      <li onclick="navigateToStep('${st.id}')">
+        <span class="step-id-roadmap">${escapeHtml(st.id)}</span>
+        ${escapeHtml(st.title)}
+        <span class="step-track-roadmap badge-track-${st.track}">${escapeHtml(st.track)}</span>
+      </li>
+    `).join('');
+
+    return `
+      <div class="storyline-overview">
+        <h1>${escapeHtml(sl.title)}</h1>
+        <div class="badges" style="margin-bottom: 16px;">
+          <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+          <span class="badge badge-confidence-${sl.confidence}">${escapeHtml(sl.confidence)} confidence</span>
+        </div>
+        <div class="one-liner">${escapeHtml(sl.summary)}</div>
+
+        ${purposeBlocks ? `<h2>Purpose</h2>${purposeBlocks}` : ''}
+
+        ${archBlocks ? `<h2>Architectural context</h2>${archBlocks}` : ''}
+
+        ${sl.change_overview ? `
+          <h2>Change overview</h2>
+          <div>${renderInlineMarkdown(sl.change_overview)}</div>
+        ` : ''}
+
+        ${sl.reading_roadmap ? `
+          <h2>Reading roadmap</h2>
+          <div>${renderInlineMarkdown(sl.reading_roadmap)}</div>
+        ` : ''}
+
+        <h2>Steps in this storyline</h2>
+        <ul class="step-list-roadmap">${stepsRoadmap}</ul>
+
+        ${sl.steps.length > 0 ? `
+          <button class="start-reading-btn" onclick="navigateToStep('${sl.steps[0].id}')">Start reading from ${escapeHtml(sl.steps[0].id)} →</button>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  // ========== Center: step view ==========
+  function renderStepCenter(storyline, step) {
+    const stepIndex = storyline.steps.findIndex(x => x.id === step.id);
+    const totalSteps = storyline.steps.length;
+    const prevId = getAdjacentStep(step.id, -1);
+    const nextId = getAdjacentStep(step.id, +1);
+
+    const primaryHtml = step.code_view.primary_changes.map(fv => renderFileBlock(fv, false)).join('');
+    const supportingHtml = (step.code_view.supporting_definitions || []).map(fv => renderFileBlock(fv, true)).join('');
+
+    return `
+      <div class="step-header">
+        <div class="breadcrumb">${escapeHtml(storyline.title)} · Step ${stepIndex + 1} of ${totalSteps} · ${escapeHtml(step.id)}</div>
+        <div class="step-title">${escapeHtml(step.title)}</div>
+        <div class="badges">
+          <span class="badge badge-track-${step.track}">${escapeHtml(step.track)}</span>
+          <span class="badge badge-kind">${escapeHtml(storyline.kind)}</span>
+          <span class="badge badge-confidence-${storyline.confidence}">storyline confidence: ${escapeHtml(storyline.confidence)}</span>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="section-label">Changes</div>
+        ${primaryHtml || '<div class="empty-state">No primary changes for this step.</div>'}
+        ${supportingHtml ? `<div class="section-label">Supporting context</div>${supportingHtml}` : ''}
+      </div>
+      <div class="step-nav">
+        <button class="nav-button" onclick="navigateToStep(${prevId ? `'${prevId}'` : 'null'})" ${prevId ? '' : 'disabled'}>← Previous step</button>
+        <button class="nav-button" onclick="goToStorylineOverview('${storyline.id}')">↑ Storyline overview</button>
+        <button class="nav-button" onclick="navigateToStep(${nextId ? `'${nextId}'` : 'null'})" ${nextId ? '' : 'disabled'}>Next step →</button>
+      </div>
+    `;
+  }
+
+  function renderFileBlock(fv, isReference) {
+    const klass = isReference ? 'file-block reference' : 'file-block';
+    const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
+    const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
+    const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
+    const rows = fv.lines.map(line => {
+      const cls = `line-${line.change}`;
+      const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
+      return `<tr class="${cls}">
+        <td class="line-num">${line.line_num}</td>
+        <td class="change-marker">${marker}</td>
+        <td class="line-content">${escapeHtml(line.content)}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <div class="${klass}">
+        <div class="file-header">
+          <span class="file-path">${escapeHtml(fv.file)}</span>
+          <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
+          ${refLabel}
+        </div>
+        ${why}
+        <table class="code-table">${rows}</table>
+      </div>
+    `;
+  }
+
+  // ========== Right pane ==========
+  // section helper: produces a collapsible section block
+  function section(name, klass, label, tag, contentHtml) {
+    if (!contentHtml) return '';
+    const collapsed = isCollapsed(name);
+    return `
+      <div class="analysis-section ${klass} ${collapsed ? 'collapsed' : ''}" data-section="${name}">
+        <div class="section-header" onclick="toggleSection('${name}')">
+          <div class="section-title-row">
+            <span class="section-title">${label}</span>
+            ${tag ? `<span class="tag">${tag}</span>` : ''}
+          </div>
+          <span class="section-toggle">▼</span>
+        </div>
+        <div class="section-body">${contentHtml}</div>
+      </div>
+    `;
+  }
+
+  function renderRight() {
+    const right = document.getElementById('right-pane');
+
+    if (state.view === 'pr_overview') {
+      right.innerHTML = `<div class="empty-state">PR-level overview is shown in the main pane.<br><br>Click a storyline to see its overview, or a step to see detailed analysis.</div>`;
+      return;
+    }
+
+    if (state.view === 'storyline_overview') {
+      const sl = findStoryline(state.currentStorylineId);
+      if (!sl) { right.innerHTML = ''; return; }
+      // Right pane for storyline overview is light — reading roadmap reminder + summary stats
+      const stepCount = sl.steps.length;
+      const trackCounts = sl.steps.reduce((acc, st) => { acc[st.track] = (acc[st.track] || 0) + 1; return acc; }, {});
+      const trackSummary = Object.entries(trackCounts).map(([k,v]) => `${v} ${k}`).join(', ');
+      right.innerHTML = `
+        <div class="empty-state" style="padding: 24px 20px; text-align: left;">
+          <div style="font-size: 12px; font-weight: 600; color: #656d76; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Storyline at a glance</div>
+          <div><strong>${stepCount}</strong> step${stepCount === 1 ? '' : 's'}: ${trackSummary}</div>
+          <div style="margin-top: 12px; font-size: 12px; color: #656d76;">Files touched: ${sl.files_touched.map(f => `<code style="font-size: 11px;">${escapeHtml(f)}</code>`).join(', ')}</div>
+          <div style="margin-top: 24px; font-size: 12px; color: #656d76;">Click "Start reading" or any step in the roadmap to begin.</div>
+        </div>
+      `;
+      return;
+    }
+
+    // step view
+    const found = findStep(state.currentStepId);
+    if (!found) { right.innerHTML = ''; return; }
+    const { step } = found;
+
+    const sections = [];
+
+    // Prerequisites (factual context-recall, default expanded)
+    if (step.prerequisites && step.prerequisites.length > 0) {
+      const items = step.prerequisites.map(p => {
+        const refLink = p.kind === 'prior_step'
+          ? `<span class="prereq-ref" onclick="navigateToStep('${p.reference_id}')">jump to ${escapeHtml(p.reference_id)}</span>`
+          : '';
+        return `<div class="prereq-item">
+          <div class="prereq-kind">${escapeHtml(p.kind.replace(/_/g, ' '))}${refLink}</div>
+          <div>${renderInlineMarkdown(p.summary)}</div>
+        </div>`;
+      }).join('');
+      sections.push(section('prerequisites', 'prereq', '前情提要', 'context', items));
+    }
+
+    // Summary (factual, default expanded)
+    if (step.summary) {
+      sections.push(section('summary', 'summary', '简介 Summary', 'factual', renderInlineMarkdown(step.summary)));
+    }
+
+    // Behavior delta (factual, default expanded)
+    if (step.behavior_delta) {
+      const bd = step.behavior_delta;
+      const html = `
+        ${bd.before ? `<div class="ba-block"><div class="ba-label">Before</div><div class="ba-content">${renderInlineMarkdown(bd.before)}</div></div>` : ''}
+        ${bd.after ? `<div class="ba-block"><div class="ba-label">After</div><div class="ba-content">${renderInlineMarkdown(bd.after)}</div></div>` : ''}
+        ${bd.diff ? `<div class="ba-block"><div class="ba-label">Behavioral diff</div><div class="ba-content">${renderInlineMarkdown(bd.diff)}</div></div>` : ''}
+      `;
+      sections.push(section('behavior_delta', 'behavior', 'Behavior Delta', 'factual', html));
+    }
+
+    // Usage context (factual, default collapsed — can be long)
+    if (step.usage_context) {
+      const uc = step.usage_context;
+      let html = '';
+      if (uc.primary_usage_scenario) {
+        html += `<div class="ba-block"><div class="ba-label">Primary usage scenario</div><div class="ba-content">${renderInlineMarkdown(uc.primary_usage_scenario)}</div></div>`;
+      }
+      if (uc.callers && uc.callers.length > 0) {
+        const callers = uc.callers.map(c => `
+          <div class="caller-item">
+            <div class="caller-loc">${escapeHtml(c.file)}:${c.line}</div>
+            ${c.snippet ? `<div class="caller-snippet">${escapeHtml(c.snippet)}</div>` : ''}
+            <div>${renderInlineMarkdown(c.context)}</div>
+          </div>
+        `).join('');
+        html += `<div class="ba-block"><div class="ba-label">Callers (${uc.callers.length})</div>${callers}</div>`;
+      }
+      if (uc.call_patterns && uc.call_patterns.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Call patterns</div><ul class="bullet-list">${uc.call_patterns.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
+      }
+      if (uc.implicit_dependencies && uc.implicit_dependencies.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Implicit dependencies</div><ul class="bullet-list">${uc.implicit_dependencies.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
+      }
+      if (html) sections.push(section('usage_context', 'usage', 'Usage Context', 'factual', html));
+    }
+
+    // Test coverage (factual, default collapsed)
+    if (step.test_coverage) {
+      const tc = step.test_coverage;
+      let html = '';
+      if (tc.added_in_this_pr && tc.added_in_this_pr.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Added in this PR (${tc.added_in_this_pr.length})</div>` +
+          tc.added_in_this_pr.map(t => `<div class="test-item"><span class="test-name">${escapeHtml(t.test_name)}</span> <span class="test-loc">${escapeHtml(t.file)}</span><br>${escapeHtml(t.what_it_tests)}</div>`).join('') +
+          `</div>`;
+      }
+      if (tc.covered_by && tc.covered_by.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Pre-existing coverage (${tc.covered_by.length})</div>` +
+          tc.covered_by.map(t => `<div class="test-item"><span class="test-name">${escapeHtml(t.test_name)}</span> <span class="test-loc">${escapeHtml(t.file)}</span><br>${escapeHtml(t.what_it_tests)}</div>`).join('') +
+          `</div>`;
+      }
+      if (tc.not_covered && tc.not_covered.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Not covered</div><ul class="bullet-list">${tc.not_covered.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
+      }
+      if (html) sections.push(section('test_coverage', 'tests', 'Test Coverage', 'factual', html));
+    }
+
+    // Codebase patterns (factual, default collapsed)
+    if (step.codebase_patterns) {
+      const cp = step.codebase_patterns;
+      let html = '';
+      if (cp.convention_alignment) {
+        html += `<div class="ba-block"><div class="ba-label">Convention alignment</div><div class="ba-content">${renderInlineMarkdown(cp.convention_alignment)}</div></div>`;
+      }
+      if (cp.deviations) {
+        html += `<div class="ba-block"><div class="ba-label">Deviations</div><div class="ba-content">${renderInlineMarkdown(cp.deviations)}</div></div>`;
+      }
+      if (cp.similar_changes_elsewhere && cp.similar_changes_elsewhere.length > 0) {
+        const items = cp.similar_changes_elsewhere.map(s => `
+          <div class="caller-item">
+            <div class="caller-loc">${escapeHtml(s.file)}:${s.line}</div>
+            <div>${renderInlineMarkdown(s.note)}</div>
+          </div>
+        `).join('');
+        html += `<div class="ba-block"><div class="ba-label">Similar elsewhere</div>${items}</div>`;
+      }
+      if (html) sections.push(section('codebase_patterns', 'patterns', 'Codebase Patterns', 'factual', html));
+    }
+
+    // Alternative approaches (factual + analytical mix, default collapsed)
+    if (step.alternative_approaches && step.alternative_approaches.length > 0) {
+      const items = step.alternative_approaches.map(a => `
+        <div class="alt-item">
+          <div class="alt-approach">${escapeHtml(a.approach)}<span class="alt-evidence-tag ${a.evidence_kind}">${escapeHtml(a.evidence_kind)}</span></div>
+          <div>${renderInlineMarkdown(a.tradeoff_vs_chosen)}</div>
+        </div>
+      `).join('');
+      sections.push(section('alternative_approaches', 'alternatives', 'Alternative Approaches', '', items));
+    }
+
+    // Evaluation (opinion, default expanded if present — short)
+    if (step.evaluation) {
+      sections.push(section('evaluation', 'evaluation', '评价 Evaluation', 'opinion', renderInlineMarkdown(step.evaluation)));
+    }
+
+    // Suggestions (action, default expanded if present)
+    if (step.suggestions && step.suggestions.length > 0) {
+      const list = step.suggestions.map(s => `<li>${renderInlineMarkdown(s)}</li>`).join('');
+      sections.push(section('suggestions', 'suggestions', '建议 Suggestions', 'action', `<ul class="bullet-list">${list}</ul>`));
+    }
+
+    // Analysis (opinion-deep, default collapsed)
+    if (step.analysis) {
+      sections.push(section('analysis', 'analysis', '分析 Analysis', 'deep', renderInlineMarkdown(step.analysis)));
+    }
+
+    // Concerns (opinion-with-evidence, default expanded if present and has high/medium severity)
+    if (step.concerns && step.concerns.length > 0) {
+      const items = step.concerns
+        .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
+        .map(c => `
+          <div class="concern-item severity-${c.severity}">
+            <div class="concern-text">${renderInlineMarkdown(c.concern)}<span class="concern-severity severity-${c.severity}">${escapeHtml(c.severity)}</span></div>
+            <div class="concern-evidence">Evidence: ${renderInlineMarkdown(c.evidence)}</div>
+          </div>
+        `).join('');
+      sections.push(section('concerns', 'concerns', '关切 Concerns', 'risk', items));
+    }
+
+    if (sections.length === 0) {
+      right.innerHTML = '<div class="empty-state">No analysis content for this step.</div>';
+    } else {
+      right.innerHTML = sections.join('');
+    }
+  }
+
+  function severityRank(sev) {
+    return { high: 0, medium: 1, low: 2, informational: 3 }[sev] || 4;
+  }
+
+  // ========== Navigation ==========
+  function goToPROverview() {
+    state.view = 'pr_overview';
+    state.currentStorylineId = null;
+    state.currentStepId = null;
+    rerender();
+  }
+
+  function goToStorylineOverview(slId) {
+    state.view = 'storyline_overview';
+    state.currentStorylineId = slId;
+    state.currentStepId = null;
+    rerender();
+  }
+
+  function navigateToStep(stepId) {
+    if (stepId === null || stepId === undefined) return;
+    const found = findStep(stepId);
+    if (!found) return;
+    state.view = 'step';
+    state.currentStorylineId = found.storyline.id;
+    state.currentStepId = stepId;
+    rerender();
+  }
+
+  function rerender() {
+    const center = document.getElementById('center-pane');
+    if (state.view === 'pr_overview') {
+      center.innerHTML = renderPROverview();
+    } else if (state.view === 'storyline_overview') {
+      const sl = findStoryline(state.currentStorylineId);
+      center.innerHTML = renderStorylineOverview(sl);
+    } else if (state.view === 'step') {
+      const found = findStep(state.currentStepId);
+      if (found) center.innerHTML = renderStepCenter(found.storyline, found.step);
+    }
+    renderRight();
+    highlightCurrentNav();
+    document.getElementById('center-pane').scrollTop = 0;
+    document.getElementById('right-pane').scrollTop = 0;
+  }
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'j') {
+      const next = state.currentStepId ? getAdjacentStep(state.currentStepId, +1) : (REVIEW_DATA.storylines[0]?.steps[0]?.id);
+      if (next) navigateToStep(next);
+      e.preventDefault();
+    } else if (e.key === 'k') {
+      const prev = getAdjacentStep(state.currentStepId, -1);
+      if (prev) navigateToStep(prev);
+      e.preventDefault();
+    } else if (e.key === 'o' || e.key === 'O') {
+      goToPROverview();
+      e.preventDefault();
+    } else if (e.key === 's' || e.key === 'S') {
+      if (state.currentStorylineId) goToStorylineOverview(state.currentStorylineId);
+      e.preventDefault();
+    }
+  });
+
+  // ========== Init ==========
+  function init() {
+    if (typeof REVIEW_DATA === 'undefined' || REVIEW_DATA === null) {
+      document.body.innerHTML = '<div style="padding: 40px; font-family: monospace;">No review data injected. The template placeholder was not replaced.</div>';
+      return;
+    }
+    renderHeader();
+    renderNav();
+    goToPROverview();
+  }
+  init();
+</script>
+
+</body>
+</html>
