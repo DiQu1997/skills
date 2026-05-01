@@ -1063,10 +1063,19 @@
     // v0.3: function_purpose before code
     const fpHtml = renderFunctionPurpose(fv.function_purpose);
 
-    // v0.3: Build walkthrough index keyed by line_end for insertion after that line
+    // v0.3: Walkthrough annotations. A modified line shows up as two rows
+    // (one "removed" and one "added") that share the same line_num. To avoid
+    // emitting the same annotation twice, map each annotation to the LAST
+    // row index whose line_num matches ann.line_end, and only insert there.
     const wt = fv.walkthrough || [];
-    const wtByEnd = {};
-    wt.forEach(a => { wtByEnd[a.line_end] = a; });
+    const annByRowIndex = {};
+    wt.forEach(ann => {
+      let lastIdx = -1;
+      for (let i = 0; i < fv.lines.length; i++) {
+        if (fv.lines[i].line_num === ann.line_end) lastIdx = i;
+      }
+      if (lastIdx !== -1) annByRowIndex[lastIdx] = ann;
+    });
     const hasWt = wt.length > 0;
 
     // v0.3: walkthrough controls bar (only if annotations exist)
@@ -1078,7 +1087,8 @@
 
     // Build code rows, interleaving walkthrough annotations after the corresponding line_end
     const parts = [];
-    for (const line of fv.lines) {
+    for (let i = 0; i < fv.lines.length; i++) {
+      const line = fv.lines[i];
       const cls = `line-${line.change}`;
       const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
       parts.push(`<tr class="${cls}">
@@ -1087,8 +1097,7 @@
         <td class="line-content">${escapeHtml(line.content)}</td>
       </tr>`);
 
-      // Insert walkthrough annotation after line_end
-      const ann = wtByEnd[line.line_num];
+      const ann = annByRowIndex[i];
       if (ann) {
         const rangeLabel = ann.line_start === ann.line_end
           ? `Line ${ann.line_start}`
