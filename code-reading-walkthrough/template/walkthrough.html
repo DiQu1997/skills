@@ -1,0 +1,1703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Reading — Walkthrough</title>
+<style>
+  /* ========== Reset & base ========== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #1a1a1a;
+    background: #ffffff;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  /* ========== Layout ========== */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr) 400px;
+    height: 100vh;
+  }
+  .pane { overflow-y: auto; height: 100vh; }
+  .left-pane   { background: #f6f8fa; border-right: 1px solid #d0d7de; }
+  .center-pane { background: #ffffff; }
+  .right-pane  { background: #fafbfc; border-left: 1px solid #d0d7de; }
+
+  /* ========== Left pane: navigation ========== */
+  .pr-header {
+    padding: 16px;
+    border-bottom: 1px solid #d0d7de;
+    background: #ffffff;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .pr-title    { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; word-wrap: break-word; }
+  .pr-subtitle { font-size: 11px; color: #656d76; word-wrap: break-word; }
+  .reset-btn {
+    margin-top: 8px;
+    font-size: 10px; font-family: inherit;
+    background: none; border: 1px solid #d0d7de;
+    border-radius: 4px; padding: 2px 8px;
+    cursor: pointer; color: #656d76;
+  }
+  .reset-btn:hover { background: #eaeef2; color: #1a1a1a; }
+  .nav-tree    { padding: 8px 0; }
+
+  .nav-overview-link {
+    padding: 8px 14px;
+    margin: 4px 8px 8px 8px;
+    border: 1px dashed #d0d7de;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    color: #656d76;
+    text-align: center;
+    user-select: none;
+  }
+  .nav-overview-link:hover { background: #eaeef2; color: #1a1a1a; }
+  .nav-overview-link.active { background: #ddf4ff; border-color: #0969da; color: #0969da; border-style: solid; }
+
+  .storyline-node { margin-bottom: 4px; }
+  .storyline-header {
+    display: flex; align-items: flex-start; gap: 6px;
+    padding: 8px 12px; cursor: pointer;
+    font-weight: 600; font-size: 13px; color: #1a1a1a;
+    user-select: none;
+  }
+  .storyline-header:hover { background: #eaeef2; }
+  .storyline-header.active-storyline { background: #ddf4ff; border-left: 2px solid #0969da; padding-left: 10px; }
+  .storyline-toggle { flex-shrink: 0; width: 12px; color: #656d76; font-size: 10px; margin-top: 4px; }
+  .storyline-title-block { flex: 1; min-width: 0; }
+  .storyline-title-row { display: flex; align-items: flex-start; gap: 6px; }
+  .storyline-title { word-wrap: break-word; flex: 1; min-width: 0; }
+  .importance-badge {
+    flex-shrink: 0;
+    font-size: 10px; font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #eaeef2;
+    color: #656d76;
+    cursor: help;
+    line-height: 1.5;
+  }
+  .importance-badge.imp-high   { background: #ffd6a5; color: #82071e; }
+  .importance-badge.imp-mid    { background: #fff8c5; color: #9a6700; }
+  .importance-badge.imp-low    { background: #eaeef2; color: #656d76; }
+  .storyline-meta {
+    font-size: 11px; font-weight: 400; color: #656d76;
+    margin-top: 2px; display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .storyline-overview-link {
+    margin-left: 18px;
+    padding: 4px 12px 4px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #0969da;
+    user-select: none;
+    font-style: italic;
+  }
+  .storyline-overview-link:hover { background: #eaeef2; }
+  .storyline-overview-link.active {
+    background: #ddf4ff;
+    border-left: 2px solid #0969da;
+    padding-left: 12px;
+    font-weight: 500;
+  }
+
+  .step-list { list-style: none; margin-left: 18px; padding: 4px 0; }
+  .step-item {
+    padding: 5px 12px 5px 14px;
+    margin: 1px 0;
+    cursor: pointer;
+    font-size: 13px;
+    color: #1a1a1a;
+    border-left: 2px solid transparent;
+    user-select: none;
+    word-wrap: break-word;
+  }
+  .step-item:hover { background: #eaeef2; }
+  .step-item.active {
+    background: #ddf4ff;
+    border-left-color: #0969da;
+    font-weight: 500;
+  }
+  .step-id { font-size: 11px; color: #656d76; margin-right: 6px; font-family: ui-monospace, monospace; }
+
+  .summary-only-pill {
+    display: inline-block;
+    margin-left: 18px;
+    margin-bottom: 4px;
+    padding: 3px 10px;
+    font-size: 10px; font-weight: 600;
+    color: #656d76;
+    background: #eaeef2;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  /* ========== Center pane: header & content ========== */
+  .step-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #d0d7de;
+    background: #ffffff;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .breadcrumb { font-size: 12px; color: #656d76; margin-bottom: 6px; font-family: ui-monospace, monospace; }
+  .step-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; word-wrap: break-word; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 12px;
+    font-weight: 500; border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .badge-track-core      { background: #ddf4ff; color: #0969da; border-color: #b6e3ff; }
+  .badge-track-supporting{ background: #f0e7ff; color: #6f42c1; border-color: #ddc3ff; }
+  .badge-track-utility   { background: #fff8c5; color: #9a6700; border-color: #f8e57b; }
+  .badge-track-data      { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+  .badge-track-extension { background: #ffe7e7; color: #82071e; border-color: #ffcecb; }
+  .badge-track-test      { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+  .badge-track-config    { background: #fff8c5; color: #9a6700; border-color: #f8e57b; }
+  .badge-kind { background: #ffffff; color: #656d76; border-color: #d0d7de; }
+  .badge-depth-full    { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
+  .badge-depth-summary { background: #eaeef2; color: #656d76; border-color: #d0d7de; }
+
+  .step-body { padding: 16px 24px 80px 24px; }
+
+  .section-label {
+    font-size: 11px; font-weight: 600;
+    color: #656d76;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px; margin-top: 24px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  /* ========== Code blocks ========== */
+  .file-block {
+    margin: 12px 0 24px 0;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #ffffff;
+  }
+  .file-block.reference { border-color: #d0d7de; border-style: dashed; }
+  .file-header {
+    padding: 8px 12px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #d0d7de;
+    font-family: ui-monospace, monospace;
+    font-size: 12px; color: #1a1a1a;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .file-block.reference .file-header { background: #fafbfc; }
+  .file-path { font-weight: 600; word-break: break-all; }
+  .reference-label {
+    font-size: 10px; background: #f0e7ff; color: #6f42c1;
+    padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .why-included {
+    font-size: 11px; color: #656d76;
+    padding: 6px 12px; background: #fafbfc;
+    border-bottom: 1px solid #eaeef2; font-style: italic;
+  }
+  .file-block.reference .why-included { background: #f6f3ff; }
+
+  .code-table {
+    width: 100%; border-collapse: collapse;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.5;
+  }
+  .code-table tr.line-added    { background: #e6ffec; }
+  .code-table tr.line-added .change-marker { color: #1a7f37; background: #aceebb; }
+  .code-table tr.line-removed  { background: #ffebe9; }
+  .code-table tr.line-removed .change-marker { color: #82071e; background: #ffcecb; }
+  .code-table tr.line-removed .line-content { text-decoration: line-through; opacity: 0.85; }
+  .code-table td.line-num {
+    width: 1%; min-width: 40px;
+    color: #656d76; text-align: right;
+    padding: 0 8px; user-select: none;
+    border-right: 1px solid #eaeef2; vertical-align: top;
+  }
+  .code-table td.change-marker {
+    width: 1%; min-width: 16px;
+    text-align: center; user-select: none;
+    color: #656d76; vertical-align: top; font-weight: 600;
+  }
+  .code-table td.line-content {
+    padding: 0 12px; white-space: pre;
+    overflow-x: auto; word-break: normal; vertical-align: top;
+  }
+
+  /* ========== Function purpose block ========== */
+  .fn-purpose {
+    padding: 10px 14px;
+    background: #f0f6ff;
+    border-bottom: 1px solid #d0d7de;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .fn-purpose-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .fn-purpose-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12px; color: #0550ae;
+  }
+  .fn-purpose-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px;
+    background: #ddf4ff; color: #0969da;
+  }
+  .fn-purpose .fp-label {
+    font-size: 10px; font-weight: 700; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 2px; margin-top: 8px;
+  }
+  .fn-purpose .fp-label:first-of-type { margin-top: 0; }
+  .fn-purpose-section {
+    padding: 8px 12px; margin-top: 8px;
+    background: rgba(255,255,255,0.6);
+    border-left: 3px solid #b6e3ff;
+    border-radius: 0 4px 4px 0;
+  }
+  .fn-purpose-section .fp-section-name {
+    font-weight: 600; font-size: 11px; color: #0550ae;
+    margin-bottom: 4px;
+  }
+  .fn-purpose-section .fp-section-range {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #656d76;
+    margin-left: 6px; font-weight: 400;
+  }
+
+  /* ========== Walkthrough annotations ========== */
+  .wt-annotation {
+    background: #f8f5ff;
+    border-left: 3px solid #c9b8ff;
+    padding: 8px 14px 8px 16px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  .wt-annotation-header {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+  }
+  .wt-toggle {
+    cursor: pointer; user-select: none;
+    color: #8250df; font-size: 11px; flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .wt-toggle.collapsed { transform: rotate(-90deg); }
+  .wt-chunk-role {
+    font-size: 10px; font-weight: 700;
+    color: #6f42c1;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .wt-line-range {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #656d76;
+  }
+  .wt-explanation {
+    font-size: 12.5px; color: #24292f;
+    line-height: 1.55;
+  }
+  .wt-annotation.wt-collapsed .wt-explanation { display: none; }
+
+  .wt-controls {
+    padding: 4px 12px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #eaeef2;
+    display: flex; justify-content: flex-end; gap: 8px;
+  }
+  .wt-controls button {
+    font-size: 10px; font-family: inherit;
+    background: none; border: 1px solid #d0d7de;
+    border-radius: 4px; padding: 2px 8px;
+    cursor: pointer; color: #656d76;
+  }
+  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
+
+  .wt-annotation-cell { padding: 0 !important; border: none !important; }
+
+  /* ========== Step navigation footer ========== */
+  .step-nav {
+    position: sticky; bottom: 0;
+    padding: 12px 24px;
+    background: #ffffff;
+    border-top: 1px solid #d0d7de;
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  .nav-button {
+    padding: 6px 12px;
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    color: #1a1a1a;
+  }
+  .nav-button:hover:not(:disabled) {
+    background: #f6f8fa;
+    border-color: #1a1a1a;
+  }
+  .nav-button:disabled { color: #afb8c1; cursor: not-allowed; }
+
+  /* ========== Right pane: collapsible sections ========== */
+  .analysis-section {
+    border-bottom: 1px solid #eaeef2;
+    border-left: 4px solid transparent;
+  }
+  .analysis-section .section-header {
+    padding: 12px 16px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .analysis-section .section-header:hover { background: rgba(0,0,0,0.03); }
+  .section-title-row {
+    display: flex; align-items: center; gap: 6px;
+    flex: 1; min-width: 0;
+  }
+  .section-title {
+    font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    word-wrap: break-word;
+  }
+  .section-toggle {
+    color: #656d76; font-size: 11px;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .analysis-section.collapsed .section-toggle { transform: rotate(-90deg); }
+  .analysis-section .section-body {
+    font-size: 13px; color: #1a1a1a;
+    padding: 0 16px 14px 16px;
+    line-height: 1.55; word-wrap: break-word;
+    overflow: hidden;
+  }
+  .analysis-section.collapsed .section-body { display: none; }
+  .analysis-section .section-body p { margin-bottom: 8px; }
+  .analysis-section .section-body p:last-child { margin-bottom: 0; }
+  .analysis-section .section-body ul, .analysis-section .section-body ol {
+    margin-left: 20px; margin-bottom: 8px;
+  }
+  .analysis-section .section-body li { margin-bottom: 4px; }
+
+  /* Section types — left border + header bg color */
+  .analysis-section.prereq      { border-left-color: #0969da; }
+  .analysis-section.prereq .section-title { color: #0550ae; }
+  .analysis-section.prereq .section-header { background: #f6fbff; }
+  .analysis-section.summary     { border-left-color: #6e7781; }
+  .analysis-section.summary .section-title { color: #1a1a1a; }
+  .analysis-section.anchor      { border-left-color: #bf8700; }
+  .analysis-section.anchor .section-title { color: #9a6700; }
+  .analysis-section.anchor .section-header { background: #fffbf3; }
+  .analysis-section.invariants  { border-left-color: #1f883d; }
+  .analysis-section.invariants .section-title { color: #1a7f37; }
+  .analysis-section.invariants .section-header { background: #f6fff8; }
+  .analysis-section.usage       { border-left-color: #8250df; }
+  .analysis-section.usage .section-title { color: #6f42c1; }
+  .analysis-section.usage .section-header { background: #faf7ff; }
+  .analysis-section.data-structures { border-left-color: #1f6feb; }
+  .analysis-section.data-structures .section-title { color: #0550ae; }
+  .analysis-section.data-structures .section-header { background: #f6fbff; }
+  .analysis-section.tests       { border-left-color: #1a7f37; }
+  .analysis-section.tests .section-title { color: #1a7f37; }
+  .analysis-section.tests .section-header { background: #f6fff8; }
+  .analysis-section.patterns    { border-left-color: #9a6700; }
+  .analysis-section.patterns .section-title { color: #9a6700; }
+  .analysis-section.patterns .section-header { background: #fffbf3; }
+  .analysis-section.design-rationale { border-left-color: #cf222e; }
+  .analysis-section.design-rationale .section-title { color: #82071e; }
+  .analysis-section.design-rationale .section-header { background: #fff5f5; }
+  .analysis-section.analysis    { border-left-color: #6f42c1; }
+  .analysis-section.analysis .section-title { color: #6f42c1; }
+  .analysis-section.analysis .section-header { background: #faf7ff; }
+
+  .anchor-callout {
+    padding: 12px 14px;
+    background: linear-gradient(180deg, #fffbe8 0%, #fffdf3 100%);
+    border-left: 3px solid #bf8700;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #1a1a1a;
+  }
+  .anchor-callout::before {
+    content: '💡 ';
+    margin-right: 4px;
+  }
+
+  .tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
+    background: rgba(0,0,0,0.06);
+    color: inherit; flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ========== Right pane content blocks ========== */
+  .ba-block {
+    margin-bottom: 10px;
+  }
+  .ba-block:last-child { margin-bottom: 0; }
+  .ba-label {
+    font-size: 10px; font-weight: 700;
+    color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 3px;
+  }
+  .ba-content {
+    font-size: 12.5px;
+  }
+
+  .prereq-item {
+    margin-bottom: 10px; padding-bottom: 10px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .prereq-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .prereq-kind {
+    font-size: 10px; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 4px;
+  }
+  .prereq-ref {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: #0969da;
+    cursor: pointer; margin-left: 4px;
+  }
+  .prereq-ref:hover { text-decoration: underline; }
+
+  .caller-item {
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .caller-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .caller-loc {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: #656d76;
+    margin-bottom: 4px;
+  }
+  .caller-snippet {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    background: #f6f8fa;
+    padding: 4px 8px; border-radius: 4px;
+    margin-bottom: 4px;
+    white-space: pre-wrap; word-break: break-all;
+    color: #24292f;
+  }
+
+  .test-item {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.03);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .test-item:last-child { margin-bottom: 0; }
+  .test-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+  .test-loc {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: #656d76;
+  }
+
+  ul.bullet-list {
+    list-style: none; padding: 0; margin: 0;
+  }
+  ul.bullet-list li {
+    padding-left: 16px; position: relative;
+    margin-bottom: 6px; font-size: 13px;
+  }
+  ul.bullet-list li:last-child { margin-bottom: 0; }
+  ul.bullet-list li::before {
+    content: '▸'; position: absolute; left: 0;
+    color: #656d76;
+  }
+
+  .ds-item {
+    margin-bottom: 12px; padding: 8px 10px;
+    background: #f6fbff;
+    border-left: 3px solid #b6e3ff;
+    border-radius: 0 4px 4px 0;
+  }
+  .ds-item:last-child { margin-bottom: 0; }
+  .ds-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; color: #0550ae;
+    font-size: 12px;
+  }
+  .ds-shape {
+    font-size: 11px; color: #656d76;
+    font-style: italic;
+    margin: 2px 0;
+  }
+  .ds-role { font-size: 12px; }
+
+  .alt-item {
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .alt-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+  .alt-approach { font-weight: 600; margin-bottom: 4px; }
+  .alt-evidence-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    margin-left: 4px;
+    text-transform: uppercase; font-weight: 700;
+  }
+  .alt-evidence-tag.evidenced { background: #dafbe1; color: #1a7f37; }
+  .alt-evidence-tag.analytical { background: #fff8c5; color: #9a6700; }
+
+  /* Inline markdown */
+  .section-body strong { font-weight: 600; }
+  .section-body code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.92em;
+    background: rgba(0,0,0,0.05);
+    padding: 1px 4px; border-radius: 3px;
+  }
+
+  /* ========== Empty state & overview pages ========== */
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: #656d76; font-size: 13px;
+  }
+
+  .pr-overview, .storyline-overview {
+    padding: 24px 32px 80px 32px;
+    max-width: 800px;
+  }
+  .pr-overview h1 { font-size: 22px; margin-bottom: 12px; word-wrap: break-word; }
+  .storyline-overview h1 { font-size: 20px; margin-bottom: 12px; word-wrap: break-word; }
+  .pr-overview h2, .storyline-overview h2 {
+    font-size: 14px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    color: #656d76;
+    margin-top: 28px; margin-bottom: 12px;
+    padding-bottom: 4px; border-bottom: 1px solid #d0d7de;
+  }
+  .pr-overview .one-liner, .storyline-overview .one-liner {
+    font-size: 15px; color: #1a1a1a; margin-bottom: 12px;
+  }
+  .pr-overview .description, .storyline-overview .description {
+    color: #1a1a1a; font-size: 14px;
+    padding: 12px 16px;
+    background: #f6f8fa;
+    border-left: 3px solid #d0d7de;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 8px;
+  }
+  .pr-overview .storyline-summary {
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.1s;
+  }
+  .pr-overview .storyline-summary:hover { border-color: #0969da; }
+  .pr-overview .storyline-summary.depth-summary { border-style: dashed; background: #fbfcfd; }
+  .pr-overview .ss-title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .pr-overview .ss-title { font-weight: 600; flex: 1; min-width: 0; }
+  .pr-overview .ss-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .pr-overview .ss-summary { font-size: 13px; color: #656d76; }
+  .pr-overview .ss-anchor {
+    font-size: 12.5px; color: #1a1a1a;
+    margin-top: 8px; padding: 8px 12px;
+    background: #fffbe8; border-left: 2px solid #bf8700;
+    border-radius: 0 4px 4px 0;
+  }
+  .pr-overview .ss-anchor::before { content: '💡 '; }
+  .promote-btn {
+    margin-top: 8px;
+    font-size: 11px; font-family: inherit;
+    background: #ffffff; border: 1px solid #d0d7de;
+    border-radius: 4px; padding: 3px 10px;
+    cursor: pointer; color: #656d76;
+  }
+  .promote-btn:hover { background: #ddf4ff; color: #0969da; border-color: #0969da; }
+
+  /* Scope panel on Reading Overview */
+  .scope-panel {
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    background: #fafbfc;
+  }
+  .scope-mode-tag {
+    display: inline-block;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 2px 8px; border-radius: 10px;
+    margin-bottom: 8px;
+  }
+  .scope-mode-tag.mode-files { background: #dafbe1; color: #1a7f37; }
+  .scope-mode-tag.mode-topic { background: #ddf4ff; color: #0969da; }
+  .scope-input {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    background: #ffffff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid #eaeef2;
+    margin-bottom: 12px;
+    word-break: break-all;
+  }
+  .scope-list { margin-top: 6px; }
+  .scope-item {
+    font-size: 12px;
+    padding: 4px 0;
+    border-bottom: 1px dashed #eaeef2;
+  }
+  .scope-item:last-child { border-bottom: 0; }
+  .scope-item-path {
+    font-family: ui-monospace, monospace;
+    color: #1a1a1a;
+  }
+  .scope-item-reason {
+    color: #656d76;
+    font-size: 11px;
+    margin-left: 6px;
+  }
+  .scope-confirmed-caption {
+    font-size: 11px; color: #1a7f37;
+    font-style: italic;
+    margin-top: 8px;
+  }
+  .scope-criteria {
+    font-size: 12.5px; color: #1a1a1a;
+    padding: 8px 12px;
+    background: #ffffff;
+    border-left: 3px solid #d0d7de;
+    border-radius: 0 4px 4px 0;
+    margin-top: 10px;
+  }
+
+  /* Storyline-overview scoped */
+  .storyline-overview .anchor-prominent {
+    padding: 14px 18px;
+    background: linear-gradient(180deg, #fffbe8 0%, #fffdf3 100%);
+    border-left: 4px solid #bf8700;
+    border-radius: 0 6px 6px 0;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+  .storyline-overview .anchor-prominent .label {
+    font-size: 11px; font-weight: 700; color: #9a6700;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 6px;
+  }
+  .storyline-overview .anchor-prominent::before { content: ''; }
+
+  .storyline-overview .purpose-block, .storyline-overview .arch-block {
+    margin-bottom: 14px;
+  }
+  .storyline-overview .purpose-block .label,
+  .storyline-overview .arch-block .label {
+    font-size: 11px; font-weight: 700;
+    color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    margin-bottom: 4px;
+  }
+  .storyline-overview .discrepancy {
+    background: #fff8c5; border-left: 3px solid #bf8700;
+    padding: 10px 14px; border-radius: 0 6px 6px 0;
+    margin-top: 8px;
+  }
+  .storyline-overview .discrepancy .label { color: #9a6700; }
+
+  .storyline-overview .modules-list {
+    list-style: none; padding: 0;
+  }
+  .storyline-overview .modules-list li {
+    padding: 6px 10px; margin-bottom: 4px;
+    background: #f6f8fa; border-radius: 4px;
+    font-size: 13px;
+  }
+  .storyline-overview .module-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+
+  .storyline-overview .diagram-box {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 14px;
+    overflow-x: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    white-space: pre;
+    line-height: 1.5;
+  }
+
+  .storyline-overview .step-list-roadmap {
+    list-style: none; padding: 0;
+    margin-top: 8px;
+  }
+  .storyline-overview .step-list-roadmap li {
+    padding: 8px 12px;
+    margin-bottom: 4px;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  .storyline-overview .step-list-roadmap li:hover {
+    border-color: #0969da; background: #f6fbff;
+  }
+  .storyline-overview .step-list-roadmap .step-id-roadmap {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: #656d76;
+    margin-right: 10px;
+  }
+  .storyline-overview .step-list-roadmap .step-track-roadmap {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .storyline-overview .start-reading-btn {
+    display: inline-block;
+    padding: 8px 16px;
+    background: #1a7f37; color: white;
+    border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; margin-top: 16px;
+    font-family: inherit;
+  }
+  .storyline-overview .start-reading-btn:hover { background: #1f883d; }
+
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ============ LEFT PANE ============ -->
+  <aside class="pane left-pane">
+    <div class="pr-header">
+      <div class="pr-title" id="pr-title">Loading...</div>
+      <div class="pr-subtitle" id="pr-subtitle"></div>
+      <button class="reset-btn" id="reset-btn" onclick="resetView()" title="Clear saved view state for this walkthrough">↺ Reset view</button>
+    </div>
+    <div class="nav-overview-link" id="pr-overview-link" onclick="goToReadingOverview()">📖 Reading Overview</div>
+    <div class="nav-tree" id="nav-tree"></div>
+  </aside>
+
+  <!-- ============ CENTER PANE ============ -->
+  <main class="pane center-pane" id="center-pane">
+    <div class="empty-state">Loading...</div>
+  </main>
+
+  <!-- ============ RIGHT PANE ============ -->
+  <aside class="pane right-pane" id="right-pane">
+    <div class="empty-state">Select a step to see context.</div>
+  </aside>
+
+</div>
+
+<script>
+  // ========== Data injection point ==========
+  const WALKTHROUGH_DATA = /*WALKTHROUGH_DATA_PLACEHOLDER*/;
+
+  // ========== State ==========
+  const state = {
+    view: 'reading_overview',     // 'reading_overview' | 'storyline_overview' | 'step'
+    currentStorylineId: null,
+    currentStepId: null,
+    sectionCollapsed: {},
+  };
+
+  // Default-collapsed sections (others default-expanded). Reading-mode set:
+  // surface mental_model_anchor, invariants, walkthrough by default; tuck
+  // away the longer factual context until the reader asks for it.
+  const DEFAULT_COLLAPSED = new Set([
+    'usage_context',
+    'codebase_patterns',
+    'design_rationale',
+    'key_data_structures',
+    'analysis',
+  ]);
+
+  function isCollapsed(name) {
+    if (state.sectionCollapsed[name] !== undefined) return state.sectionCollapsed[name];
+    return DEFAULT_COLLAPSED.has(name);
+  }
+
+  function toggleSection(name) {
+    state.sectionCollapsed[name] = !isCollapsed(name);
+    const sec = document.querySelector(`.analysis-section[data-section="${name}"]`);
+    if (sec) sec.classList.toggle('collapsed');
+    saveState();
+  }
+
+  // ========== localStorage persistence ==========
+  function storageKey() {
+    const m = WALKTHROUGH_DATA.metadata || {};
+    // Cheap stable hash so we don't store giant strings as keys
+    function djb2(s) {
+      let h = 5381;
+      for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i);
+      return (h >>> 0).toString(36);
+    }
+    return 'crw:' + djb2((m.commit || '') + '|' + (m.target || ''));
+  }
+
+  function saveState() {
+    try {
+      const payload = {
+        view: state.view,
+        currentStorylineId: state.currentStorylineId,
+        currentStepId: state.currentStepId,
+        sectionCollapsed: state.sectionCollapsed,
+      };
+      localStorage.setItem(storageKey(), JSON.stringify(payload));
+    } catch (_) { /* localStorage may be disabled — silently ignore */ }
+  }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(storageKey());
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) { return null; }
+  }
+
+  function resetView() {
+    try { localStorage.removeItem(storageKey()); } catch (_) {}
+    state.view = 'reading_overview';
+    state.currentStorylineId = null;
+    state.currentStepId = null;
+    state.sectionCollapsed = {};
+    rerender();
+  }
+
+  // ========== Helpers ==========
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderInlineMarkdown(s) {
+    if (s == null) return '';
+    let out = escapeHtml(s);
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+    if (out.indexOf('\n\n') !== -1) {
+      out = out.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+    } else {
+      out = out.replace(/\n/g, '<br>');
+    }
+    return out;
+  }
+
+  function findStep(stepId) {
+    for (const sl of WALKTHROUGH_DATA.storylines) {
+      const steps = sl.steps || [];
+      for (const st of steps) {
+        if (st.id === stepId) return { storyline: sl, step: st };
+      }
+    }
+    return null;
+  }
+
+  function findStoryline(slId) {
+    return WALKTHROUGH_DATA.storylines.find(s => s.id === slId);
+  }
+
+  function getAllSteps() {
+    const result = [];
+    for (const sl of WALKTHROUGH_DATA.storylines) {
+      const steps = sl.steps || [];
+      for (const st of steps) {
+        result.push({ storyline: sl, step: st });
+      }
+    }
+    return result;
+  }
+
+  function getAdjacentStep(stepId, direction) {
+    const all = getAllSteps();
+    const idx = all.findIndex(x => x.step.id === stepId);
+    if (idx === -1) return null;
+    const target = idx + direction;
+    if (target < 0 || target >= all.length) return null;
+    return all[target].step.id;
+  }
+
+  function importanceClass(total) {
+    if (total >= 9) return 'imp-high';
+    if (total >= 6) return 'imp-mid';
+    return 'imp-low';
+  }
+
+  function importanceTooltip(scores) {
+    if (!scores) return '';
+    return `centrality ${scores.centrality} · conceptual_weight ${scores.conceptual_weight} · entry_point ${scores.entry_point} · novelty ${scores.novelty}`;
+  }
+
+  // ========== Left nav ==========
+  function renderNav() {
+    const root = document.getElementById('nav-tree');
+    const sls = WALKTHROUGH_DATA.storylines;
+    const html = sls.map(sl => {
+      const steps = sl.steps || [];
+      const isSummary = sl.depth === 'summary';
+      const imp = sl.importance_scores || {};
+      const impClass = importanceClass(imp.total || 0);
+      const impTip = importanceTooltip(imp);
+
+      const headerHtml = `
+        <div class="storyline-header" onclick="toggleStoryline('${sl.id}')">
+          <span class="storyline-toggle" id="toggle-${sl.id}">▼</span>
+          <div class="storyline-title-block">
+            <div class="storyline-title-row">
+              <div class="storyline-title">${escapeHtml(sl.title)}</div>
+              ${imp.total != null ? `<span class="importance-badge ${impClass}" title="${escapeHtml(impTip)}">${imp.total}</span>` : ''}
+            </div>
+            <div class="storyline-meta">
+              <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+              ${isSummary
+                ? '<span class="badge badge-depth-summary">summary</span>'
+                : `<span>${steps.length} step${steps.length === 1 ? '' : 's'}</span>`}
+            </div>
+          </div>
+        </div>`;
+
+      const bodyHtml = isSummary ? `
+        <div id="content-${sl.id}">
+          <div class="storyline-overview-link" data-storyline-id="${sl.id}" onclick="event.stopPropagation(); goToStorylineOverview('${sl.id}')">
+            ↪ Open summary card
+          </div>
+          <div class="summary-only-pill">summary only</div>
+        </div>
+      ` : `
+        <div id="content-${sl.id}">
+          <div class="storyline-overview-link" data-storyline-id="${sl.id}" onclick="event.stopPropagation(); goToStorylineOverview('${sl.id}')">
+            ↪ Storyline overview
+          </div>
+          <ul class="step-list" id="steps-${sl.id}">
+            ${steps.map(st => `
+              <li class="step-item" data-step-id="${st.id}" onclick="navigateToStep('${st.id}')">
+                <span class="step-id">${escapeHtml(st.id)}</span>${escapeHtml(st.title)}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+      `;
+
+      return `<div class="storyline-node">${headerHtml}${bodyHtml}</div>`;
+    }).join('');
+    root.innerHTML = html;
+  }
+
+  function toggleStoryline(slId) {
+    const content = document.getElementById('content-' + slId);
+    const toggle = document.getElementById('toggle-' + slId);
+    if (content.style.display === 'none') {
+      content.style.display = '';
+      toggle.textContent = '▼';
+    } else {
+      content.style.display = 'none';
+      toggle.textContent = '▶';
+    }
+  }
+
+  function highlightCurrentNav() {
+    document.querySelectorAll('.step-item').forEach(el => {
+      el.classList.toggle('active', state.view === 'step' && el.dataset.stepId === state.currentStepId);
+    });
+    document.querySelectorAll('.storyline-overview-link').forEach(el => {
+      el.classList.toggle('active', state.view === 'storyline_overview' && el.dataset.storylineId === state.currentStorylineId);
+    });
+    document.getElementById('pr-overview-link').classList.toggle('active', state.view === 'reading_overview');
+    document.querySelectorAll('.storyline-header').forEach(el => el.classList.remove('active-storyline'));
+  }
+
+  // ========== Header ==========
+  function renderHeader() {
+    const m = WALKTHROUGH_DATA.metadata;
+    document.getElementById('pr-title').textContent = m.title;
+    const subParts = [];
+    if (m.repo) subParts.push(m.repo);
+    if (m.commit) subParts.push(m.commit.length > 12 ? m.commit.slice(0, 10) : m.commit);
+    if (m.target) subParts.push(m.target.length > 64 ? m.target.slice(0, 60) + '…' : m.target);
+    document.getElementById('pr-subtitle').textContent = subParts.join(' · ');
+  }
+
+  // ========== Center: reading overview ==========
+  function renderScopePanel() {
+    const sc = WALKTHROUGH_DATA.scope;
+    if (!sc) return '';
+    const modeClass = sc.mode === 'topic' ? 'mode-topic' : 'mode-files';
+    const inBoundsHtml = (sc.discovered_scope || []).map(d => `
+      <div class="scope-item">
+        <span class="scope-item-path">${escapeHtml(d.path)}</span>
+        <span class="scope-item-reason">— ${escapeHtml(d.reason)}${d.note ? `: ${escapeHtml(d.note)}` : ''}</span>
+      </div>
+    `).join('');
+    const excludedHtml = (sc.excluded || []).map(e => `
+      <div class="scope-item">
+        <span class="scope-item-path">${escapeHtml(e.path)}</span>
+        <span class="scope-item-reason">— excluded: ${escapeHtml(e.reason)}</span>
+      </div>
+    `).join('');
+    return `
+      <div class="scope-panel">
+        <div><span class="scope-mode-tag ${modeClass}">${escapeHtml(sc.mode)} mode</span></div>
+        <div class="scope-input">${escapeHtml(sc.input)}</div>
+        ${sc.mode === 'topic' ? '<div class="scope-confirmed-caption">✓ Scope confirmed by reader before reading.</div>' : ''}
+        ${inBoundsHtml ? `<div class="ba-label" style="margin-top: 12px;">In scope (${(sc.discovered_scope||[]).length})</div><div class="scope-list">${inBoundsHtml}</div>` : ''}
+        ${excludedHtml ? `<div class="ba-label" style="margin-top: 12px;">Considered but excluded</div><div class="scope-list">${excludedHtml}</div>` : ''}
+        ${sc.importance_criteria ? `<div class="scope-criteria"><strong>Importance criteria:</strong> ${renderInlineMarkdown(sc.importance_criteria)}</div>` : ''}
+      </div>`;
+  }
+
+  function renderReadingOverview() {
+    const m = WALKTHROUGH_DATA.metadata;
+    const s = WALKTHROUGH_DATA.summary;
+    const sls = WALKTHROUGH_DATA.storylines.map(sl => {
+      const isSummary = sl.depth === 'summary';
+      const imp = sl.importance_scores || {};
+      const impClass = importanceClass(imp.total || 0);
+      const stepCount = (sl.steps || []).length;
+      const promoteBtn = isSummary ? `<button class="promote-btn" onclick="event.stopPropagation(); alert('To promote this summary to a full walkthrough, ask the agent: \\'Promote storyline ${sl.id} to full depth.\\'')">Promote to full</button>` : '';
+      return `
+        <div class="storyline-summary ${isSummary ? 'depth-summary' : ''}" onclick="goToStorylineOverview('${sl.id}')">
+          <div class="ss-title-row">
+            <div class="ss-title">${escapeHtml(sl.title)}</div>
+            ${imp.total != null ? `<span class="importance-badge ${impClass}" title="${escapeHtml(importanceTooltip(imp))}">${imp.total}</span>` : ''}
+          </div>
+          <div class="ss-meta">
+            <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+            <span class="badge badge-depth-${sl.depth || 'full'}">${escapeHtml(sl.depth || 'full')}</span>
+            ${!isSummary ? `<span class="badge" style="background:#f6f8fa; color:#656d76; border-color:#d0d7de;">${stepCount} step${stepCount === 1 ? '' : 's'}</span>` : ''}
+          </div>
+          <div class="ss-summary">${escapeHtml(sl.summary)}</div>
+          ${sl.mental_model_anchor ? `<div class="ss-anchor">${escapeHtml(sl.mental_model_anchor)}</div>` : ''}
+          ${promoteBtn}
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="pr-overview">
+        <h1>${escapeHtml(m.title)}</h1>
+        <div class="one-liner">${escapeHtml(s.one_line)}</div>
+        <div class="description">${renderInlineMarkdown(s.description)}</div>
+
+        ${WALKTHROUGH_DATA.scope ? '<h2>Scope</h2>' + renderScopePanel() : ''}
+
+        <h2>Storylines (${WALKTHROUGH_DATA.storylines.length})</h2>
+        ${sls}
+      </div>
+    `;
+  }
+
+  // ========== Center: storyline overview ==========
+  function renderStorylineOverview(sl) {
+    if (!sl) return '<div class="empty-state">Storyline not found.</div>';
+
+    const isSummary = sl.depth === 'summary';
+    const purpose = sl.purpose || {};
+    const arch = sl.architectural_context || {};
+    const imp = sl.importance_scores || {};
+
+    let purposeBlocks = '';
+    if (purpose.stated || purpose.evident) {
+      purposeBlocks = `
+        ${purpose.stated ? `
+          <div class="purpose-block">
+            <div class="label">As documented (existing comments / docs)</div>
+            <div>${renderInlineMarkdown(purpose.stated)}</div>
+          </div>` : ''}
+        ${purpose.evident ? `
+          <div class="purpose-block">
+            <div class="label">As evident from the code</div>
+            <div>${renderInlineMarkdown(purpose.evident)}</div>
+          </div>` : ''}
+        ${purpose.discrepancy ? `
+          <div class="discrepancy">
+            <div class="label">⚠ Discrepancy</div>
+            <div>${renderInlineMarkdown(purpose.discrepancy)}</div>
+          </div>` : ''}
+      `;
+    }
+
+    let archBlocks = '';
+    if (arch.system_role) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">System role</div>
+          <div>${renderInlineMarkdown(arch.system_role)}</div>
+        </div>`;
+    }
+    if (arch.involved_modules && arch.involved_modules.length > 0) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">Involved modules</div>
+          <ul class="modules-list">
+            ${arch.involved_modules.map(m => `
+              <li><span class="module-name">${escapeHtml(m.module)}</span> — ${escapeHtml(m.role_in_storyline)}</li>
+            `).join('')}
+          </ul>
+        </div>`;
+    }
+    if (arch.data_flow) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">Data flow</div>
+          <div>${renderInlineMarkdown(arch.data_flow)}</div>
+        </div>`;
+    }
+    if (arch.diagram && arch.diagram.type !== 'none' && arch.diagram.content) {
+      archBlocks += `
+        <div class="arch-block">
+          <div class="label">Diagram (${escapeHtml(arch.diagram.type)})</div>
+          <div class="diagram-box">${escapeHtml(arch.diagram.content)}</div>
+        </div>`;
+    }
+
+    const steps = sl.steps || [];
+    const stepsRoadmap = steps.map(st => `
+      <li onclick="navigateToStep('${st.id}')">
+        <span class="step-id-roadmap">${escapeHtml(st.id)}</span>
+        ${escapeHtml(st.title)}
+        <span class="step-track-roadmap badge-track-${st.track}">${escapeHtml(st.track)}</span>
+      </li>
+    `).join('');
+
+    const impBadges = imp.total != null ? `
+      <span class="badge badge-kind" title="${escapeHtml(importanceTooltip(imp))}">importance ${imp.total}</span>
+      <span class="badge badge-depth-${sl.depth || 'full'}">${escapeHtml(sl.depth || 'full')}</span>
+    ` : '';
+
+    return `
+      <div class="storyline-overview">
+        <h1>${escapeHtml(sl.title)}</h1>
+        <div class="badges" style="margin-bottom: 16px;">
+          <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+          ${impBadges}
+        </div>
+        <div class="one-liner">${escapeHtml(sl.summary)}</div>
+
+        ${sl.mental_model_anchor ? `
+          <div class="anchor-prominent">
+            <div class="label">💡 Mental model anchor</div>
+            <div>${renderInlineMarkdown(sl.mental_model_anchor)}</div>
+          </div>` : ''}
+
+        ${imp.rationale ? `
+          <div class="purpose-block">
+            <div class="label">Why this importance score</div>
+            <div>${renderInlineMarkdown(imp.rationale)}</div>
+          </div>` : ''}
+
+        ${isSummary ? `
+          <div class="empty-state" style="text-align: left; padding: 16px 0;">
+            This storyline was kept at <strong>summary depth</strong> by the importance ranking.
+            To get a step-by-step walkthrough with code annotations, ask the agent:
+            <br><br>
+            <code style="background:#f6f8fa; padding: 2px 6px; border-radius: 3px;">Promote storyline ${escapeHtml(sl.id)} to full depth.</code>
+          </div>` : ''}
+
+        ${purposeBlocks ? `<h2>Purpose</h2>${purposeBlocks}` : ''}
+
+        ${archBlocks ? `<h2>Architectural context</h2>${archBlocks}` : ''}
+
+        ${sl.change_overview ? `
+          <h2>Overview</h2>
+          <div>${renderInlineMarkdown(sl.change_overview)}</div>
+        ` : ''}
+
+        ${sl.reading_roadmap ? `
+          <h2>Reading roadmap</h2>
+          <div>${renderInlineMarkdown(sl.reading_roadmap)}</div>
+        ` : ''}
+
+        ${steps.length > 0 ? `
+          <h2>Steps in this storyline</h2>
+          <ul class="step-list-roadmap">${stepsRoadmap}</ul>
+          <button class="start-reading-btn" onclick="navigateToStep('${steps[0].id}')">Start reading from ${escapeHtml(steps[0].id)} →</button>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  // ========== Center: step view ==========
+  function renderStepCenter(storyline, step) {
+    const steps = storyline.steps || [];
+    const stepIndex = steps.findIndex(x => x.id === step.id);
+    const totalSteps = steps.length;
+    const prevId = getAdjacentStep(step.id, -1);
+    const nextId = getAdjacentStep(step.id, +1);
+
+    const primaryHtml = step.code_view.primary_changes.map(fv => renderFileBlock(fv, false)).join('');
+    const supportingHtml = (step.code_view.supporting_definitions || []).map(fv => renderFileBlock(fv, true)).join('');
+    const imp = storyline.importance_scores || {};
+
+    return `
+      <div class="step-header">
+        <div class="breadcrumb">${escapeHtml(storyline.title)} · Step ${stepIndex + 1} of ${totalSteps} · ${escapeHtml(step.id)}</div>
+        <div class="step-title">${escapeHtml(step.title)}</div>
+        <div class="badges">
+          <span class="badge badge-track-${step.track}">${escapeHtml(step.track)}</span>
+          <span class="badge badge-kind">${escapeHtml(storyline.kind)}</span>
+          ${imp.total != null ? `<span class="badge badge-kind" title="${escapeHtml(importanceTooltip(imp))}">storyline importance: ${imp.total}</span>` : ''}
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="section-label">Code</div>
+        ${primaryHtml || '<div class="empty-state">No code attached to this step.</div>'}
+        ${supportingHtml ? `<div class="section-label">Supporting definitions</div>${supportingHtml}` : ''}
+      </div>
+      <div class="step-nav">
+        <button class="nav-button" onclick="navigateToStep(${prevId ? `'${prevId}'` : 'null'})" ${prevId ? '' : 'disabled'}>← Previous step</button>
+        <button class="nav-button" onclick="goToStorylineOverview('${storyline.id}')">↑ Storyline overview</button>
+        <button class="nav-button" onclick="navigateToStep(${nextId ? `'${nextId}'` : 'null'})" ${nextId ? '' : 'disabled'}>Next step →</button>
+      </div>
+    `;
+  }
+
+  let _fileBlockSeq = 0;
+
+  function renderFunctionPurpose(fp) {
+    if (!fp) return '';
+    const nameLabel = fp.function_name ? escapeHtml(fp.function_name) : '(anonymous block)';
+    if (fp.structure === 'multi_section' && fp.sections && fp.sections.length > 0) {
+      const secs = fp.sections.map(s => `
+        <div class="fn-purpose-section">
+          <div class="fp-section-name">${escapeHtml(s.section_name)}<span class="fp-section-range">lines ${s.line_start}–${s.line_end}</span></div>
+          <div class="fp-label">Problem solved</div>
+          <div>${renderInlineMarkdown(s.problem_solved)}</div>
+          <div class="fp-label">Without it</div>
+          <div>${renderInlineMarkdown(s.without_it)}</div>
+        </div>
+      `).join('');
+      return `
+        <div class="fn-purpose">
+          <div class="fn-purpose-header">
+            <span class="fn-purpose-name">${nameLabel}</span>
+            <span class="fn-purpose-tag">multi-section</span>
+          </div>
+          ${secs}
+        </div>`;
+    }
+    return `
+      <div class="fn-purpose">
+        <div class="fn-purpose-header">
+          <span class="fn-purpose-name">${nameLabel}</span>
+          <span class="fn-purpose-tag">function purpose</span>
+        </div>
+        <div class="fp-label">Problem solved</div>
+        <div>${renderInlineMarkdown(fp.problem_solved)}</div>
+        <div class="fp-label">Without it</div>
+        <div>${renderInlineMarkdown(fp.without_it)}</div>
+      </div>`;
+  }
+
+  function renderFileBlock(fv, isReference) {
+    const blockId = 'fb-' + (++_fileBlockSeq);
+    const klass = isReference ? 'file-block reference' : 'file-block';
+    const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
+    const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
+    const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
+
+    const fpHtml = renderFunctionPurpose(fv.function_purpose);
+
+    const wt = fv.walkthrough || [];
+    const annByRowIndex = {};
+    wt.forEach(ann => {
+      let lastIdx = -1;
+      for (let i = 0; i < fv.lines.length; i++) {
+        if (fv.lines[i].line_num === ann.line_end) lastIdx = i;
+      }
+      if (lastIdx !== -1) annByRowIndex[lastIdx] = ann;
+    });
+    const hasWt = wt.length > 0;
+
+    const wtControls = hasWt ? `
+      <div class="wt-controls">
+        <button onclick="toggleAllAnnotations('${blockId}', false)">Hide all</button>
+        <button onclick="toggleAllAnnotations('${blockId}', true)">Show all</button>
+      </div>` : '';
+
+    const parts = [];
+    for (let i = 0; i < fv.lines.length; i++) {
+      const line = fv.lines[i];
+      const cls = `line-${line.change}`;
+      const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
+      parts.push(`<tr class="${cls}">
+        <td class="line-num">${line.line_num}</td>
+        <td class="change-marker">${marker}</td>
+        <td class="line-content">${escapeHtml(line.content)}</td>
+      </tr>`);
+
+      const ann = annByRowIndex[i];
+      if (ann) {
+        const rangeLabel = ann.line_start === ann.line_end
+          ? `Line ${ann.line_start}`
+          : `Lines ${ann.line_start}–${ann.line_end}`;
+        parts.push(`<tr><td colspan="3" class="wt-annotation-cell">
+          <div class="wt-annotation" data-block-id="${blockId}">
+            <div class="wt-annotation-header">
+              <span class="wt-toggle" onclick="toggleAnnotation(this)">▾</span>
+              <span class="wt-line-range">${rangeLabel}</span>
+              <span class="wt-chunk-role">${escapeHtml(ann.chunk_role)}</span>
+            </div>
+            <div class="wt-explanation">${renderInlineMarkdown(ann.explanation)}</div>
+          </div>
+        </td></tr>`);
+      }
+    }
+
+    return `
+      <div class="${klass}" id="${blockId}">
+        <div class="file-header">
+          <span class="file-path">${escapeHtml(fv.file)}</span>
+          <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
+          ${refLabel}
+        </div>
+        ${why}
+        ${fpHtml}
+        ${wtControls}
+        <table class="code-table">${parts.join('')}</table>
+      </div>
+    `;
+  }
+
+  function toggleAnnotation(toggleEl) {
+    const ann = toggleEl.closest('.wt-annotation');
+    ann.classList.toggle('wt-collapsed');
+    toggleEl.classList.toggle('collapsed');
+    toggleEl.textContent = ann.classList.contains('wt-collapsed') ? '▸' : '▾';
+  }
+
+  function toggleAllAnnotations(blockId, show) {
+    const block = document.getElementById(blockId);
+    if (!block) return;
+    block.querySelectorAll('.wt-annotation').forEach(ann => {
+      const toggle = ann.querySelector('.wt-toggle');
+      if (show) {
+        ann.classList.remove('wt-collapsed');
+        if (toggle) { toggle.classList.remove('collapsed'); toggle.textContent = '▾'; }
+      } else {
+        ann.classList.add('wt-collapsed');
+        if (toggle) { toggle.classList.add('collapsed'); toggle.textContent = '▸'; }
+      }
+    });
+  }
+
+  // ========== Right pane ==========
+  function section(name, klass, label, tag, contentHtml) {
+    if (!contentHtml) return '';
+    const collapsed = isCollapsed(name);
+    return `
+      <div class="analysis-section ${klass} ${collapsed ? 'collapsed' : ''}" data-section="${name}">
+        <div class="section-header" onclick="toggleSection('${name}')">
+          <div class="section-title-row">
+            <span class="section-title">${label}</span>
+            ${tag ? `<span class="tag">${tag}</span>` : ''}
+          </div>
+          <span class="section-toggle">▼</span>
+        </div>
+        <div class="section-body">${contentHtml}</div>
+      </div>
+    `;
+  }
+
+  function renderRight() {
+    const right = document.getElementById('right-pane');
+
+    if (state.view === 'reading_overview') {
+      right.innerHTML = `<div class="empty-state">Reading-level overview is shown in the main pane.<br><br>Click a storyline to see its overview, or a step to see detailed walkthrough.</div>`;
+      return;
+    }
+
+    if (state.view === 'storyline_overview') {
+      const sl = findStoryline(state.currentStorylineId);
+      if (!sl) { right.innerHTML = ''; return; }
+      const isSummary = sl.depth === 'summary';
+      const steps = sl.steps || [];
+      const trackCounts = steps.reduce((acc, st) => { acc[st.track] = (acc[st.track] || 0) + 1; return acc; }, {});
+      const trackSummary = Object.entries(trackCounts).map(([k,v]) => `${v} ${k}`).join(', ');
+      right.innerHTML = `
+        <div class="empty-state" style="padding: 24px 20px; text-align: left;">
+          <div style="font-size: 12px; font-weight: 600; color: #656d76; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Storyline at a glance</div>
+          ${isSummary
+            ? `<div>Depth: <strong>summary</strong> — no steps. See the main pane to promote.</div>`
+            : `<div><strong>${steps.length}</strong> step${steps.length === 1 ? '' : 's'}: ${trackSummary}</div>`}
+          <div style="margin-top: 12px; font-size: 12px; color: #656d76;">Files: ${(sl.files_touched || []).map(f => `<code style="font-size: 11px;">${escapeHtml(f)}</code>`).join(', ')}</div>
+          ${!isSummary ? `<div style="margin-top: 24px; font-size: 12px; color: #656d76;">Click "Start reading" or any step in the roadmap to begin.</div>` : ''}
+        </div>
+      `;
+      return;
+    }
+
+    // step view
+    const found = findStep(state.currentStepId);
+    if (!found) { right.innerHTML = ''; return; }
+    const { storyline, step } = found;
+
+    const sections = [];
+
+    // Prerequisites (factual context-recall, default expanded)
+    if (step.prerequisites && step.prerequisites.length > 0) {
+      const items = step.prerequisites.map(p => {
+        const refLink = p.kind === 'prior_step'
+          ? `<span class="prereq-ref" onclick="navigateToStep('${p.reference_id}')">jump to ${escapeHtml(p.reference_id)}</span>`
+          : '';
+        return `<div class="prereq-item">
+          <div class="prereq-kind">${escapeHtml(p.kind.replace(/_/g, ' '))}${refLink}</div>
+          <div>${renderInlineMarkdown(p.summary)}</div>
+        </div>`;
+      }).join('');
+      sections.push(section('prerequisites', 'prereq', '前情提要 Prerequisites', 'context', items));
+    }
+
+    // Mental model anchor — surface via storyline's anchor when on first step
+    // (the anchor lives on the storyline; show it on every step as a quick recall).
+    if (storyline.mental_model_anchor) {
+      sections.push(section(
+        'mental_model_anchor', 'anchor',
+        '心智模型 Mental Model', 'anchor',
+        `<div class="anchor-callout">${renderInlineMarkdown(storyline.mental_model_anchor)}</div>`
+      ));
+    }
+
+    // Summary (factual, default expanded)
+    if (step.summary) {
+      sections.push(section('summary', 'summary', '简介 Summary', 'factual', renderInlineMarkdown(step.summary)));
+    }
+
+    // Invariants (factual, default expanded — central to mental model)
+    if (step.invariants && step.invariants.length > 0) {
+      const list = step.invariants.map(s => `<li>${renderInlineMarkdown(s)}</li>`).join('');
+      sections.push(section('invariants', 'invariants', '不变量 Invariants', 'factual', `<ul class="bullet-list">${list}</ul>`));
+    }
+
+    // Key data structures (factual, default collapsed — table of nouns)
+    if (step.key_data_structures && step.key_data_structures.length > 0) {
+      const items = step.key_data_structures.map(d => `
+        <div class="ds-item">
+          <div class="ds-name">${escapeHtml(d.name)}</div>
+          ${d.shape ? `<div class="ds-shape">${escapeHtml(d.shape)}</div>` : ''}
+          ${d.role ? `<div class="ds-role">${renderInlineMarkdown(d.role)}</div>` : ''}
+        </div>
+      `).join('');
+      sections.push(section('key_data_structures', 'data-structures', 'Key Data Structures', 'factual', items));
+    }
+
+    // Usage context — "where this is called from in the larger system"
+    if (step.usage_context) {
+      const uc = step.usage_context;
+      let html = '';
+      if (uc.primary_usage_scenario) {
+        html += `<div class="ba-block"><div class="ba-label">Primary usage scenario</div><div class="ba-content">${renderInlineMarkdown(uc.primary_usage_scenario)}</div></div>`;
+      }
+      if (uc.callers && uc.callers.length > 0) {
+        const callers = uc.callers.map(c => `
+          <div class="caller-item">
+            <div class="caller-loc">${escapeHtml(c.file)}:${c.line}</div>
+            ${c.snippet ? `<div class="caller-snippet">${escapeHtml(c.snippet)}</div>` : ''}
+            <div>${renderInlineMarkdown(c.context)}</div>
+          </div>
+        `).join('');
+        html += `<div class="ba-block"><div class="ba-label">Callers (${uc.callers.length})</div>${callers}</div>`;
+      }
+      if (uc.call_patterns && uc.call_patterns.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Call patterns</div><ul class="bullet-list">${uc.call_patterns.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
+      }
+      if (uc.implicit_dependencies && uc.implicit_dependencies.length > 0) {
+        html += `<div class="ba-block"><div class="ba-label">Implicit dependencies</div><ul class="bullet-list">${uc.implicit_dependencies.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
+      }
+      if (html) sections.push(section('usage_context', 'usage', 'Where This Is Called From', 'factual', html));
+    }
+
+    // Codebase patterns (factual, default collapsed)
+    if (step.codebase_patterns) {
+      const cp = step.codebase_patterns;
+      let html = '';
+      if (cp.convention_alignment) {
+        html += `<div class="ba-block"><div class="ba-label">Convention alignment</div><div class="ba-content">${renderInlineMarkdown(cp.convention_alignment)}</div></div>`;
+      }
+      if (cp.deviations) {
+        html += `<div class="ba-block"><div class="ba-label">Deviations</div><div class="ba-content">${renderInlineMarkdown(cp.deviations)}</div></div>`;
+      }
+      const similar = cp.similar_code_elsewhere || cp.similar_changes_elsewhere || [];
+      if (similar.length > 0) {
+        const items = similar.map(s => `
+          <div class="caller-item">
+            <div class="caller-loc">${escapeHtml(s.file)}:${s.line}</div>
+            <div>${renderInlineMarkdown(s.note)}</div>
+          </div>
+        `).join('');
+        html += `<div class="ba-block"><div class="ba-label">Similar elsewhere</div>${items}</div>`;
+      }
+      if (html) sections.push(section('codebase_patterns', 'patterns', 'Codebase Patterns', 'factual', html));
+    }
+
+    // Design rationale (was alternative_approaches in v0.3)
+    const dr = step.design_rationale || step.alternative_approaches;
+    if (dr && dr.length > 0) {
+      const items = dr.map(a => `
+        <div class="alt-item">
+          <div class="alt-approach">${escapeHtml(a.approach)}<span class="alt-evidence-tag ${a.evidence_kind}">${escapeHtml(a.evidence_kind)}</span></div>
+          <div>${renderInlineMarkdown(a.tradeoff_vs_chosen_design || a.tradeoff_vs_chosen)}</div>
+        </div>
+      `).join('');
+      sections.push(section('design_rationale', 'design-rationale', '设计取舍 Design Rationale', '', items));
+    }
+
+    // Analysis (deeper technical reasoning, default collapsed)
+    if (step.analysis) {
+      sections.push(section('analysis', 'analysis', '分析 Analysis', 'deep', renderInlineMarkdown(step.analysis)));
+    }
+
+    if (sections.length === 0) {
+      right.innerHTML = '<div class="empty-state">No context attached to this step.</div>';
+    } else {
+      right.innerHTML = sections.join('');
+    }
+  }
+
+  // ========== Navigation ==========
+  function goToReadingOverview() {
+    state.view = 'reading_overview';
+    state.currentStorylineId = null;
+    state.currentStepId = null;
+    saveState();
+    rerender();
+  }
+
+  function goToStorylineOverview(slId) {
+    state.view = 'storyline_overview';
+    state.currentStorylineId = slId;
+    state.currentStepId = null;
+    saveState();
+    rerender();
+  }
+
+  function navigateToStep(stepId) {
+    if (stepId === null || stepId === undefined) return;
+    const found = findStep(stepId);
+    if (!found) return;
+    state.view = 'step';
+    state.currentStorylineId = found.storyline.id;
+    state.currentStepId = stepId;
+    saveState();
+    rerender();
+  }
+
+  function rerender() {
+    _fileBlockSeq = 0;
+    const center = document.getElementById('center-pane');
+    if (state.view === 'reading_overview') {
+      center.innerHTML = renderReadingOverview();
+    } else if (state.view === 'storyline_overview') {
+      const sl = findStoryline(state.currentStorylineId);
+      center.innerHTML = renderStorylineOverview(sl);
+    } else if (state.view === 'step') {
+      const found = findStep(state.currentStepId);
+      if (found) center.innerHTML = renderStepCenter(found.storyline, found.step);
+    }
+    renderRight();
+    highlightCurrentNav();
+    document.getElementById('center-pane').scrollTop = 0;
+    document.getElementById('right-pane').scrollTop = 0;
+  }
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'j') {
+      const next = state.currentStepId ? getAdjacentStep(state.currentStepId, +1) : (() => {
+        for (const sl of WALKTHROUGH_DATA.storylines) {
+          if (sl.steps && sl.steps.length > 0) return sl.steps[0].id;
+        }
+        return null;
+      })();
+      if (next) navigateToStep(next);
+      e.preventDefault();
+    } else if (e.key === 'k') {
+      const prev = getAdjacentStep(state.currentStepId, -1);
+      if (prev) navigateToStep(prev);
+      e.preventDefault();
+    } else if (e.key === 'o' || e.key === 'O') {
+      goToReadingOverview();
+      e.preventDefault();
+    } else if (e.key === 's' || e.key === 'S') {
+      if (state.currentStorylineId) goToStorylineOverview(state.currentStorylineId);
+      e.preventDefault();
+    }
+  });
+
+  // ========== Init ==========
+  function init() {
+    if (typeof WALKTHROUGH_DATA === 'undefined' || WALKTHROUGH_DATA === null) {
+      document.body.innerHTML = '<div style="padding: 40px; font-family: monospace;">No walkthrough data injected. The template placeholder was not replaced.</div>';
+      return;
+    }
+    renderHeader();
+    renderNav();
+
+    // Restore prior view from localStorage if available
+    const saved = loadState();
+    if (saved) {
+      if (saved.sectionCollapsed) state.sectionCollapsed = saved.sectionCollapsed;
+      if (saved.view === 'step' && saved.currentStepId && findStep(saved.currentStepId)) {
+        state.view = 'step';
+        state.currentStorylineId = saved.currentStorylineId;
+        state.currentStepId = saved.currentStepId;
+        rerender();
+        return;
+      } else if (saved.view === 'storyline_overview' && saved.currentStorylineId && findStoryline(saved.currentStorylineId)) {
+        state.view = 'storyline_overview';
+        state.currentStorylineId = saved.currentStorylineId;
+        rerender();
+        return;
+      }
+    }
+    goToReadingOverview();
+  }
+  init();
+</script>
+
+</body>
+</html>
