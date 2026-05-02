@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "walkthrough_key": "d79b5537d04af081",
+  "qa": [
+    {
+      "id": "qa-b3443fd1197b",
+      "step_id": "S3.1",
+      "storyline_id": "S3",
+      "question": "Why might this comment have been outdated before the change?",
+      "answer_markdown": "The old comment described the **previous implementation** of `ApproximateMemoryUsage()` — one that walked the arena's block list to sum allocated memory, which was genuinely O(blocks) and worth warning callers about.\n\nStep S1 (referenced in the storyline overview) replaced that traversal with a **cached counter incremented at write time**. Once that landed, the function became O(1), but nobody updated the header comment on line 40. So the comment was outdated the moment S1 was merged — it described behavior the code no longer had.\n\nThis is a common drift pattern: implementation comments live in a different file from the implementation (`.h` vs `.cc`), so a change to the body in `memtable.cc` doesn't visually nudge the author to revisit the declaration in `memtable.h`. S3.1 is just the cleanup that should have ridden along with S1.\n\nOne nuance the new comment still glosses over (flagged in the **Behavior delta**): the cached counter tracks **entry bytes**, not **arena bytes**, so it's not just a faster version of the old number — it's measuring a slightly different thing.",
+      "asked_at": "2026-05-02T07:29:29+00:00",
+      "cli": "claude",
+      "model": null,
+      "elapsed_s": 10.41
+    }
+  ]
+}
