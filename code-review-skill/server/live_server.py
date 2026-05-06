@@ -356,6 +356,32 @@ def find_review_json(html_path: Path) -> Path:
     return candidate
 
 
+def extract_embedded_json(html_path: Path) -> dict:
+    """Recover REVIEW_DATA from the HTML itself.
+
+    `render.py` injects the JSON via a literal replacement of
+    `/*REVIEW_DATA_PLACEHOLDER*/` with `json.dumps(data, indent=2)`. The
+    resulting line looks like `const REVIEW_DATA = { ... };` near the top
+    of the embedded <script>. We find that block, un-escape the `</` →
+    `<\\/` guard the renderer applies, and re-parse it as JSON.
+
+    Returns the parsed dict on success; raises ValueError otherwise.
+    """
+    import re
+    text = html_path.read_text(encoding="utf-8")
+    # Match `const REVIEW_DATA = ` followed by a JSON object literal
+    # ending with `};`. The object spans many lines (indent=2), so use a
+    # non-greedy match anchored on the closing `};`.
+    m = re.search(r"const\s+REVIEW_DATA\s*=\s*(\{[\s\S]*?\})\s*;", text)
+    if not m:
+        raise ValueError("could not locate `const REVIEW_DATA = {...}` in HTML")
+    raw = m.group(1).replace("<\\/", "</")  # un-escape the </script> guard
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"embedded REVIEW_DATA failed to parse: {e}")
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Companion live server for code-review-narrative HTML reviews.")
     p.add_argument("html", type=Path, help="Path to the rendered review HTML.")
@@ -378,9 +404,28 @@ def main():
     if not _HTML_PATH.exists():
         sys.exit(f"HTML not found: {_HTML_PATH}")
 
-    _JSON_PATH = (args.json or find_review_json(_HTML_PATH)).resolve()
-    with open(_JSON_PATH, "r", encoding="utf-8") as f:
-        _REVIEW_DATA = json.load(f)
+    # Locate the JSON: explicit --json wins, else sibling <name>.json,
+    # else extract from the embedded const in the HTML.
+    if args.json:
+        _JSON_PATH = args.json.resolve()
+        with open(_JSON_PATH, "r", encoding="utf-8") as f:
+            _REVIEW_DATA = json.load(f)
+    else:
+        sibling = _HTML_PATH.with_suffix(".json")
+        if sibling.exists():
+            _JSON_PATH = sibling.resolve()
+            with open(_JSON_PATH, "r", encoding="utf-8") as f:
+                _REVIEW_DATA = json.load(f)
+        else:
+            try:
+                _REVIEW_DATA = extract_embedded_json(_HTML_PATH)
+            except ValueError as e:
+                sys.exit(
+                    f"No sibling JSON at {sibling}, and could not extract from HTML: {e}\n"
+                    f"  Pass --json <path> if the source JSON lives elsewhere."
+                )
+            _JSON_PATH = None
+            print(f"[live_server] no sibling JSON found — recovered REVIEW_DATA from {_HTML_PATH.name}")
 
     _SIDECAR_PATH = _HTML_PATH.with_suffix(".followups.json")
 
@@ -393,7 +438,7 @@ def main():
     _BARE = args.bare
 
     print(f"[live_server] HTML:     {_HTML_PATH}")
-    print(f"[live_server] JSON:     {_JSON_PATH}")
+    print(f"[live_server] JSON:     {_JSON_PATH if _JSON_PATH else '(extracted from HTML)'}")
     print(f"[live_server] sidecar:  {_SIDECAR_PATH}")
     print(f"[live_server] CLI:      {_CLI} ({_CLI_BIN}){' [--bare]' if _BARE else ''}")
     if _MODEL:

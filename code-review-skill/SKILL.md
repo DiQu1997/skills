@@ -137,11 +137,38 @@ Construct the final JSON conforming to the schema in `prompts/schema.md`. Valida
 
 ### 9. Render to HTML
 
-Read `template/review.html`. Find the placeholder `/*REVIEW_DATA_PLACEHOLDER*/` and replace it with the JSON (formatted as a JS object literal — `JSON.stringify(data, null, 2)` is fine).
+Run `python3 render.py <review.json> <review.html>`. The script reads
+`template/review.html`, replaces `/*REVIEW_DATA_PLACEHOLDER*/` with the JSON,
+and writes the self-contained HTML.
 
-Write the final HTML to a path the user specified, or to `review.html` in the current directory.
+Default output path: `review.html` in the directory the user specified, or
+the current working directory.
 
-Tell the user where the file was written and suggest they open it in a browser.
+### 10. Open in live mode (default behavior)
+
+Immediately after rendering, run:
+
+```bash
+python3 server/live_review.py <review.html>
+```
+
+This wrapper detects whether a companion `live_server.py` is already serving
+this HTML on a port in `8765–8775`. If yes, it just opens the browser. If
+no, it starts the server in the background (detached, survives this script
+exiting) and then opens the browser. The server enables a "💬 Q&A" section
+on each step where the reader can ask follow-up questions; answers are
+written to a sidecar `<basename>.followups.json` next to the HTML.
+
+Tell the user the URL (e.g. `http://127.0.0.1:8765/`) and that the live
+badge in the upper-left subtitle confirms live mode is active. If they
+prefer a static-only file with no Q&A, they can skip step 10 and open the
+HTML directly via `file://`.
+
+To stop the server later: `python3 server/live_review.py --stop` (kills all
+live-review servers) or `--stop <html>` (just one).
+
+The server requires `claude` (or `--cli codex`) on PATH. If neither is
+available, fall back to telling the user to open the HTML directly.
 
 ## Constraints
 
@@ -164,7 +191,11 @@ Tell the user where the file was written and suggest they open it in a browser.
 - `SKILL.md` — this file
 - `prompts/analyze_diff.md` — detailed prompt for the analysis phase (used during step 3-7)
 - `prompts/schema.md` — full JSON schema specification
-- `template/review.html` — the HTML/CSS/JS template
+- `template/review.html` — the HTML/CSS/JS template (with live-mode chat input + Q&A section)
 - `render.py` — helper script to inject JSON into template
+- `server/live_server.py` — companion HTTP server that powers live-mode Q&A (`/__alive`, `/followups`, `/ask` → `claude -p` or `codex exec`); falls back to extracting `REVIEW_DATA` from the HTML if no sibling JSON is found
+- `server/live_review.py` — wrapper that starts (or reuses) `live_server.py` in the background and opens the browser; supports `--status` and `--stop`
+- `server/prompts/followup_prompt.md` — prompt template fed to the CLI for each follow-up question
 - `demo/sample_review.json` — reference example of valid JSON
 - `demo/sample_review.html` — reference example of rendered output
+- `demo/sample_review.followups.json` — example sidecar Q&A file
