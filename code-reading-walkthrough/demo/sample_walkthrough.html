@@ -798,6 +798,146 @@
   }
   .storyline-overview .start-reading-btn:hover { background: #1f883d; }
 
+  /* ========== Step-graph diagram (storyline overview + reading overview) ========== */
+  .step-diagram-canvas {
+    position: relative;
+    background: #fafbfc;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    margin-top: 8px;
+    overflow: auto;
+  }
+  .step-diagram-canvas svg.connectors {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none;
+  }
+  .step-box {
+    position: absolute;
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    padding: 9px 12px;
+    cursor: pointer;
+    transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    user-select: none;
+  }
+  .step-box:hover {
+    border-color: #0969da;
+    box-shadow: 0 2px 8px rgba(9, 105, 218, 0.18);
+    transform: translateY(-1px);
+  }
+  .step-box.track-core      { border-left: 4px solid #0969da; }
+  .step-box.track-supporting{ border-left: 4px solid #6f42c1; }
+  .step-box.track-utility   { border-left: 4px solid #9a6700; }
+  .step-box.track-data      { border-left: 4px solid #1f6feb; }
+  .step-box.track-extension { border-left: 4px solid #d18c1a; }
+  .step-box .top-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; color: #656d76; margin-bottom: 4px;
+  }
+  .step-box .step-id { font-family: ui-monospace, monospace; font-weight: 600; color: #1a1a1a; }
+  .step-box .track-tag {
+    text-transform: uppercase; letter-spacing: 0.4px;
+    padding: 1px 6px; border-radius: 8px; font-weight: 700;
+  }
+  .step-box.track-core      .track-tag { background: #ddf4ff; color: #0969da; }
+  .step-box.track-supporting .track-tag{ background: #f0e7ff; color: #6f42c1; }
+  .step-box.track-utility   .track-tag { background: #fff8c5; color: #9a6700; }
+  .step-box.track-data      .track-tag { background: #ddf4ff; color: #1f6feb; }
+  .step-box.track-extension .track-tag { background: #ffe7ce; color: #b04600; }
+  .step-box .step-title { font-weight: 600; font-size: 12.5px; margin-bottom: 4px; line-height: 1.32; }
+  .step-box .step-summary { font-size: 11px; color: #444; line-height: 1.4; }
+
+  /* Storyline cluster: full and summary depth */
+  .storyline-cluster {
+    position: absolute;
+    background: rgba(255,255,255,0.55);
+    border: 1.5px dashed #c9d1d9;
+    border-radius: 12px;
+    padding-top: 30px;
+    transition: border-color 0.12s;
+  }
+  /* Reading-skill kind palette */
+  .storyline-cluster.kind-core_flow      { border-color: #b6e3ff; background: rgba(221, 244, 255, 0.30); }
+  .storyline-cluster.kind-entry_point    { border-color: #b6e3ff; background: rgba(221, 244, 255, 0.30); }
+  .storyline-cluster.kind-algorithm      { border-color: #ddc3ff; background: rgba(240, 231, 255, 0.30); }
+  .storyline-cluster.kind-data_model     { border-color: #aceebb; background: rgba(218, 251, 225, 0.30); }
+  .storyline-cluster.kind-extension_point{ border-color: #ffd6a5; background: rgba(255, 231, 206, 0.30); }
+  .storyline-cluster.kind-utility        { border-color: #d0d7de; background: rgba(246, 248, 250, 0.50); }
+  .storyline-cluster.kind-glue           { border-color: #d0d7de; background: rgba(246, 248, 250, 0.50); }
+  .storyline-cluster.kind-config         { border-color: #f8e57b; background: rgba(255, 248, 197, 0.30); }
+  .storyline-cluster.kind-mixed          { border-color: #d0d7de; background: rgba(246, 248, 250, 0.40); }
+
+  .storyline-cluster.depth-summary {
+    border-style: dashed;
+    background: rgba(246, 248, 250, 0.55);
+    opacity: 0.95;
+  }
+  .storyline-cluster .cluster-label {
+    position: absolute;
+    top: 6px; left: 14px; right: 14px;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    color: #1a1a1a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .storyline-cluster .cluster-label:hover { color: #0969da; }
+  .storyline-cluster .cluster-label .cluster-id {
+    font-family: ui-monospace, monospace; color: #656d76;
+  }
+  .storyline-cluster .cluster-label .cluster-imp {
+    font-family: ui-monospace, monospace; font-size: 10px; font-weight: 700;
+    padding: 1px 6px; border-radius: 8px;
+    background: #eaeef2; color: #656d76;
+    cursor: help;
+  }
+  .storyline-cluster .cluster-label .cluster-imp.imp-high { background: #ffd6a5; color: #82071e; }
+  .storyline-cluster .cluster-label .cluster-imp.imp-mid  { background: #fff8c5; color: #9a6700; }
+  .storyline-cluster .cluster-label .cluster-imp.imp-low  { background: #eaeef2; color: #656d76; }
+  .storyline-cluster .cluster-label .cluster-title {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* Empty body for summary-only clusters */
+  .storyline-cluster .summary-only-body {
+    position: absolute;
+    top: 36px; left: 14px; right: 14px;
+    text-align: center;
+    color: #656d76;
+    font-size: 11px;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .storyline-cluster .summary-only-body .pill {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: #eaeef2;
+    color: #656d76;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+
+  .step-diagram-legend {
+    margin-top: 10px;
+    font-size: 11px; color: #656d76;
+    display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  .step-diagram-legend .legend-item { display: flex; align-items: center; gap: 6px; }
+  .step-diagram-legend .legend-line {
+    display: inline-block; width: 22px; height: 0;
+    border-top: 2px solid #0969da;
+  }
+  .step-diagram-legend .legend-line.dashed {
+    border-top-style: dashed; border-top-color: #6f42c1;
+  }
+
 </style>
 </head>
 <body>
@@ -4110,6 +4250,276 @@
       </div>`;
   }
 
+  // ========== Step-graph diagram helpers ==========
+  // Used by both reading overview (cross-storyline clusters) and storyline
+  // overview (single storyline as a DAG of its steps). Edges come from
+  // step.prerequisites entries with kind === 'prior_step'. No external
+  // libs — pure SVG over absolutely-positioned HTML cards. Summary-depth
+  // storylines render as small pill-only clusters (no boxes inside).
+  const _STEP_BOX_W = 230;
+  const _STEP_BOX_H = 84;
+  const _LAYER_V_GAP = 60;
+  const _LAYER_H_GAP = 22;
+  const _CANVAS_PAD = 24;
+  const _SUMMARY_CLUSTER_W = 230 + 2 * 16;  // box-width + padding
+  const _SUMMARY_CLUSTER_H = 96;
+
+  function _stepBoxSummary(step) {
+    const s = step.summary || '';
+    return s.length > 130 ? s.slice(0, 130).replace(/[\s,;:.!?]+$/, '') + '…' : s;
+  }
+
+  function _layerNodes(nodes, edges) {
+    const idSet = new Set(nodes.map(n => n.id));
+    const localEdges = edges.filter(e => idSet.has(e.from) && idSet.has(e.to));
+    const indeg = {};
+    nodes.forEach(n => { indeg[n.id] = 0; });
+    localEdges.forEach(e => { indeg[e.to]++; });
+    const layers = [];
+    const placed = new Set();
+    let frontier = nodes.filter(n => indeg[n.id] === 0);
+    while (frontier.length) {
+      layers.push(frontier);
+      frontier.forEach(n => placed.add(n.id));
+      const nextIds = new Set();
+      localEdges.forEach(e => {
+        if (placed.has(e.from) && !placed.has(e.to)) {
+          indeg[e.to]--;
+          if (indeg[e.to] === 0) nextIds.add(e.to);
+        }
+      });
+      frontier = Array.from(nextIds).map(id => nodes.find(n => n.id === id));
+    }
+    nodes.forEach(n => { if (!placed.has(n.id)) layers.push([n]); });
+    return layers;
+  }
+
+  function _curvePath(x1, y1, x2, y2) {
+    const midY = (y1 + y2) / 2;
+    return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+  }
+
+  function _hCurvePath(x1, y1, x2, y2) {
+    const midX = (x1 + x2) / 2;
+    return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+  }
+
+  function _arrowDefs(prefix) {
+    return `
+      <defs>
+        <marker id="${prefix}-arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0969da" />
+        </marker>
+        <marker id="${prefix}-arrow-cross" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f42c1" />
+        </marker>
+      </defs>`;
+  }
+
+  function _renderStepBox(step, x, y, w, onclickAttr) {
+    return `
+      <div class="step-box track-${escapeHtml(step.track)}"
+           style="left:${x}px; top:${y}px; width:${w}px;"
+           ${onclickAttr}>
+        <div class="top-row">
+          <span class="step-id">${escapeHtml(step.id)}</span>
+          <span class="track-tag">${escapeHtml(step.track)}</span>
+        </div>
+        <div class="step-title">${escapeHtml(step.title)}</div>
+        <div class="step-summary">${escapeHtml(_stepBoxSummary(step))}</div>
+      </div>`;
+  }
+
+  function _buildPriorStepEdges(steps) {
+    const out = [];
+    const idSet = new Set(steps.map(s => s.id));
+    steps.forEach(st => {
+      (st.prerequisites || []).forEach(p => {
+        if (p.kind === 'prior_step' && idSet.has(p.reference_id)) {
+          out.push({ from: p.reference_id, to: st.id });
+        }
+      });
+    });
+    return out;
+  }
+
+  function _clusterLabel(sl) {
+    const imp = sl.importance_scores || {};
+    const impTotal = imp.total;
+    const impCls = impTotal != null ? importanceClass(impTotal) : '';
+    const impTip = impTotal != null ? importanceTooltip(imp) + ' — core-functionality importance' : '';
+    return `
+      <span class="cluster-label" onclick="goToStorylineOverview('${escapeHtml(sl.id)}')">
+        <span class="cluster-id">${escapeHtml(sl.id)}</span>
+        ${impTotal != null ? `<span class="cluster-imp ${impCls}" title="${escapeHtml(impTip)}">${impTotal}</span>` : ''}
+        <span class="cluster-title">${escapeHtml(sl.title)}</span>
+      </span>`;
+  }
+
+  // Render a single storyline as a top-down DAG of its steps (full-depth only).
+  function renderStorylineDiagram(sl) {
+    const steps = sl.steps || [];
+    if (steps.length === 0) return '<div class="empty-state">No steps in this storyline (summary depth).</div>';
+    const edges = _buildPriorStepEdges(steps);
+    const layers = _layerNodes(steps, edges);
+    const maxLen = Math.max(...layers.map(l => l.length));
+    const canvasW = maxLen * _STEP_BOX_W + (maxLen - 1) * _LAYER_H_GAP + 2 * _CANVAS_PAD;
+    const positions = {};
+    let y = _CANVAS_PAD;
+    layers.forEach(layer => {
+      const layerW = layer.length * _STEP_BOX_W + (layer.length - 1) * _LAYER_H_GAP;
+      const startX = (canvasW - layerW) / 2;
+      layer.forEach((s, i) => {
+        positions[s.id] = { x: startX + i * (_STEP_BOX_W + _LAYER_H_GAP), y, w: _STEP_BOX_W, h: _STEP_BOX_H };
+      });
+      y += _STEP_BOX_H + _LAYER_V_GAP;
+    });
+    const canvasH = y - _LAYER_V_GAP + _CANVAS_PAD;
+
+    const arrows = edges.map(e => {
+      const a = positions[e.from], b = positions[e.to];
+      const x1 = a.x + a.w / 2, y1 = a.y + a.h;
+      const x2 = b.x + b.w / 2, y2 = b.y;
+      return `<path d="${_curvePath(x1, y1, x2, y2)}" stroke="#0969da" stroke-width="2"
+              fill="none" marker-end="url(#sl-${escapeHtml(sl.id)}-arrow)" />`;
+    }).join('');
+    const boxes = steps.map(s => _renderStepBox(s, positions[s.id].x, positions[s.id].y, _STEP_BOX_W,
+      `onclick="navigateToStep('${escapeHtml(s.id)}')"`)).join('');
+
+    return `
+      <div class="step-diagram-canvas" style="width:${canvasW}px; max-width:100%; height:${canvasH}px;">
+        <svg class="connectors" width="${canvasW}" height="${canvasH}">
+          ${_arrowDefs('sl-' + sl.id)}
+          ${arrows}
+        </svg>
+        ${boxes}
+      </div>
+      <div class="step-diagram-legend">
+        <div class="legend-item"><span class="legend-line"></span> prerequisite (<code>prior_step</code>)</div>
+        <div class="legend-item">Click any box to open the step's detailed view.</div>
+      </div>`;
+  }
+
+  // Render all storylines as side-by-side dashed clusters with cross-storyline
+  // prereq arrows. Summary-depth storylines render as compact label-only clusters.
+  function renderCrossStorylineDiagram() {
+    const stls = WALKTHROUGH_DATA.storylines || [];
+    if (stls.length === 0) return '';
+
+    const positions = {};
+    const clusters = [];
+    const stepToStoryline = {};
+    const allEdges = [];
+    stls.forEach(sl => {
+      (sl.steps || []).forEach(s => {
+        stepToStoryline[s.id] = sl.id;
+        (s.prerequisites || []).forEach(p => {
+          if (p.kind === 'prior_step') allEdges.push({ from: p.reference_id, to: s.id });
+        });
+      });
+    });
+
+    const CLUSTER_GAP = 56;
+    const CLUSTER_PAD = 16;
+    const CLUSTER_HEAD = 28;
+    let cursorX = _CANVAS_PAD;
+    let canvasH = 0;
+
+    stls.forEach(sl => {
+      const isSummary = sl.depth === 'summary';
+      const cy = _CANVAS_PAD;
+      let cx = cursorX, cw, ch;
+
+      if (isSummary || (sl.steps || []).length === 0) {
+        cw = _SUMMARY_CLUSTER_W;
+        ch = _SUMMARY_CLUSTER_H;
+      } else {
+        const innerEdges = _buildPriorStepEdges(sl.steps);
+        const layers = _layerNodes(sl.steps, innerEdges);
+        const maxLen = Math.max(...layers.map(l => l.length));
+        const innerW = maxLen * _STEP_BOX_W + (maxLen - 1) * _LAYER_H_GAP;
+        const innerH = layers.length * _STEP_BOX_H + (layers.length - 1) * _LAYER_V_GAP;
+        cw = innerW + 2 * CLUSTER_PAD;
+        ch = innerH + 2 * CLUSTER_PAD + CLUSTER_HEAD;
+
+        let y = cy + CLUSTER_HEAD + CLUSTER_PAD;
+        layers.forEach(layer => {
+          const layerW = layer.length * _STEP_BOX_W + (layer.length - 1) * _LAYER_H_GAP;
+          const sx = cx + (cw - layerW) / 2;
+          layer.forEach((s, i) => {
+            positions[s.id] = { x: sx + i * (_STEP_BOX_W + _LAYER_H_GAP), y, w: _STEP_BOX_W, h: _STEP_BOX_H };
+          });
+          y += _STEP_BOX_H + _LAYER_V_GAP;
+        });
+      }
+
+      clusters.push({
+        id: sl.id, title: sl.title, kind: sl.kind, depth: sl.depth || 'full',
+        importance_scores: sl.importance_scores,
+        x: cx, y: cy, w: cw, h: ch, isSummary,
+      });
+      cursorX += cw + CLUSTER_GAP;
+      canvasH = Math.max(canvasH, cy + ch + _CANVAS_PAD);
+    });
+
+    const canvasW = cursorX - CLUSTER_GAP + _CANVAS_PAD;
+
+    const edgesHtml = allEdges.map(e => {
+      const a = positions[e.from], b = positions[e.to];
+      if (!a || !b) return '';
+      const isCross = stepToStoryline[e.from] !== stepToStoryline[e.to];
+      let x1, y1, x2, y2, path, stroke, marker, dash;
+      if (isCross) {
+        x1 = a.x + a.w; y1 = a.y + a.h / 2;
+        x2 = b.x;       y2 = b.y + b.h / 2;
+        path = _hCurvePath(x1, y1, x2, y2);
+        stroke = '#6f42c1'; marker = 'cross-overview-arrow-cross'; dash = 'stroke-dasharray="5,5"';
+      } else {
+        x1 = a.x + a.w / 2; y1 = a.y + a.h;
+        x2 = b.x + b.w / 2; y2 = b.y;
+        path = _curvePath(x1, y1, x2, y2);
+        stroke = '#0969da'; marker = 'cross-overview-arrow'; dash = '';
+      }
+      return `<path d="${path}" stroke="${stroke}" stroke-width="2" ${dash}
+              fill="none" marker-end="url(#${marker})" />`;
+    }).join('');
+
+    const clustersHtml = clusters.map(c => {
+      const sl = stls.find(x => x.id === c.id);
+      const labelHtml = _clusterLabel(c);
+      const summaryBody = c.isSummary
+        ? `<div class="summary-only-body">${escapeHtml(sl.summary || '').slice(0, 80)}${(sl.summary || '').length > 80 ? '…' : ''}<br><span class="pill">summary only</span></div>`
+        : '';
+      return `
+        <div class="storyline-cluster kind-${escapeHtml(c.kind)} depth-${escapeHtml(c.depth)}"
+             style="left:${c.x}px; top:${c.y}px; width:${c.w}px; height:${c.h}px;">
+          ${labelHtml}
+          ${summaryBody}
+        </div>`;
+    }).join('');
+
+    const boxesHtml = stls.flatMap(sl => sl.steps || [])
+      .map(s => positions[s.id]
+        ? _renderStepBox(s, positions[s.id].x, positions[s.id].y, _STEP_BOX_W,
+            `onclick="navigateToStep('${escapeHtml(s.id)}')"`)
+        : '').join('');
+
+    return `
+      <div class="step-diagram-canvas" style="width:${canvasW}px; max-width:100%; height:${canvasH}px;">
+        <svg class="connectors" width="${canvasW}" height="${canvasH}">
+          ${_arrowDefs('cross-overview')}
+          ${edgesHtml}
+        </svg>
+        ${clustersHtml}
+        ${boxesHtml}
+      </div>
+      <div class="step-diagram-legend">
+        <div class="legend-item"><span class="legend-line"></span> prerequisite within storyline</div>
+        <div class="legend-item"><span class="legend-line dashed"></span> cross-storyline prerequisite</div>
+        <div class="legend-item">Cluster header → storyline overview · Box → step detail · Number = core-functionality importance (4–12)</div>
+      </div>`;
+  }
+
   function renderReadingOverview() {
     const m = WALKTHROUGH_DATA.metadata;
     const s = WALKTHROUGH_DATA.summary;
@@ -4136,6 +4546,7 @@
         </div>
       `;
     }).join('');
+    const crossDiagram = renderCrossStorylineDiagram();
     return `
       <div class="pr-overview">
         <h1>${escapeHtml(m.title)}</h1>
@@ -4143,6 +4554,8 @@
         <div class="description">${renderInlineMarkdown(s.description)}</div>
 
         ${WALKTHROUGH_DATA.scope ? '<h2>Scope</h2>' + renderScopePanel() : ''}
+
+        ${crossDiagram ? `<h2>Storyline graph</h2>${crossDiagram}` : ''}
 
         <h2>Storylines (${WALKTHROUGH_DATA.storylines.length})</h2>
         ${sls}
@@ -4215,13 +4628,6 @@
     }
 
     const steps = sl.steps || [];
-    const stepsRoadmap = steps.map(st => `
-      <li onclick="navigateToStep('${st.id}')">
-        <span class="step-id-roadmap">${escapeHtml(st.id)}</span>
-        ${escapeHtml(st.title)}
-        <span class="step-track-roadmap badge-track-${st.track}">${escapeHtml(st.track)}</span>
-      </li>
-    `).join('');
 
     const impBadges = imp.total != null ? `
       <span class="badge badge-kind" title="${escapeHtml(importanceTooltip(imp))}">importance ${imp.total}</span>
@@ -4272,8 +4678,8 @@
         ` : ''}
 
         ${steps.length > 0 ? `
-          <h2>Steps in this storyline</h2>
-          <ul class="step-list-roadmap">${stepsRoadmap}</ul>
+          <h2>Step graph</h2>
+          ${renderStorylineDiagram(sl)}
           <button class="start-reading-btn" onclick="navigateToStep('${steps[0].id}')">Start reading from ${escapeHtml(steps[0].id)} →</button>
         ` : ''}
       </div>
