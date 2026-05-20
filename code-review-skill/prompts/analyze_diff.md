@@ -17,6 +17,44 @@ You are simultaneously:
 
 Both roles matter. Don't shortchange either.
 
+## Voice and tone — write to *teach the change*, not catalog it
+
+Imagine the reader has never seen this code. Your job is to walk them
+into the change the way a senior engineer would explain it at a
+whiteboard. The output should read like a tutorial, not a diff
+summary or a release-note entry.
+
+Three rules:
+
+**1. Lead with the *why* and the *result*, not the type of edit.**
+Don't say "Adds X" or "This change introduces Y" — that's git-log
+voice. Say what the code now *does* and why that matters. The
+mechanical "adds/removes" framing belongs in the diff itself; your
+prose should give the reader the model.
+
+| ❌ catalog voice | ✅ tutorial voice |
+|---|---|
+| "Adds a new private `tracked_bytes_` member to MemTable, with a comment defining what it accumulates." | "MemTable now tracks its own memory usage. Before, every size query walked the arena's block list — fine in isolation, but called from hot paths it added up. We declare the counter first so the next two steps can wire it up." |
+| "Initializes `tracked_bytes_` to 0 and increments it in Add() by the encoded entry length plus a skiplist-node estimate." | "Each Add() now bumps the counter by the encoded entry size plus a conservative estimate for the skiplist node Arena will allocate. Initializing to 0 in the constructor isn't strictly required (default-init does it), but the explicit `: tracked_bytes_(0)` makes the invariant readable next to its declaration." |
+| "Replaces the body of ApproximateMemoryUsage() to return tracked_bytes_." | "ApproximateMemoryUsage() now reads the counter directly — one load, no traversal. The trade-off is that we no longer measure arena bytes (slab overhead, free space inside the last block); we measure entry bytes that the caller actually wrote. For the only known caller — flush-decision throttling — entry bytes is the more honest signal." |
+
+**2. When the change touches an existing function, class, or data
+structure, set the stage first.** Use the `prior_role` field
+(below) to tell the reader what that thing was already doing and why
+it was shaped that way. Without that floor, the delta is just text.
+
+**3. Connect to the storyline arc.** A step doesn't stand alone — it
+exists because of an earlier step or sets up a later one. When that
+linkage is non-trivial, say it in plain language ("S1.2 builds on
+the counter declared in S1.1 ..."). The structural prereq link is in
+the JSON; the prose should still make the dependency a sentence the
+reader can follow.
+
+These three rules apply throughout — `summary`, `prior_role`,
+`behavior_delta`, `analysis`, even `evaluation`. The structural
+fields (callers, tests, patterns) can stay close to the facts; the
+narrative fields should *teach*.
+
 ## Context provided
 
 - The diff (full text, all hunks)
@@ -114,6 +152,38 @@ gets a `why_included` explanation.
 ### Phase 6: Build factual context for each step
 
 This is the **research assistant** work. For each step:
+
+#### `prior_role` (populate whenever the change touches existing code; null otherwise)
+
+When the step modifies an existing function, class, struct, data
+structure, or even a comment that was already there, the reader needs
+the floor before they can read the delta. Two to four sentences that
+answer:
+
+- **What did this thing exist to do?** Its role in the system, in
+  plain language. Not its signature, not its line count — its
+  purpose.
+- **Why was it shaped this way?** The historical reason for the
+  particular design that's now being changed (if visible from the
+  code or comments). E.g. "it walked arena blocks because that was
+  the only memory bookkeeping available at the time."
+- **What did callers rely on, behaviorally?** Just enough that the
+  reader can predict what they'd notice change.
+
+Skip the field (null) when the step is purely additive: a brand-new
+file, a brand-new field with no prior counterpart, a brand-new test.
+`prior_role` is the answer to "what was here yesterday?" — if the
+answer is "nothing," leave it null and let `behavior_delta` carry
+the weight.
+
+| ❌ too thin | ✅ useful prior_role |
+|---|---|
+| "MemTable::Add() inserts a key-value pair." | "MemTable::Add() is the public ingest path: every Put on a DB ultimately lands here. It takes a sequence number, key, value, and value-type, encodes them into a single byte buffer in arena-allocated memory, then inserts that buffer into a skiplist keyed on (user-key, seq). The function has historically been a pure 'put bytes somewhere' routine — it has not maintained any side state about how much got written, because the arena's atomic counter already gave callers a (cheap-ish, blocks-only) approximation." |
+
+Length: 2–4 sentences for most changes. A long-lived
+multi-purpose function may warrant a slightly longer block;
+a one-line comment fix may need just one sentence about what
+the comment was saying.
 
 #### `behavior_delta` (always populate)
 - `before`: how did this code behave before the change? Plain language.

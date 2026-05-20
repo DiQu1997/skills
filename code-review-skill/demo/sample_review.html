@@ -368,6 +368,9 @@
   .analysis-section.prereq .section-header { background: #f6fbff; }
   .analysis-section.summary     { border-left-color: #6e7781; }
   .analysis-section.summary .section-title { color: #1a1a1a; }
+  .analysis-section.prior-role  { border-left-color: #8b6914; }
+  .analysis-section.prior-role .section-title { color: #6e5009; }
+  .analysis-section.prior-role .section-header { background: #fffaf0; }
   .analysis-section.behavior    { border-left-color: #1f6feb; }
   .analysis-section.behavior .section-title { color: #0550ae; }
   .analysis-section.behavior .section-header { background: #f6fbff; }
@@ -1096,11 +1099,11 @@
             ],
             "supporting_definitions": []
           },
-          "summary": "Adds a new private `tracked_bytes_` member to MemTable, with a comment defining what it accumulates: encoded entry bytes plus skiplist node overhead.",
+          "summary": "MemTable starts tracking its own memory. Before, every size query walked the arena's block list — fine in isolation, but called from hot paths (flush throttling, monitoring) it added up. This step just declares the counter; S1.2 wires the per-Add increment, and S1.3 swaps the public accessor to read it directly.",
           "behavior_delta": {
-            "before": "MemTable carried no internal byte-usage counter. Size was derived on demand from the arena.",
-            "after": "MemTable now declares a `size_t tracked_bytes_` field intended to be maintained as entries are added.",
-            "diff": "Pure declaration change; no runtime behavior changes by this step alone (S1.2 wires the increment, S1.3 wires the read)."
+            "before": "MemTable carried no internal byte-usage counter — when callers asked how big it was, the answer came from `arena_.MemoryUsage()`, the arena's own atomic.",
+            "after": "MemTable now owns a `tracked_bytes_` field. Nothing reads or writes it yet — declaration only. The companion comment fixes the field's meaning ('encoded entry bytes plus skiplist node overhead estimate') before S1.2 and S1.3 give it a job.",
+            "diff": "No runtime change in isolation. The step's value is what it sets up: a place for S1.2 to accumulate into, and a target for S1.3 to read. The crucial choice happens in the field's *definition* of what it tracks — entry bytes, not arena bytes — which is the semantic break that S1.3 will operationalize."
           },
           "usage_context": {
             "primary_usage_scenario": "This field is set up at MemTable construction (every time a new MemTable is created — once per DBImpl write-buffer rotation) and read by ApproximateMemoryUsage() (called frequently by DBImpl::MakeRoomForWrite during write batch processing).",
@@ -1161,7 +1164,8 @@
           ],
           "analysis": null,
           "concerns": [],
-          "prerequisites": []
+          "prerequisites": [],
+          "prior_role": "MemTable is LevelDB's in-memory write buffer: every Put lands here first, accumulates until the table hits its size threshold, then flushes to a disk SSTable. Its size is queried often — the flush-decision logic checks it on every write, monitoring queries it on a tick — and historically that query delegated to the embedded `Arena`, which already maintained an atomic counter of total allocated bytes (cheap lock-free reads, blocks-granularity precision). The class therefore carried no side-state about how much had been written; the arena was the source of truth."
         },
         {
           "id": "S1.2",
@@ -1401,11 +1405,11 @@
               }
             ]
           },
-          "summary": "Initializes `tracked_bytes_` to 0 in the constructor and increments it in Add() by the encoded entry length plus a conservative skiplist-node overhead estimate (96 bytes).",
+          "summary": "Every Add() now bumps `tracked_bytes_` by the encoded entry size plus a conservative estimate for the skiplist node Arena will allocate. The explicit `: tracked_bytes_(0)` in the constructor isn't strictly required (default-init zeros it), but the explicit form makes the invariant readable next to its declaration. The increment is non-atomic — MemTable is single-writer by design, so no synchronization is needed.",
           "behavior_delta": {
-            "before": "Add() encoded the entry, allocated arena space, and inserted into the skiplist. The arena tracked its own consumed bytes via its internal atomic counter.",
-            "after": "Same as before, plus: after a successful Insert(), tracked_bytes_ is incremented by `encoded_len + kApproxSkipListNodeOverhead`. tracked_bytes_ is initialized to 0 at construction.",
-            "diff": "Per-Add() side-effect now includes a non-atomic increment to a MemTable member. The increment counts the entry bytes plus a fixed conservative estimate of the skiplist node's allocation, regardless of the actual randomly-chosen node height."
+            "before": "Add() encoded the entry, allocated arena space, inserted into the skiplist, returned. The arena's counter ticked up as a side effect of the allocation, but MemTable itself had nothing to update.",
+            "after": "Same flow, plus a single non-atomic `tracked_bytes_ += encoded_len + kSkipListNodeOverheadEstimate;` line right after the insert. The constant is a per-entry guess at what Arena will allocate for the skiplist node holding the entry pointer.",
+            "diff": "One arithmetic op per Add — negligible. The interesting thing is what's being counted: encoded entry bytes the caller wrote plus a fixed-overhead estimate. This deliberately doesn't track arena waste, padding, or unused space in the last block. The counter and `arena_.MemoryUsage()` will diverge — and that divergence is the whole point of the storyline (S1.3 will read this counter instead of the arena's)."
           },
           "usage_context": {
             "primary_usage_scenario": "Add() is called once per Put/Delete operation through DBImpl::Write. In typical workloads this is the dominant write-path operation — for a busy database, called millions of times per second across the lifetime of a MemTable.",
@@ -1507,7 +1511,8 @@
               "reference_id": "S1.1",
               "summary": "tracked_bytes_ was introduced in S1.1 as a private size_t field with a comment indicating it accumulates 'encoded entry bytes plus skiplist node overhead'. This step makes that comment factual."
             }
-          ]
+          ],
+          "prior_role": "MemTable::Add() is the single ingest path: every Put on the DB ultimately lands here. It takes (sequence_number, key, value, value_type), encodes them into a single contiguous byte buffer in arena-allocated memory, then inserts that buffer into the skiplist keyed on (user-key, seq). Historically it was a pure 'put bytes somewhere' routine — no side state about how much got written — because Arena's atomic counter already gave callers a cheap (if blocks-only) approximation."
         },
         {
           "id": "S1.3",
@@ -1931,11 +1936,11 @@
               }
             ]
           },
-          "summary": "Replaces the body of ApproximateMemoryUsage() to return `tracked_bytes_` instead of `arena_.MemoryUsage()`. One-line behavior change.",
+          "summary": "ApproximateMemoryUsage() now reads `tracked_bytes_` directly — one load, no traversal. The trade-off is that we no longer measure *arena* bytes (slab overhead, free space inside the last block); we measure *entry* bytes that callers actually wrote. For the only known caller — flush-decision throttling — entry bytes is the more honest signal.",
           "behavior_delta": {
-            "before": "ApproximateMemoryUsage() returned `arena_.MemoryUsage()`, which is the atomic count of total bytes the arena has allocated (used + reserved-but-unused inside arena blocks).",
-            "after": "ApproximateMemoryUsage() returns `tracked_bytes_`, which is the sum over all Add() calls of (encoded_len + 96-byte node-overhead estimate).",
-            "diff": "Two semantic shifts: (1) value reflects only inserted entries, not arena waste/overhead; (2) value uses a fixed-overhead estimate rather than the arena's true allocation. The resulting number can be either larger or smaller than the old number depending on workload — for many small entries, the new number is larger (because 96 > average node size); for large values that fill arena blocks tightly, the new number is smaller."
+            "before": "Returned `arena_.MemoryUsage()` — an atomic count of bytes the arena had ever handed out across all blocks. Included slab overhead, padding, and any unused space in the current trailing block.",
+            "after": "Returns `tracked_bytes_` directly. No iteration, no atomic access (the field is non-atomic; only the single writer touches it).",
+            "diff": "Two semantic shifts happen here, not one. (1) **Cost**: O(blocks) → O(1). (2) **Meaning**: arena-allocated bytes → entry bytes (plus the per-entry overhead estimate from S1.2). The returned number will systematically be smaller than the old number — it omits slab waste and unused tail space. For flush throttling, this is arguably the *more* honest signal because it tracks the bytes you'd actually have to flush, not the bytes the arena happened to grab. But any caller that used the old value to size a buffer for compaction would now under-allocate — none exist in this repo, but the comment in S3.1 doesn't flag the shift."
           },
           "usage_context": {
             "primary_usage_scenario": "ApproximateMemoryUsage() is called by DBImpl::MakeRoomForWrite during every write batch to decide whether to rotate the MemTable. It is the trigger for memtable→immutable-memtable→flush state transitions.",
@@ -2032,7 +2037,8 @@
               "reference_id": "S1.2",
               "summary": "tracked_bytes_ is now actively maintained by Add() (S1.2). At this point it accumulates encoded_len + node-overhead estimate per inserted entry."
             }
-          ]
+          ],
+          "prior_role": "ApproximateMemoryUsage() is MemTable's public 'how big is this' accessor. It's called from the flush-decision logic on every write and from monitoring queries every tick, so its cost matters. Before this change, it delegated to `arena_.MemoryUsage()`, which under the hood walked the arena's linked list of allocation blocks summing their `block_used_` fields — O(blocks), where blocks count grows with writes. The 'approximate' in the name was about avoiding *iteration cost*, not about precision; the returned number was exact for arena-allocated bytes."
         }
       ]
     },
@@ -2160,7 +2166,7 @@
             ],
             "supporting_definitions": []
           },
-          "summary": "Adds a test that inserts 100 entries and asserts ApproximateMemoryUsage() returns a strictly larger value after each Add().",
+          "summary": "A monotonicity guard. If a future change skips the increment on some entries — dedup, special-case keys, an early return — the public accessor would silently understate memory. This test plants a tripwire: insert 100 entries, assert the returned value is *strictly* larger after each Add. It would catch that whole class of regression before it ships, even though it doesn't check the *magnitude* of growth.",
           "behavior_delta": {
             "before": "No test directly observed the post-Add() growth of ApproximateMemoryUsage(). Existing tests cover the data-correctness side (Get returns what was Put) but not the size accounting.",
             "after": "On every test run, 100 entries are inserted and the returned size is asserted to grow with each insert.",
@@ -2333,7 +2339,7 @@
             ],
             "supporting_definitions": []
           },
-          "summary": "Adds a test that inserts 1000 small entries and asserts the tracked size is in the range 10K–1M bytes (i.e. 10–1000 bytes per entry).",
+          "summary": "A magnitude check, intentionally loose. Insert 1000 small entries, assert tracked size lands in [10K, 1M]. The author acknowledges in-place that 10–1000 bytes per entry is an enormous band: this catches catastrophic miscounting (counter never incremented; off by 1000×) but not subtle drift. It's a placeholder while a tighter assertion is figured out — at minimum we want a smoke test that the absolute number is in the right ballpark.",
           "behavior_delta": {
             "before": "No prior magnitude check.",
             "after": "On each test run, 1000 entries are added and ApproximateMemoryUsage() is asserted within [10K, 1M] bytes.",
@@ -2487,7 +2493,7 @@
             ],
             "supporting_definitions": []
           },
-          "summary": "Changes the comment above ApproximateMemoryUsage() declaration to reflect the new O(1) implementation.",
+          "summary": "The header comment is updated to match the new reality. The old comment warned readers that ApproximateMemoryUsage() iterates arena blocks and is expensive — true before S1.3, false after. The replacement says 'cached counter updated at write time; O(1)' — true now, but glosses over the *semantic* shift (the counter measures entry bytes, not arena bytes), which a careful reader of S1.3's behavior delta will catch.",
           "behavior_delta": {
             "before": "Comment told readers ApproximateMemoryUsage() iterates arena blocks and is expensive.",
             "after": "Comment says it returns a cached counter and is O(1).",
@@ -2540,7 +2546,8 @@
               "reference_id": "S1.3",
               "summary": "The new O(1) behavior was introduced in S1.3 by replacing arena_.MemoryUsage() with tracked_bytes_."
             }
-          ]
+          ],
+          "prior_role": "The comment above `ApproximateMemoryUsage()` in `memtable.h` has stood since the function was first added — `git blame` shows the language predates the move to atomic-counter-backed arenas. It told callers that the call walks the arena's block list and is therefore something to avoid in tight loops. That guidance is no longer accurate after S1.3 replaced the implementation; the comment is now actively misleading (suggests an O(blocks) cost that doesn't exist)."
         }
       ]
     }
@@ -3509,6 +3516,11 @@
     // Summary (factual, default expanded)
     if (step.summary) {
       sections.push(section('summary', 'summary', '简介 Summary', 'factual', renderInlineMarkdown(step.summary)));
+    }
+
+    // Prior role (background context for changes to existing code, default expanded)
+    if (step.prior_role) {
+      sections.push(section('prior_role', 'prior-role', '前世今生 Prior Role', 'background', renderInlineMarkdown(step.prior_role)));
     }
 
     // Behavior delta (factual, default expanded)

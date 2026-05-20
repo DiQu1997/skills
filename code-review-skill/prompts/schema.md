@@ -87,6 +87,9 @@ inline code-attached annotations and function-level rationale.
 
   "summary": "string (factual: what this step does, 1-3 sentences)",
 
+  // NEW in v0.3 — background context for changes that touch existing code
+  "prior_role": "string | null (2-4 sentences: what the function/class/data structure being modified existed to do, and why it was shaped this way, BEFORE this change — the floor the reader needs before the delta makes sense; null when the step introduces something brand new)",
+
   // NEW in v0.2 — rich context fields
   "behavior_delta": {
     "before": "string (how the code behaved before this change, in plain language)",
@@ -268,6 +271,7 @@ only what's substantive for each step.
 - usage_context (at least primary_usage_scenario)
 
 **Populate when relevant** (may be empty/null):
+- prior_role — populate whenever the change modifies an existing function, class, data structure, or comment; null for steps that introduce something brand new (a new file, a new field with no prior counterpart, etc.)
 - code_view.supporting_definitions
 - FileView.function_purpose (when the code block is function-scoped)
 - FileView.walkthrough (when the code is non-trivial and annotations aid understanding)

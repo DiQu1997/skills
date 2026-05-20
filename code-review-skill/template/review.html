@@ -368,6 +368,9 @@
   .analysis-section.prereq .section-header { background: #f6fbff; }
   .analysis-section.summary     { border-left-color: #6e7781; }
   .analysis-section.summary .section-title { color: #1a1a1a; }
+  .analysis-section.prior-role  { border-left-color: #8b6914; }
+  .analysis-section.prior-role .section-title { color: #6e5009; }
+  .analysis-section.prior-role .section-header { background: #fffaf0; }
   .analysis-section.behavior    { border-left-color: #1f6feb; }
   .analysis-section.behavior .section-title { color: #0550ae; }
   .analysis-section.behavior .section-header { background: #f6fbff; }
@@ -1925,6 +1928,11 @@
     // Summary (factual, default expanded)
     if (step.summary) {
       sections.push(section('summary', 'summary', '简介 Summary', 'factual', renderInlineMarkdown(step.summary)));
+    }
+
+    // Prior role (background context for changes to existing code, default expanded)
+    if (step.prior_role) {
+      sections.push(section('prior_role', 'prior-role', '前世今生 Prior Role', 'background', renderInlineMarkdown(step.prior_role)));
     }
 
     // Behavior delta (factual, default expanded)
