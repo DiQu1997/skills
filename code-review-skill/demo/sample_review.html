@@ -244,6 +244,16 @@
     margin-left: 6px; font-weight: 400;
   }
 
+  /* ========== Syntax highlighting ========== */
+  .sh-kw  { color: #cf222e; font-weight: 600; }   /* keyword */
+  .sh-ty  { color: #8250df; }                       /* type */
+  .sh-str { color: #0a3069; }                       /* string */
+  .sh-num { color: #0550ae; }                       /* number */
+  .sh-cmt { color: #6e7781; font-style: italic; }   /* comment */
+  .sh-pp  { color: #953800; }                       /* preprocessor */
+  .sh-fn  { color: #8250df; }                       /* function call */
+  .sh-op  { color: #24292f; }                       /* operator (subtle) */
+
   /* ========== v0.3/v0.4: Semantic block chunking ========== */
 
   /* --- Preamble region (lines outside any walkthrough chunk) --- */
@@ -2656,6 +2666,146 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ========== Syntax highlighting ==========
+  // Lightweight regex-based highlighter. Works on already-escaped HTML.
+  // Strategy: extract strings/comments into placeholders first (so keywords
+  // inside strings aren't highlighted), highlight the rest, then restore.
+
+  const _SH_KEYWORDS = new Set([
+    // C/C++
+    'auto','break','case','catch','class','const','constexpr','continue',
+    'default','delete','do','else','enum','explicit','export','extern',
+    'false','final','for','friend','goto','if','inline','mutable',
+    'namespace','new','noexcept','nullptr','operator','override',
+    'private','protected','public','register','return','sizeof','static',
+    'static_assert','struct','switch','template','this','throw','true',
+    'try','typedef','typename','union','using','virtual','void','volatile',
+    'while','yield',
+    // JS/TS
+    'async','await','const','debugger','export','extends','function',
+    'import','in','instanceof','let','of','super','typeof','var',
+    // Python
+    'and','as','assert','async','await','class','def','del','elif',
+    'except','finally','from','global','import','in','is','lambda',
+    'nonlocal','not','or','pass','raise','with',
+    // Go
+    'chan','defer','fallthrough','func','go','interface','map','package',
+    'range','select','type',
+    // Rust
+    'crate','dyn','fn','impl','let','loop','match','mod','move','mut',
+    'pub','ref','self','Self','trait','unsafe','use','where',
+    // Java
+    'abstract','boolean','byte','extends','final','implements','interface',
+    'native','package','synchronized','throws','transient',
+  ]);
+
+  const _SH_TYPES = new Set([
+    'int','long','short','float','double','char','bool','unsigned','signed',
+    'int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t',
+    'size_t','ssize_t','ptrdiff_t','uintptr_t',
+    'string','String','str','Vec','Box','Option','Result','HashMap','HashSet',
+    'Array','Map','Set','Promise','Iterator',
+    'std','vector','unordered_map','shared_ptr','unique_ptr',
+    'i8','i16','i32','i64','u8','u16','u32','u64','f32','f64','usize','isize',
+    'any','never','unknown','undefined','null','None','True','False',
+    'number','boolean','object','symbol','bigint',
+  ]);
+
+  // Per-file highlight state (for multi-line comments spanning lines)
+  let _shMultilineComment = false;
+
+  function resetHighlightState() { _shMultilineComment = false; }
+
+  function highlightLine(raw, lang) {
+    if (raw == null) return '';
+    let s = escapeHtml(raw);
+    if (!s.trim()) return s; // blank line
+
+    const tokens = [];
+    let out = '';
+
+    // If we're inside a multi-line comment from a previous line
+    if (_shMultilineComment) {
+      const endIdx = s.indexOf('*/');
+      if (endIdx === -1) {
+        return `<span class="sh-cmt">${s}</span>`;
+      }
+      out += `<span class="sh-cmt">${s.slice(0, endIdx + 2)}</span>`;
+      s = s.slice(endIdx + 2);
+      _shMultilineComment = false;
+      if (!s) return out;
+    }
+
+    // Tokenize: extract strings, comments, preprocessor into placeholders
+    const PH = [];
+    function ph(cls, text) {
+      const idx = PH.length;
+      PH.push(`<span class="${cls}">${text}</span>`);
+      return `\x00${idx}\x00`;
+    }
+
+    // Preprocessor lines (C/C++): #include, #define, etc.
+    if (/^\s*#(include|define|ifdef|ifndef|endif|pragma|if|else|elif|undef|error|warning)/.test(s)) {
+      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    }
+
+    // Python decorator
+    if (/^\s*@\w/.test(s) && (lang === 'python' || lang === 'py')) {
+      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    }
+
+    // Extract strings (double-quoted, single-quoted, backtick)
+    // Work with escaped HTML: &quot; for ", &#39; for '
+    s = s.replace(/&quot;((?:[^&]|&(?!quot;))*)&quot;/g, (m, inner) => ph('sh-str', m));
+    s = s.replace(/&#39;((?:[^&]|&(?!#39;))*)&#39;/g, (m, inner) => ph('sh-str', m));
+    // Raw backtick strings (not HTML-escaped)
+    s = s.replace(/`([^`]*)`/g, (m) => ph('sh-str', escapeHtml(m)));
+
+    // Extract comments
+    // Single-line // comment
+    s = s.replace(/(\/\/.*)$/, (m) => ph('sh-cmt', m));
+    // Single-line # comment (Python, Ruby, shell) — but not preprocessor (already handled)
+    if (['python','py','ruby','rb','shell','bash','sh','yaml','yml','toml'].includes(lang)) {
+      s = s.replace(/(#.*)$/, (m) => ph('sh-cmt', m));
+    }
+    // Multi-line comment start
+    const mlStart = s.indexOf('/*');
+    if (mlStart !== -1) {
+      const mlEnd = s.indexOf('*/', mlStart + 2);
+      if (mlEnd !== -1) {
+        // Whole comment on one line
+        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart, mlEnd + 2)) + s.slice(mlEnd + 2);
+      } else {
+        // Comment starts but doesn't end on this line
+        _shMultilineComment = true;
+        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart));
+      }
+    }
+
+    // Numbers (hex, float, int) — word-boundary safe
+    s = s.replace(/\b(0x[0-9a-fA-F]+[uUlL]*)\b/g, '<span class="sh-num">$1</span>');
+    s = s.replace(/\b(\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*)\b/g, '<span class="sh-num">$1</span>');
+
+    // Keywords and types — match whole words not inside placeholders
+    s = s.replace(/\b([a-zA-Z_]\w*)\b/g, (m, w) => {
+      if (_SH_KEYWORDS.has(w)) return `<span class="sh-kw">${w}</span>`;
+      if (_SH_TYPES.has(w)) return `<span class="sh-ty">${w}</span>`;
+      return m;
+    });
+
+    // Function calls: word followed by (
+    s = s.replace(/\b([a-zA-Z_]\w*)\s*(?=\()/g, (m, fn) => {
+      // Don't re-wrap if already wrapped in a span
+      if (_SH_KEYWORDS.has(fn) || _SH_TYPES.has(fn)) return m;
+      return `<span class="sh-fn">${fn}</span>`;
+    });
+
+    // Restore placeholders
+    s = s.replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+
+    return out + s;
+  }
+
   // Minimal inline-markdown: **bold**, `code`, paragraph breaks (\n\n).
   // Q&A answers may also include fenced ``` blocks and `-` bullet lists,
   // which renderRichMarkdown handles; this lighter function stays
@@ -3256,6 +3406,7 @@
     const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
     const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
     const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
+    const lang = (fv.language || '').toLowerCase();
 
     // v0.3: function_purpose before code
     const fpHtml = renderFunctionPurpose(fv.function_purpose);
@@ -3299,13 +3450,14 @@
       // Render segments
       const segParts = [];
       segments.forEach(seg => {
+        resetHighlightState();
         const rows = seg.rows.map(line => {
           const cls = `line-${line.change}` + (seg.type === 'preamble' ? ' preamble-line' : '');
           const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
           return `<tr class="${cls}">
             <td class="line-num">${line.line_num}</td>
             <td class="change-marker">${marker}</td>
-            <td class="line-content">${escapeHtml(line.content)}</td>
+            <td class="line-content">${highlightLine(line.content, lang)}</td>
           </tr>`;
         }).join('');
 
@@ -3354,6 +3506,7 @@
     }
 
     // --- Fallback: no walkthrough chunks — render flat table as before ---
+    resetHighlightState();
     const parts = [];
     for (let i = 0; i < fv.lines.length; i++) {
       const line = fv.lines[i];
@@ -3362,7 +3515,7 @@
       parts.push(`<tr class="${cls}">
         <td class="line-num">${line.line_num}</td>
         <td class="change-marker">${marker}</td>
-        <td class="line-content">${escapeHtml(line.content)}</td>
+        <td class="line-content">${highlightLine(line.content, lang)}</td>
       </tr>`);
     }
 
