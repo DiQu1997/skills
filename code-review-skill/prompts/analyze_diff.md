@@ -144,6 +144,41 @@ sees the change *in context*, not as an isolated +/- hunk.
 If a step touches multiple files, list each as a separate entry, ordered
 logically (not alphabetically).
 
+#### `walkthrough` chunks — semantic block boundaries
+
+The `walkthrough` array on each FileView serves double duty: its entries
+provide explanations AND define **visual block boundaries** in the HTML.
+The template renders each chunk as a bordered box with its explanation
+attached below, so the reader processes code one meaningful unit at a
+time.
+
+**Chunk by semantic units, not syntax.** Ask: "can I explain what this
+block *does* in one sentence?" If yes, it's a chunk. If the best you can
+say is "these are include statements," it's boilerplate — don't give it
+its own chunk.
+
+Good chunks:
+- A struct/class definition (one concept, one block)
+- A function body (one problem, one block)
+- A logical phase within a long function (validation → core logic → cleanup)
+- A doc-comment paired with the code it describes
+
+NOT chunks (leave uncovered — renders as dimmed preamble):
+- `#include` / `import` / `using` blocks
+- Header guards, `#pragma once`
+- Bare namespace open/close braces
+- Trivial constant declarations with no domain significance
+
+Lines outside any chunk's `[line_start, line_end]` range render as dimmed
+preamble in the HTML — visible but visually de-emphasized. You do NOT
+need to "cover" every line. Uncovered boilerplate naturally fades to the
+background.
+
+**Granularity**: match chunk size to explanation depth. A 3-field struct
+needs one chunk, not three. A 40-line function with distinct phases may
+warrant 2-3 sub-chunks. If you can't write a substantive paragraph for a
+chunk's `explanation`, it's too small — merge with an adjacent one.
+
 #### `supporting_definitions`
 0-3 entries showing code referenced by `primary_changes` that the
 reviewer needs to understand the change but isn't itself modified. Each
