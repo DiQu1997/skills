@@ -3,9 +3,9 @@ name: code-review-narrative
 description: Analyzes a git diff or PR and produces an interactive HTML review document organized by logical groups (storylines) rather than alphabetically by file. Each storyline contains step-by-step changes with full code context, prerequisite reminders, factual context (behavior delta, callers, test coverage, codebase patterns, alternative approaches), and analytical commentary (summary/evaluation/suggestions/analysis). Use when a user wants help reviewing a PR, commit range, or git diff in a structured way that surfaces logical units of change rather than file-by-file. Triggers include "review this PR", "analyze this diff", "help me review", or being given a diff and asked to walk through it.
 ---
 
-# code-review-narrative skill (v0.2)
+# code-review-narrative skill (v0.3)
 
-Schema v0.2 — see `prompts/schema.md` for full spec. Adds rich factual context per step (behavior delta, callers, test coverage, codebase patterns, alternatives) and storyline-level overview (purpose, architectural context, change overview, reading roadmap).
+Schema v0.3 — see `prompts/schema.md` for full spec. Builds on v0.2's rich factual context per step (behavior_delta, usage_context, test_coverage, codebase_patterns, alternative_approaches) and storyline-level overview (purpose, architectural_context, change_overview, reading_roadmap). v0.3 adds `prior_role` (what an existing function/class did before the change), `function_purpose` and `walkthrough` on FileView (function-level rationale and code-attached annotations), and `concerns` (explicit issues with severity).
 
 
 ## Purpose
@@ -97,23 +97,43 @@ Limit to 0-3 supporting definitions per step. More is noise.
 
 For both, fill in `lines` with `{line_num, content, change}` for each line, where `change` is `added | removed | unchanged`.
 
-### 6. For each step, write the analytical content
+**function_purpose** (v0.3, optional, on FileView): when the code block is function-scoped, populate the function's motivation — `problem_solved` ("the system needs Y; this function provides Y") and `without_it` ("if this didn't exist, callers would..."). Use `structure: "single"` for one coherent purpose, `"multi_section"` with `sections[]` for long multi-concern functions.
 
-Each step gets four pieces of meta-content:
+**walkthrough** (v0.3, optional, on FileView): sparse code-attached annotations that help the reader connect the +/- lines to the surrounding logic. For each candidate chunk ask "does understanding this chunk help understand the change?" — if yes (changed lines, or unchanged code the change interacts with), annotate with `{line_start, line_end, chunk_role, explanation}`. Skip surrounding context that's unrelated to the change. Aim for 2-5 annotations per file, not one per line.
+
+### 6. For each step, build factual context (research-assistant work)
+
+These fields deliver the context a reviewer needs to judge the change independently. Populate from grep + repo reading — don't skip because it's tedious.
+
+**behavior_delta** (required): `before` / `after` / `diff` in plain language. `diff` is the meaningful functional delta, not the text diff.
+
+**prior_role** (v0.3, populate whenever the step modifies existing code; null for brand-new additions): 2-4 sentences answering "what did this function/class/struct exist to do, why was it shaped this way, and what did callers behaviorally rely on?" — the floor the reader needs before the delta makes sense.
+
+**usage_context**: `primary_usage_scenario` narrative + `callers[]` (file:line + snippet + why-called) + `call_patterns[]` (observed patterns across callers) + `implicit_dependencies[]` (other code relying on specific behavior, not just signature).
+
+**test_coverage**: `covered_by[]` (existing tests exercising this code) + `added_in_this_pr[]` (tests added here) + `not_covered[]` (specific untested cases, concrete).
+
+**codebase_patterns**: `similar_changes_elsewhere[]` (file:line + analogy) + `convention_alignment` prose + `deviations` (if any, with what's visible from code about why).
+
+**alternative_approaches[]**: at least one for non-trivial steps. Mark `evidence_kind: "evidenced"` (visible in code/comments) vs `"analytical"` (reader-side reasoning). Give `tradeoff_vs_chosen` for each.
+
+### 7. For each step, write analytical content (senior-reviewer work)
 
 **summary** (factual, required): One or two sentences describing what this step does. Should be uncontroversial — describes the change without judgment.
 
-**evaluation** (opinion, optional): Quality assessment. Is the change well-implemented? Are there code smells? Is the abstraction right? May be null if no notable evaluation.
+**evaluation** (opinion, optional): Quality assessment — naming, abstraction, consistency with codebase, error handling, clarity, structural soundness. Set null if nothing notable. Can be multi-paragraph when substantive.
 
-**suggestions** (action items, optional): Concrete things the reviewer should check or consider. Each item is one bullet. Examples: "Verify the new constant is consistent with similar constants nearby", "This loop runs in O(n) — confirm it's not on a hot path", "Consider adding a test for the empty-input case". May be empty array.
+**suggestions** (action items, optional): Concrete things the reviewer should check or consider. Each item is one bullet. Examples: "Verify the new constant is consistent with similar constants nearby", "This loop runs in O(n) — confirm it's not on a hot path". Empty array if nothing concrete.
 
-**analysis** (deep technical, optional): Deeper reasoning about implications — performance, edge cases, interaction with other systems, alternative approaches. May be null. This is where you raise concerns the reviewer might miss without thinking carefully.
+**analysis** (deep technical, optional): Deeper reasoning about implications — performance, race conditions, edge cases, system-wide ripples. Set null for mechanical changes (rename, comment fix).
 
-The separation matters for **trust calibration**: readers can take `summary` at face value but should treat `evaluation`/`suggestions`/`analysis` as analytical claims to be checked.
+**concerns** (v0.3, optional, structured): explicit issues with `{concern, evidence, severity: high|medium|low|informational}`. Use this when you have a specific concern grounded in evidence, rather than burying it in prose `analysis`.
+
+The separation matters for **trust calibration**: readers can take `summary` and the factual context (Phase 6) at face value but should treat `evaluation` / `suggestions` / `analysis` / `concerns` as analytical claims to be checked.
 
 Write in the language the user is using (English or 中文). The template renders Chinese section labels (前情提要/简介/评价/建议/分析) but content can be in either language.
 
-### 7. Identify prerequisites
+### 8. Identify prerequisites
 
 For each step, identify whether the reader needs to recall something from earlier to understand the current step. Common cases:
 - A symbol introduced in an earlier step is now being used
@@ -127,15 +147,19 @@ For each prerequisite, populate:
 
 Aim for prerequisites to be informative without being patronizing. Don't explain things the reviewer obviously knows. Do remind them of specifics they might have read 5 minutes ago and forgotten.
 
-### 8. Validate and emit JSON
+### 9. Validate and emit JSON
 
 Construct the final JSON conforming to the schema in `prompts/schema.md`. Validate that:
+- `schema_version` is `"0.3"`
 - Every `id` is unique
 - Every `prerequisite.reference_id` of kind `prior_step` resolves to an actual step
 - Every `code_view.primary_changes` has at least one entry (otherwise the step has no code, which is suspicious)
+- Every step has `behavior_delta` populated
+- For every FileView with a `walkthrough[]`, each annotation's `line_start`/`line_end` falls within `context_start_line..context_end_line` and `line_start <= line_end`
+- For every FileView with `function_purpose`, the populated subset matches `structure`: `structure: "single"` uses `problem_solved` + `without_it`; `structure: "multi_section"` uses `sections[]`
 - All required fields are present
 
-### 9. Render to HTML
+### 10. Render to HTML
 
 Run `python3 render.py <review.json> <review.html>`. The script reads
 `template/review.html`, replaces `/*REVIEW_DATA_PLACEHOLDER*/` with the JSON,
@@ -144,7 +168,7 @@ and writes the self-contained HTML.
 Default output path: `review.html` in the directory the user specified, or
 the current working directory.
 
-### 10. Open in live mode (default behavior)
+### 11. Open in live mode (default behavior)
 
 Immediately after rendering, run:
 
@@ -161,7 +185,7 @@ written to a sidecar `<basename>.followups.json` next to the HTML.
 
 Tell the user the URL (e.g. `http://127.0.0.1:8765/`) and that the live
 badge in the upper-left subtitle confirms live mode is active. If they
-prefer a static-only file with no Q&A, they can skip step 10 and open the
+prefer a static-only file with no Q&A, they can skip step 11 and open the
 HTML directly via `file://`.
 
 To stop the server later: `python3 server/live_review.py --stop` (kills all
@@ -172,9 +196,10 @@ available, fall back to telling the user to open the HTML directly.
 
 ## Constraints
 
-- **No fabrication**: don't invent author intent. If a change's purpose is unclear, mark the storyline confidence as `medium` or `low` and explain in `confidence_reasoning`.
-- **Trust calibration**: be honest in `evaluation` and `analysis`. If something looks wrong, say so. If something looks fine, don't pad with vague concerns.
-- **Conciseness**: each `summary` should be 1-3 sentences. `evaluation` and `analysis` can be longer but should still be focused. The reviewer will read this in flow; long-windedness wastes their attention.
+- **No fabrication**: don't invent author intent. If a change's purpose is unclear, mark the storyline confidence as `medium` or `low` and explain in `confidence_reasoning`. For alternatives the author didn't visibly consider, mark `evidence_kind: "analytical"` — don't claim the author considered them.
+- **Trust calibration**: be honest in `evaluation`, `analysis`, and `concerns`. If something looks wrong, say so. If something looks fine, don't pad with vague concerns.
+- **Populate factual context** (`prior_role`, `usage_context`, `test_coverage`, `codebase_patterns`, `alternative_approaches`): do the grep/repo work. Leaving these empty because it was tedious is the most common failure of this skill — it strands the reviewer back at "I have to go grep" which the document was supposed to spare them.
+- **Conciseness**: each `summary` should be 1-3 sentences. `evaluation`, `analysis`, `change_overview` can be longer but should still be focused. The reviewer will read this in flow; long-windedness wastes their attention.
 - **Single output file**: produce one HTML file. Don't split into multiple files; don't reference external resources; don't require a server.
 - **Schema compliance**: the JSON must conform to `prompts/schema.md` exactly. The template depends on this contract.
 
