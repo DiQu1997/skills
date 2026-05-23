@@ -1,4 +1,4 @@
-# Analyze Diff — Prompt Template (v0.2)
+# Analyze Diff — Prompt Template (v0.3)
 
 Use this prompt for the analysis phase of the workflow in `SKILL.md`.
 
@@ -64,12 +64,14 @@ narrative fields should *teach*.
 
 ## Your output
 
-A single JSON document conforming to schema v0.2. Includes per-storyline
-deep context (`purpose`, `architectural_context`, `change_overview`,
-`reading_roadmap`) and per-step rich factual context (`behavior_delta`,
-`usage_context`, `test_coverage`, `codebase_patterns`,
-`alternative_approaches`) alongside the existing analytical fields
-(`summary`, `evaluation`, `suggestions`, `analysis`).
+A single JSON document conforming to schema v0.3 (`schema_version: "0.3"`).
+Includes per-storyline deep context (`purpose`, `architectural_context`,
+`change_overview`, `reading_roadmap`) and per-step rich factual context
+(`prior_role`, `behavior_delta`, `usage_context`, `test_coverage`,
+`codebase_patterns`, `alternative_approaches`), optional FileView-level
+rationale and annotations (`function_purpose`, `walkthrough`), alongside
+the analytical fields (`summary`, `evaluation`, `suggestions`, `analysis`,
+`concerns`).
 
 ## Workflow phases
 
@@ -148,6 +150,33 @@ logically (not alphabetically).
 0-3 entries showing code referenced by `primary_changes` that the
 reviewer needs to understand the change but isn't itself modified. Each
 gets a `why_included` explanation.
+
+#### `function_purpose` (v0.3, optional, per FileView)
+Populate when the code block is function-scoped. Two fields force articulation
+of non-obvious value:
+- `problem_solved`: motivation — "the system needs Y; this function provides Y"
+- `without_it`: counter-factual — "if this didn't exist, callers would pay
+  cost / risk error / be unable to do thing"
+
+For a function with one coherent purpose use `structure: "single"` with
+`problem_solved` + `without_it`. For long, historically-merged, or
+multi-concern functions use `structure: "multi_section"` with `sections[]`
+reflecting the function's logical structure (parsing 1-80, execution 81-200,
+etc.) — not necessarily aligned with diff hunks.
+
+#### `walkthrough` (v0.3, optional, per FileView)
+Sparse code-attached annotations. **Change-centric with related unchanged
+code included**: for each candidate chunk ask "does understanding this
+chunk help the reader understand the change?"
+
+- Yes (the chunk is a +/- change, or unchanged code the change interacts with)
+  → annotate with `{line_start, line_end, chunk_role, explanation}`
+- No (surrounding context unrelated to the change's logic) → skip
+
+A 30-line function with a 5-line change typically gets 2-3 annotations. Avoid
+both failure modes: annotating every line (noise) and annotating only +/-
+lines (reader can't connect change to surrounding logic). `line_start` /
+`line_end` must fall within `context_start_line..context_end_line`.
 
 ### Phase 6: Build factual context for each step
 
@@ -267,10 +296,25 @@ Concrete beats generic. Empty array is fine.
 #### `analysis` (optional, deep)
 Deeper technical reasoning. Performance, race conditions, edge cases,
 system-wide ripples, maintenance implications, future-extension
-considerations. Mark concerns with the evidence backing them.
+considerations.
 
 For mechanical changes (rename, comment fix), set null. For non-trivial
 changes, expect this to be substantive — multiple paragraphs is fine.
+
+#### `concerns` (v0.3, optional, structured)
+Specific issues that the reviewer should be aware of, each backed by
+evidence visible in the code or surrounding context. Use this in
+preference to burying issues inside `analysis` prose:
+
+- `concern`: the specific issue or risk, one sentence
+- `evidence`: what in the code/context supports it (file:line, behavior
+  observed, etc.) — not "intuition"
+- `severity`: `high` (correctness/safety), `medium` (likely bug or
+  significant smell), `low` (minor), `informational` (worth noting, not
+  blocking)
+
+Empty array is fine. Don't manufacture concerns to fill space; don't
+downgrade real ones to `informational` to soften them.
 
 ### Phase 8: Identify prerequisites
 
@@ -281,10 +325,21 @@ details are exactly what readers forget.
 
 ### Phase 9: Validate and emit JSON
 
+- `schema_version` is `"0.3"`
 - Every `id` unique
-- Every `prior_step` `reference_id` resolves
+- Every `prior_step` `reference_id` resolves to an actual step
 - Every required field present
 - `behavior_delta` populated for every step
+- `prior_role` populated for every step that modifies existing code
+  (null only when the step introduces something brand new)
+- For every FileView with a `walkthrough[]`, each annotation has
+  `line_start <= line_end` and both fall within
+  `context_start_line..context_end_line`
+- For every FileView with `function_purpose`, the populated subset matches
+  `structure`: `"single"` uses `problem_solved` + `without_it`;
+  `"multi_section"` uses `sections[]`
+- For every `concerns[]` entry: `severity` is one of
+  `high|medium|low|informational` and `evidence` is non-empty
 - All optional fields either populated meaningfully or set to null/empty
 
 Emit one JSON document per the schema. No prose around it. No code
@@ -305,8 +360,10 @@ A reviewer reading the document should be able to:
    covers it)
 6. **Reason about alternatives** (because `alternative_approaches`
    covers it)
-7. **Have raised concerns to evaluate** (because `evaluation`,
-   `suggestions`, `analysis` cover them)
+7. **See the floor under any modified code** (because `prior_role`
+   covers what existed before the delta)
+8. **Have raised concerns to evaluate** (because `evaluation`,
+   `suggestions`, `analysis`, and structured `concerns` cover them)
 
 If the reviewer would still need to grep around the codebase to feel
 confident, you didn't research deep enough.

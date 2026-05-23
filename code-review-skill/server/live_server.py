@@ -123,45 +123,216 @@ def find_step(step_id: str):
     return None, None
 
 
-def render_code_view(code_view: dict) -> str:
-    """Render code_view's primary_changes as a readable text block."""
+def _render_file_view(fv: dict, why_included: str = None) -> list:
+    """Render a single FileView (primary_change or supporting_definition).
+    Returns lines (no trailing newline) ready to be joined."""
     parts = []
-    for fv in code_view.get("primary_changes", []):
-        parts.append(f"--- {fv['file']} (lines {fv['context_start_line']}–{fv['context_end_line']}, {fv['language']}) ---")
-        for line in fv.get("lines", []):
-            marker = "+" if line["change"] == "added" else ("-" if line["change"] == "removed" else " ")
-            parts.append(f"{line['line_num']:5d} {marker} {line['content']}")
-        # Walkthrough annotations on this file
-        wt = fv.get("walkthrough") or []
-        if wt:
-            parts.append("")
-            parts.append("[walkthrough annotations on this file]")
-            for ann in wt:
-                rng = f"L{ann['line_start']}" if ann["line_start"] == ann["line_end"] else f"L{ann['line_start']}–{ann['line_end']}"
-                parts.append(f"  {rng} ({ann.get('chunk_role','')}): {ann.get('explanation','')}")
+    header = f"--- {fv['file']} (lines {fv['context_start_line']}–{fv['context_end_line']}, {fv['language']}) ---"
+    parts.append(header)
+    if why_included:
+        parts.append(f"[supporting definition — {why_included}]")
+
+    fp = fv.get("function_purpose")
+    if fp:
+        name = fp.get("function_name") or "(unnamed block)"
+        parts.append(f"[function_purpose for {name}]")
+        if fp.get("structure") == "multi_section":
+            for sec in fp.get("sections", []) or []:
+                parts.append(f"  • L{sec.get('line_start')}–{sec.get('line_end')} {sec.get('section_name','')}: "
+                             f"problem={sec.get('problem_solved','')} | without_it={sec.get('without_it','')}")
+        else:
+            if fp.get("problem_solved"):
+                parts.append(f"  • problem_solved: {fp['problem_solved']}")
+            if fp.get("without_it"):
+                parts.append(f"  • without_it:     {fp['without_it']}")
+
+    for line in fv.get("lines", []):
+        marker = "+" if line["change"] == "added" else ("-" if line["change"] == "removed" else " ")
+        parts.append(f"{line['line_num']:5d} {marker} {line['content']}")
+
+    wt = fv.get("walkthrough") or []
+    if wt:
         parts.append("")
+        parts.append("[walkthrough annotations on this file]")
+        for ann in wt:
+            rng = (f"L{ann['line_start']}" if ann["line_start"] == ann["line_end"]
+                   else f"L{ann['line_start']}–{ann['line_end']}")
+            parts.append(f"  {rng} ({ann.get('chunk_role','')}): {ann.get('explanation','')}")
+    return parts
+
+
+def render_code_view(code_view: dict) -> str:
+    """Render primary_changes + supporting_definitions as a readable text block."""
+    parts = []
+    for fv in code_view.get("primary_changes", []) or []:
+        parts.extend(_render_file_view(fv))
+        parts.append("")
+    sd = code_view.get("supporting_definitions") or []
+    if sd:
+        parts.append("## Supporting definitions (referenced by the change, not modified)")
+        for fv in sd:
+            parts.extend(_render_file_view(fv, why_included=fv.get("why_included")))
+            parts.append("")
     return "\n".join(parts)
 
 
-def render_step_context(storyline: dict, step: dict, prior_qas: list) -> str:
-    """Build the context block fed to the LLM."""
-    bd = step.get("behavior_delta") or {}
-    out = []
-    out.append(f"# Storyline: {storyline.get('title','')}")
+def _bullets(items, prefix="- "):
+    """Format a list of strings as bullets; returns lines or [] if empty."""
+    return [f"{prefix}{x}" for x in items if x]
+
+
+def _render_storyline_context(storyline: dict) -> list:
+    """Storyline-level header: purpose, architecture, overview, roadmap."""
+    out = [f"# Storyline: {storyline.get('title','')} ({storyline.get('id','')})"]
+    if storyline.get("summary"):
+        out.append(f"\n_{storyline['summary']}_")
+
+    purpose = storyline.get("purpose") or {}
+    if purpose.get("stated") or purpose.get("evident") or purpose.get("discrepancy"):
+        out.append("\n## Purpose")
+        if purpose.get("stated"):      out.append(f"- Stated:      {purpose['stated']}")
+        if purpose.get("evident"):     out.append(f"- Evident:     {purpose['evident']}")
+        if purpose.get("discrepancy"): out.append(f"- Discrepancy: {purpose['discrepancy']}")
+
+    arch = storyline.get("architectural_context") or {}
+    if arch.get("system_role") or arch.get("data_flow") or arch.get("involved_modules"):
+        out.append("\n## Architectural context")
+        if arch.get("system_role"):
+            out.append(f"- System role: {arch['system_role']}")
+        if arch.get("involved_modules"):
+            out.append("- Involved modules:")
+            for m in arch["involved_modules"]:
+                out.append(f"  • {m.get('module','?')}: {m.get('role_in_storyline','')}")
+        if arch.get("data_flow"):
+            out.append(f"- Data flow: {arch['data_flow']}")
+        diagram = arch.get("diagram") or {}
+        if diagram.get("type") and diagram["type"] != "none" and diagram.get("content"):
+            out.append(f"- Diagram ({diagram['type']}):")
+            out.append("```")
+            out.append(diagram["content"])
+            out.append("```")
+
     if storyline.get("change_overview"):
-        out.append(f"\n## Storyline overview\n{storyline['change_overview']}")
+        out.append(f"\n## Change overview\n{storyline['change_overview']}")
+    if storyline.get("reading_roadmap"):
+        out.append(f"\n## Reading roadmap\n{storyline['reading_roadmap']}")
+    return out
+
+
+def _render_step_factual_context(step: dict) -> list:
+    """Step-level factual context (research-assistant fields)."""
+    out = []
+    if step.get("prior_role"):
+        out.append(f"\n## Prior role (what existed before this change)\n{step['prior_role']}")
+
+    bd = step.get("behavior_delta") or {}
+    if bd.get("before") or bd.get("after") or bd.get("diff"):
+        out.append("\n## Behavior delta")
+        if bd.get("before"): out.append(f"- Before: {bd['before']}")
+        if bd.get("after"):  out.append(f"- After:  {bd['after']}")
+        if bd.get("diff"):   out.append(f"- Diff:   {bd['diff']}")
+
+    uc = step.get("usage_context") or {}
+    has_uc = uc.get("primary_usage_scenario") or uc.get("callers") or uc.get("call_patterns") or uc.get("implicit_dependencies")
+    if has_uc:
+        out.append("\n## Usage context")
+        if uc.get("primary_usage_scenario"):
+            out.append(f"- Primary usage scenario: {uc['primary_usage_scenario']}")
+        if uc.get("callers"):
+            out.append("- Callers:")
+            for c in uc["callers"]:
+                out.append(f"  • {c.get('file','?')}:{c.get('line','?')} — {c.get('context','')}")
+                if c.get("snippet"):
+                    out.append(f"      `{c['snippet']}`")
+        if uc.get("call_patterns"):
+            out.append("- Call patterns:")
+            out.extend(_bullets(uc["call_patterns"], prefix="  • "))
+        if uc.get("implicit_dependencies"):
+            out.append("- Implicit dependencies:")
+            out.extend(_bullets(uc["implicit_dependencies"], prefix="  • "))
+
+    tc = step.get("test_coverage") or {}
+    has_tc = tc.get("covered_by") or tc.get("added_in_this_pr") or tc.get("not_covered")
+    if has_tc:
+        out.append("\n## Test coverage")
+        if tc.get("covered_by"):
+            out.append("- Covered by existing tests:")
+            for t in tc["covered_by"]:
+                out.append(f"  • {t.get('file','?')} :: {t.get('test_name','?')} — {t.get('what_it_tests','')}")
+        if tc.get("added_in_this_pr"):
+            out.append("- Added in this PR:")
+            for t in tc["added_in_this_pr"]:
+                out.append(f"  • {t.get('file','?')} :: {t.get('test_name','?')} — {t.get('what_it_tests','')}")
+        if tc.get("not_covered"):
+            out.append("- Not covered:")
+            out.extend(_bullets(tc["not_covered"], prefix="  • "))
+
+    cp = step.get("codebase_patterns") or {}
+    has_cp = cp.get("convention_alignment") or cp.get("deviations") or cp.get("similar_changes_elsewhere")
+    if has_cp:
+        out.append("\n## Codebase patterns")
+        if cp.get("convention_alignment"):
+            out.append(f"- Convention alignment: {cp['convention_alignment']}")
+        if cp.get("deviations"):
+            out.append(f"- Deviations: {cp['deviations']}")
+        if cp.get("similar_changes_elsewhere"):
+            out.append("- Similar changes elsewhere:")
+            for s in cp["similar_changes_elsewhere"]:
+                out.append(f"  • {s.get('file','?')}:{s.get('line','?')} — {s.get('note','')}")
+
+    alts = step.get("alternative_approaches") or []
+    if alts:
+        out.append("\n## Alternative approaches")
+        for a in alts:
+            out.append(f"- ({a.get('evidence_kind','?')}) {a.get('approach','')}")
+            if a.get("tradeoff_vs_chosen"):
+                out.append(f"    tradeoff: {a['tradeoff_vs_chosen']}")
+    return out
+
+
+def _render_step_analysis(step: dict) -> list:
+    """Step-level analytical content (senior-reviewer fields)."""
+    out = []
+    if step.get("evaluation"):
+        out.append(f"\n## Existing evaluation\n{step['evaluation']}")
+    if step.get("analysis"):
+        out.append(f"\n## Existing analysis\n{step['analysis']}")
+    if step.get("suggestions"):
+        out.append("\n## Existing suggestions")
+        out.extend(_bullets(step["suggestions"]))
+    concerns = step.get("concerns") or []
+    if concerns:
+        out.append("\n## Concerns")
+        for c in concerns:
+            sev = c.get("severity", "?")
+            out.append(f"- [{sev}] {c.get('concern','')}")
+            if c.get("evidence"):
+                out.append(f"    evidence: {c['evidence']}")
+    return out
+
+
+def render_step_context(storyline: dict, step: dict, prior_qas: list) -> str:
+    """Build the context block fed to the LLM.
+
+    Mirrors what the reader sees in the right pane: storyline-level
+    purpose/architecture/overview, step-level factual context
+    (prior_role, behavior_delta, usage_context, test_coverage,
+    codebase_patterns, alternative_approaches), then existing analytical
+    content (evaluation, analysis, suggestions, concerns), then the code
+    block with walkthrough + function_purpose annotations.
+    """
+    out = _render_storyline_context(storyline)
+
     out.append(f"\n# Step: {step.get('title','')} ({step.get('id','')})")
     if step.get("summary"):
         out.append(f"\n## Step summary\n{step['summary']}")
-    if bd.get("before") or bd.get("after") or bd.get("diff"):
-        out.append("\n## Behavior delta")
-        if bd.get("before"):  out.append(f"- Before: {bd['before']}")
-        if bd.get("after"):   out.append(f"- After:  {bd['after']}")
-        if bd.get("diff"):    out.append(f"- Diff:   {bd['diff']}")
-    if step.get("evaluation"):
-        out.append(f"\n## Existing evaluation\n{step['evaluation']}")
+
+    out.extend(_render_step_factual_context(step))
+    out.extend(_render_step_analysis(step))
+
     out.append("\n## Code under discussion")
     out.append(render_code_view(step.get("code_view", {})))
+
     if prior_qas:
         out.append("## Prior follow-up Q&A on this step (most recent last)")
         for qa in prior_qas[-5:]:  # cap the trailing context at 5
