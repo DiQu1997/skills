@@ -50,13 +50,15 @@ def pid_file(port): return PID_DIR / f"live-review-{port}.pid"
 def log_file(port): return PID_DIR / f"live-review-{port}.log"
 
 
-def start_in_background(html, port, cli, model, repo, bare):
+def start_in_background(html, port, cli, model, repo, bare, max_concurrent):
     if not LIVE_SERVER.exists():
         sys.exit(f"live_server.py not found at {LIVE_SERVER}")
     cmd = [sys.executable, "-u", str(LIVE_SERVER), str(html), "--port", str(port), "--cli", cli]
     if model: cmd.extend(["--model", model])
     if repo:  cmd.extend(["--repo", str(repo)])
     if bare:  cmd.append("--bare")
+    if max_concurrent is not None:
+        cmd.extend(["--max-concurrent", str(max_concurrent)])
     log = open(log_file(port), "w", encoding="utf-8")
     kwargs = {"stdout": log, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
     if os.name == "posix":
@@ -125,7 +127,7 @@ def cmd_start(args):
         print(f"[live-review] port {args.port} busy with another file; using {port} instead")
 
     # 3. Start the server in the background.
-    pid = start_in_background(html, port, args.cli, args.model, args.repo, args.bare)
+    pid = start_in_background(html, port, args.cli, args.model, args.repo, args.bare, args.max_concurrent)
     info = wait_for_alive(port)
     if info is None:
         sys.exit(
@@ -202,11 +204,13 @@ def parse_args():
     )
     p.add_argument("html", type=Path, nargs="?", help="Path to the rendered review HTML.")
     p.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Preferred port (default {DEFAULT_PORT}).")
-    p.add_argument("--cli", choices=["claude", "codex"], default="claude")
+    p.add_argument("--cli", choices=["codex", "claude"], default="codex")
     p.add_argument("--model", default=None, help="Model id passed through to the CLI.")
     p.add_argument("--repo", type=Path, default=None, help="Working dir for the CLI subprocess.")
     p.add_argument("--bare", action="store_true",
-                   help="Pass --bare to claude. Requires ANTHROPIC_API_KEY env (claude --bare does not read OAuth/keychain).")
+                   help="Pass --bare to claude (only meaningful with --cli claude). Requires ANTHROPIC_API_KEY env.")
+    p.add_argument("--max-concurrent", type=int, default=None,
+                   help="Cap on concurrent /ask subprocesses (default: server's own default).")
     p.add_argument("--no-open", action="store_true", help="Do not auto-open a browser tab.")
     p.add_argument("--status", action="store_true", help="List running live-review servers and exit.")
     p.add_argument("--stop", action="store_true",
