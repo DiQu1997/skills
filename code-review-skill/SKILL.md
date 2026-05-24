@@ -191,8 +191,14 @@ HTML directly via `file://`.
 To stop the server later: `python3 server/live_review.py --stop` (kills all
 live-review servers) or `--stop <html>` (just one).
 
-The server requires `claude` (or `--cli codex`) on PATH. If neither is
-available, fall back to telling the user to open the HTML directly.
+The server defaults to `codex exec` (use `--cli claude` for `claude -p`
+instead). The chosen CLI must be on PATH; if neither is available, fall
+back to telling the user to open the HTML directly.
+
+The server caps concurrent `/ask` subprocesses (default 2) and rejects
+duplicate questions for the same step with a 429. It binds 127.0.0.1
+only and **must not** be exposed beyond loopback — `/ask` runs the CLI
+on user-supplied input, so external exposure is a cost/exec risk.
 
 ## Constraints
 
@@ -218,7 +224,7 @@ available, fall back to telling the user to open the HTML directly.
 - `prompts/schema.md` — full JSON schema specification
 - `template/review.html` — the HTML/CSS/JS template (with live-mode chat input + Q&A section)
 - `render.py` — helper script to inject JSON into template
-- `server/live_server.py` — companion HTTP server that powers live-mode Q&A (`/__alive`, `/followups`, `/ask` → `claude -p` or `codex exec`); falls back to extracting `REVIEW_DATA` from the HTML if no sibling JSON is found
+- `server/live_server.py` — companion HTTP server that powers live-mode Q&A (`/__alive`, `/followups`, `/ask` → `codex exec` by default, or `claude -p` via `--cli claude`); enforces a global concurrency cap and per-step in-flight gate; falls back to extracting `REVIEW_DATA` from the HTML if no sibling JSON is found
 - `server/live_review.py` — wrapper that starts (or reuses) `live_server.py` in the background and opens the browser; supports `--status` and `--stop`
 - `server/prompts/followup_prompt.md` — prompt template fed to the CLI for each follow-up question
 - `demo/sample_review.json` — reference example of valid JSON
