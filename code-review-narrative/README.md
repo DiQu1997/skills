@@ -25,11 +25,14 @@ A single self-contained HTML file. Three-pane layout:
   Step view shows full enclosing-function code context with optional
   `function_purpose` rationale and inline `walkthrough` annotations, plus
   supporting definitions.
-- **Right**: Collapsible context + analysis sections per step.
-  - *Context* (factual): 前情提要 · Prior role · Behavior delta · Usage context
-    (callers, call patterns, implicit deps) · Test coverage · Codebase patterns
-    · Alternative approaches
-  - *Analysis* (opinion): 简介 · 评价 · 建议 · 分析 · Concerns (with severity)
+- **Right**: Collapsible context + analysis sections per step. Section
+  labels honor `metadata.locale` (`"en"` default → Prerequisites /
+  Summary / Prior Role / ...; `"zh"` → 前情提要 / 简介 / 前世今生 / ...).
+  - *Context* (factual): Prerequisites · Prior Role · Behavior Delta ·
+    Usage Context (callers, call patterns, implicit deps) · Test Coverage
+    · Codebase Patterns · Alternative Approaches
+  - *Analysis* (opinion): Summary · Evaluation · Suggestions · Analysis ·
+    Concerns (with severity)
 
 Section collapse state persists across step navigation. Default-collapsed
 sections (Test coverage, Codebase patterns, Alternatives) keep the right
@@ -47,7 +50,7 @@ open demo/sample_review.html  # or xdg-open / open in browser manually
 ## Files
 
 ```
-code-review-skill/
+code-review-narrative/
 ├── README.md
 ├── SKILL.md                     ← skill definition
 ├── render.py                    ← inject JSON → HTML

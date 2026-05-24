@@ -131,7 +131,7 @@ These fields deliver the context a reviewer needs to judge the change independen
 
 The separation matters for **trust calibration**: readers can take `summary` and the factual context (Phase 6) at face value but should treat `evaluation` / `suggestions` / `analysis` / `concerns` as analytical claims to be checked.
 
-Write in the language the user is using (English or 中文). The template renders Chinese section labels (前情提要/简介/评价/建议/分析) but content can be in either language.
+Write in the language the user is using (English or 中文). Set `metadata.locale: "en"` (default) for English right-pane section labels (Prerequisites/Summary/Prior Role/...) or `"zh"` for Chinese labels (前情提要/简介/前世今生/...). Content language is independent — you can pair English content with Chinese labels or vice versa, but matching them reads more naturally.
 
 ### 8. Identify prerequisites
 

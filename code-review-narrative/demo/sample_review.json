@@ -5,7 +5,8 @@
     "base_commit": "a5394e1...",
     "head_commit": "b7f2c8d...",
     "title": "Track MemTable size at write time + tests + comment cleanup",
-    "generated_at": "2026-04-26T00:00:00Z"
+    "generated_at": "2026-04-26T00:00:00Z",
+    "locale": "zh"
   },
   "summary": {
     "one_line": "Replace on-demand arena memory query with a write-time counter, plus tests and a comment cleanup.",
