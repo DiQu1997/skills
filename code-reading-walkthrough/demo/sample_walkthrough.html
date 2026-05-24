@@ -972,52 +972,52 @@
   const WALKTHROUGH_DATA = {
   "schema_version": "0.4-reading",
   "metadata": {
-    "repo": "AI-Brain/skills/code-review-skill",
+    "repo": "AI-Brain/skills/code-review-narrative",
     "commit": "e984ec0",
-    "target": "code-review-skill/{render.py, prompts/schema.md, prompts/analyze_diff.md, template/review.html}",
-    "title": "How code-review-skill works",
+    "target": "code-review-narrative/{render.py, prompts/schema.md, prompts/analyze_diff.md, template/review.html}",
+    "title": "How code-review-narrative works",
     "generated_at": "2026-04-30T00:00:00Z"
   },
   "summary": {
-    "one_line": "A reading walkthrough of code-review-skill — how a git diff becomes an interactive HTML review document.",
-    "description": "This walkthrough takes a reader through the code-review-skill from input to output. The skill takes a git diff, an LLM analyzes it against a JSON contract, and a tiny Python script injects that JSON into a single HTML file with a 3-pane layout, line-attached annotations, and per-step collapsible context panels. The four full-depth storylines cover the architecture you'd want to grasp before extending the skill: the UI layout & view-mode state machine, the JSON contract that mediates LLM ↔ template, the analysis prompt that fills the contract, and the v0.3 walkthrough-annotation system that places explanations inline with code. Three smaller storylines (render pipeline, function-purpose blocks, right-pane sections) are kept at summary depth — important to know about, not central to extending the skill."
+    "one_line": "A reading walkthrough of code-review-narrative — how a git diff becomes an interactive HTML review document.",
+    "description": "This walkthrough takes a reader through the code-review-narrative from input to output. The skill takes a git diff, an LLM analyzes it against a JSON contract, and a tiny Python script injects that JSON into a single HTML file with a 3-pane layout, line-attached annotations, and per-step collapsible context panels. The four full-depth storylines cover the architecture you'd want to grasp before extending the skill: the UI layout & view-mode state machine, the JSON contract that mediates LLM ↔ template, the analysis prompt that fills the contract, and the v0.3 walkthrough-annotation system that places explanations inline with code. Three smaller storylines (render pipeline, function-purpose blocks, right-pane sections) are kept at summary depth — important to know about, not central to extending the skill."
   },
   "scope": {
     "mode": "files",
-    "input": "code-review-skill/render.py, code-review-skill/prompts/schema.md, code-review-skill/prompts/analyze_diff.md, code-review-skill/template/review.html",
+    "input": "code-review-narrative/render.py, code-review-narrative/prompts/schema.md, code-review-narrative/prompts/analyze_diff.md, code-review-narrative/template/review.html",
     "discovered_scope": [
       {
-        "path": "code-review-skill/prompts/schema.md",
+        "path": "code-review-narrative/prompts/schema.md",
         "reason": "type-def",
         "note": "JSON contract — defines what the LLM must produce and what the template consumes"
       },
       {
-        "path": "code-review-skill/prompts/analyze_diff.md",
+        "path": "code-review-narrative/prompts/analyze_diff.md",
         "reason": "core-flow",
         "note": "Analysis prompt — instructs the LLM how to fill the contract"
       },
       {
-        "path": "code-review-skill/render.py",
+        "path": "code-review-narrative/render.py",
         "reason": "entry-point",
         "note": "CLI entry — placeholder substitution from JSON to HTML"
       },
       {
-        "path": "code-review-skill/template/review.html",
+        "path": "code-review-narrative/template/review.html",
         "reason": "core-flow",
         "note": "HTML/CSS/JS template — renders the JSON into the user-facing UI"
       }
     ],
     "excluded": [
       {
-        "path": "code-review-skill/SKILL.md",
+        "path": "code-review-narrative/SKILL.md",
         "reason": "user-facing skill description; not part of the runtime pipeline"
       },
       {
-        "path": "code-review-skill/README.md",
+        "path": "code-review-narrative/README.md",
         "reason": "user-facing intro; redundant with SKILL.md for understanding the code"
       },
       {
-        "path": "code-review-skill/demo/*",
+        "path": "code-review-narrative/demo/*",
         "reason": "example data; useful for spot-checking but not part of the pipeline"
       }
     ],
@@ -1039,7 +1039,7 @@
       },
       "summary": "A 280|fluid|400 grid hosts three panes; a tiny `state` object switches the center pane between PR-overview, storyline-overview, and step views.",
       "files_touched": [
-        "code-review-skill/template/review.html"
+        "code-review-narrative/template/review.html"
       ],
       "mental_model_anchor": "Think of it as a code editor split-pane: storyline tree on the left, code in the middle, sidekick context on the right. The center pane has three modes (PR overview / storyline overview / step), and a single `state.view` string decides which one renders.",
       "purpose": {
@@ -1079,7 +1079,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "html",
                 "context_start_line": 21,
                 "context_end_line": 30,
@@ -1151,7 +1151,7 @@
                 ]
               },
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "html",
                 "context_start_line": 673,
                 "context_end_line": 695,
@@ -1330,7 +1330,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "javascript",
                 "context_start_line": 697,
                 "context_end_line": 729,
@@ -1560,13 +1560,13 @@
             "primary_usage_scenario": "Every navigation/interaction starts by mutating `state` and ends by calling `rerender()` (or, for section toggles, by mutating one CSS class).",
             "callers": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 1359,
                 "snippet": "function goToPROverview() { state.view = 'pr_overview'; ... rerender(); }",
                 "context": "All three navigation entry points mutate `state` then call `rerender()`."
               },
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 1164,
                 "snippet": "<div class=\"section-header\" onclick=\"toggleSection('${name}')\">",
                 "context": "Every right-pane section header binds its onclick to `toggleSection`, which uses `isCollapsed` and the `state.sectionCollapsed` map."
@@ -1614,7 +1614,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "javascript",
                 "context_start_line": 1359,
                 "context_end_line": 1399,
@@ -1872,7 +1872,7 @@
             "primary_usage_scenario": "Called from every onclick handler in the left nav and from keyboard shortcuts (lines 1402–1420). `init()` calls `goToPROverview()` once at the end of page load.",
             "callers": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 1430,
                 "snippet": "renderHeader(); renderNav(); goToPROverview();",
                 "context": "`init()` performs first paint by triggering a navigation."
@@ -1914,7 +1914,7 @@
       },
       "summary": "A versioned JSON shape with metadata, summary, and an array of storylines, each containing storyline-level context plus an array of steps with code views, factual context, and analytical sections.",
       "files_touched": [
-        "code-review-skill/prompts/schema.md"
+        "code-review-narrative/prompts/schema.md"
       ],
       "mental_model_anchor": "The schema is the *contract* between two parties that never talk directly: an LLM that produces JSON, and a static HTML file that consumes it. Designing this contract is the actual product. v0.3 added line-attached annotations (`walkthrough`) and function-level rationale (`function_purpose`) — both attached to the `FileView` so that any code shown anywhere can carry them.",
       "purpose": {
@@ -1954,7 +1954,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/prompts/schema.md",
+                "file": "code-review-narrative/prompts/schema.md",
                 "language": "markdown",
                 "context_start_line": 9,
                 "context_end_line": 73,
@@ -2080,7 +2080,7 @@
                 ]
               },
               {
-                "file": "code-review-skill/prompts/schema.md",
+                "file": "code-review-narrative/prompts/schema.md",
                 "language": "markdown",
                 "context_start_line": 40,
                 "context_end_line": 73,
@@ -2292,7 +2292,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/prompts/schema.md",
+                "file": "code-review-narrative/prompts/schema.md",
                 "language": "markdown",
                 "context_start_line": 161,
                 "context_end_line": 204,
@@ -2512,7 +2512,7 @@
             ],
             "supporting_definitions": [
               {
-                "file": "code-review-skill/prompts/schema.md",
+                "file": "code-review-narrative/prompts/schema.md",
                 "language": "markdown",
                 "context_start_line": 206,
                 "context_end_line": 230,
@@ -2669,13 +2669,13 @@
             "primary_usage_scenario": "Read by `renderFileBlock` (review.html line 1056) which renders one FileView as a `.file-block` card with header, optional function-purpose block, optional walkthrough-controls bar, and the code table.",
             "callers": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 991,
                 "snippet": "step.code_view.primary_changes.map(fv => renderFileBlock(fv, false))",
                 "context": "Each step iterates its primary_changes array, rendering one FileView per entry."
               },
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 992,
                 "snippet": "(step.code_view.supporting_definitions || []).map(fv => renderFileBlock(fv, true))",
                 "context": "Supporting definitions follow the same shape as primary_changes (FileViewWithReason adds `why_included`) and render with `isReference=true` for visually distinct styling."
@@ -2728,7 +2728,7 @@
       },
       "summary": "A 9-phase prompt walks the LLM from reading the diff to emitting JSON, with explicit dual roles (research assistant + senior reviewer) and length expectations per field.",
       "files_touched": [
-        "code-review-skill/prompts/analyze_diff.md"
+        "code-review-narrative/prompts/analyze_diff.md"
       ],
       "mental_model_anchor": "Think of analyze_diff.md as a recipe card the LLM reads once before cooking. It tells the LLM what to read first (the whole diff), what shape to produce (schema-conformant JSON), what voice to use in each field (factual vs opinion), and which failure modes to avoid (generic suggestions, padded analysis, fabricated alternatives).",
       "purpose": {
@@ -2772,7 +2772,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/prompts/analyze_diff.md",
+                "file": "code-review-narrative/prompts/analyze_diff.md",
                 "language": "markdown",
                 "context_start_line": 7,
                 "context_end_line": 47,
@@ -3033,7 +3033,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/prompts/analyze_diff.md",
+                "file": "code-review-narrative/prompts/analyze_diff.md",
                 "language": "markdown",
                 "context_start_line": 115,
                 "context_end_line": 175,
@@ -3101,7 +3101,7 @@
                 ]
               },
               {
-                "file": "code-review-skill/prompts/analyze_diff.md",
+                "file": "code-review-narrative/prompts/analyze_diff.md",
                 "language": "markdown",
                 "context_start_line": 170,
                 "context_end_line": 273,
@@ -3152,7 +3152,7 @@
                 ]
               },
               {
-                "file": "code-review-skill/prompts/analyze_diff.md",
+                "file": "code-review-narrative/prompts/analyze_diff.md",
                 "language": "markdown",
                 "context_start_line": 259,
                 "context_end_line": 273,
@@ -3291,7 +3291,7 @@
       },
       "summary": "`renderFileBlock` builds a code `<table>`, indexes annotations by `line_end`, and inserts each annotation as a `<tr colspan=3>` row right after the matching code line.",
       "files_touched": [
-        "code-review-skill/template/review.html"
+        "code-review-narrative/template/review.html"
       ],
       "mental_model_anchor": "Imagine you're reading a code listing in a textbook with margin notes. The table shows code rows, but every now and then a 'note' row interrupts to explain what just happened. Here those notes are styled rows with colspan=3 spanning the full code-table width, and they live inside the same `<table>` so they scroll naturally with the code.",
       "purpose": {
@@ -3331,7 +3331,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "javascript",
                 "context_start_line": 1066,
                 "context_end_line": 1131,
@@ -3622,7 +3622,7 @@
             ],
             "supporting_definitions": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "javascript",
                 "context_start_line": 1056,
                 "context_end_line": 1065,
@@ -3699,13 +3699,13 @@
             "primary_usage_scenario": "Called from `renderStepCenter` (line 991) for each entry in `step.code_view.primary_changes` and `step.code_view.supporting_definitions`.",
             "callers": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 991,
                 "snippet": "step.code_view.primary_changes.map(fv => renderFileBlock(fv, false))",
                 "context": "primary changes — main code blocks for the step"
               },
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "line": 992,
                 "snippet": "(step.code_view.supporting_definitions || []).map(fv => renderFileBlock(fv, true))",
                 "context": "supporting definitions — referenced code shown for context"
@@ -3754,7 +3754,7 @@
           "code_view": {
             "primary_changes": [
               {
-                "file": "code-review-skill/template/review.html",
+                "file": "code-review-narrative/template/review.html",
                 "language": "javascript",
                 "context_start_line": 1133,
                 "context_end_line": 1155,
@@ -3950,7 +3950,7 @@
       },
       "summary": "`render.py` is a single-file CLI that takes (input.json, output.html) on argv. It loads the JSON, loads `template/review.html`, finds `/*REVIEW_DATA_PLACEHOLDER*/` once, json-dumps the data with `ensure_ascii=False` and a `<\/` → `<\\/` escape (to prevent JSON content from prematurely closing the embedding `<script>` tag), substitutes only the first occurrence, and writes the output. Errors at any step exit with code 1. The script intentionally does not validate the JSON shape — it trusts the analysis prompt's output and lets template rendering fail loudly if the contract is broken.",
       "files_touched": [
-        "code-review-skill/render.py"
+        "code-review-narrative/render.py"
       ]
     },
     {
@@ -3968,7 +3968,7 @@
       },
       "summary": "`renderFunctionPurpose(fp)` (review.html lines 1020–1054) renders the v0.3 `function_purpose` block above the code table. Two structures: `single` emits a flat `problem_solved` + `without_it` pair; `multi_section` emits a sub-block per section, each with its own line range and pair. The block has its own background color (`#f0f6ff`), a small tag (`function purpose` / `multi-section`), and the function name in monospace. It renders nothing if `fp` is null — so a FileView without function_purpose just shows code straight after the file header. To extend the function_purpose semantics (e.g. add a `complexity` field), this is the place to render it.",
       "files_touched": [
-        "code-review-skill/template/review.html"
+        "code-review-narrative/template/review.html"
       ]
     },
     {
@@ -3986,7 +3986,7 @@
       },
       "summary": "`renderRight()` (review.html lines 1176–1352) is a long but flat dispatch. For each schema field that has content (`prerequisites`, `summary`, `behavior_delta`, `usage_context`, `test_coverage`, `codebase_patterns`, `alternative_approaches`, `evaluation`, `suggestions`, `analysis`, `concerns`), it builds an HTML string and pushes it onto a `sections[]` array using the `section()` helper (which wraps content in a collapsible `.analysis-section` block). The function reads `state.view` to pick between three branches: pr_overview shows a placeholder, storyline_overview shows a 'Storyline at a glance' summary, and step view emits all the analysis sections. To add a new schema field that should render in the right pane, you add a new block in the step branch and a CSS class for the new section type.",
       "files_touched": [
-        "code-review-skill/template/review.html"
+        "code-review-narrative/template/review.html"
       ]
     }
   ]
