@@ -1,4 +1,4 @@
-# Analyze Diff — Prompt Template (v0.3)
+# Analyze Diff — Prompt Template (v0.4)
 
 Use this prompt for the analysis phase of the workflow in `SKILL.md`.
 
@@ -64,7 +64,7 @@ narrative fields should *teach*.
 
 ## Your output
 
-A single JSON document conforming to schema v0.3 (`schema_version: "0.3"`).
+A single JSON document conforming to schema v0.4 (`schema_version: "0.4"`).
 Includes per-storyline deep context (`purpose`, `architectural_context`,
 `change_overview`, `reading_roadmap`) and per-step rich factual context
 (`prior_role`, `behavior_delta`, `usage_context`, `test_coverage`,
@@ -75,13 +75,27 @@ the analytical fields (`summary`, `evaluation`, `suggestions`, `analysis`,
 
 ## Workflow phases
 
-### Phase 1: Read the diff
+### Phase 1: Read the diff and materialize `diff_hunks`
 
 Read the entire diff. Don't start grouping until you've seen all changes.
 
 For each changed file, also read the **full file** from the post-change
 working tree. You'll need this to find enclosing functions, identify
 referenced symbols, and produce code views with proper context.
+
+**Immediately produce the top-level `diff_hunks` field** — one entry per
+changed file, listing every `+`/`-` line with `{line_num, content, change}`.
+This is the truth source for the coverage check in Phase 9. Convention:
+
+- `change: "removed"` → `line_num` is the line's position in the OLD file
+- `change: "added"`   → `line_num` is the line's position in the NEW file
+- Don't include unchanged context lines here
+- Pure-rename / mode-change files: emit the file with `"lines": []`
+
+Treat this as a mechanical exercise — extract the diff verbatim. Don't
+edit, normalize, or summarize. The whole point of `diff_hunks` is that
+it can be diff'd against the agent's storyline coverage to catch silent
+omissions.
 
 ### Phase 2: Identify storylines
 
@@ -360,7 +374,15 @@ details are exactly what readers forget.
 
 ### Phase 9: Validate and emit JSON
 
-- `schema_version` is `"0.3"`
+- `schema_version` is `"0.4"`
+- `diff_hunks` present; for every changed file there's one entry with
+  every +/- line listed (pure-rename / mode-change files: `"lines": []`)
+- **Coverage**: every `(file, change, line_num)` triple in `diff_hunks`
+  appears in at least one step's `code_view.primary_changes[].lines`
+  with the matching `change`. `render.py` enforces this — it will refuse
+  to render and list missing lines. If that happens, *go back and add /
+  expand steps to cover them*; do not bypass with `--no-coverage-check`
+  unless instructed.
 - Every `id` unique
 - Every `prior_step` `reference_id` resolves to an actual step
 - Every required field present
@@ -379,6 +401,30 @@ details are exactly what readers forget.
 
 Emit one JSON document per the schema. No prose around it. No code
 fences. Just JSON.
+
+## Iterating on coverage failure
+
+After emitting JSON, run `python3 render.py review.json review.html`.
+If it exits non-zero with a `[coverage] FAIL:` block listing uncovered
+lines, that's the loop:
+
+1. Read the report — it's grouped by file with `L<num> + content` /
+   `L<num> - content` for each missing line.
+2. For each missing line, decide where it belongs:
+   - **Inside an existing step's window** → extend that step's
+     `context_start_line` / `context_end_line` and insert the +/- line
+     into `code_view.primary_changes[].lines` at the right position
+   - **A different logical concern** → add a step to the right
+     storyline (or a new storyline, with appropriate confidence)
+   - **A file you forgot about entirely** → new storyline, usually
+     mixed-kind with explicit confidence note
+3. Re-run `render.py`. Iterate until it prints `[coverage] OK: N/N lines covered (100%)`.
+
+Missed lines are almost always one of: (a) a comment-only or formatting
+hunk you dismissed, (b) a test file you skipped to focus on logic,
+(c) a `.gitignore` / config tweak inside the same PR. None of these are
+"too small to mention" — the coverage gate exists because reviewers
+deserve to see every change the PR makes.
 
 ## Calibration: what "enough context" looks like
 

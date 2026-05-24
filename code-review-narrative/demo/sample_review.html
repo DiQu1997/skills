@@ -1031,7 +1031,7 @@
 <script>
   // ========== Data injection point ==========
   const REVIEW_DATA = {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "metadata": {
     "repo": "github.com/google/leveldb (fabricated)",
     "base_commit": "a5394e1...",
@@ -1044,6 +1044,243 @@
     "one_line": "Replace on-demand arena memory query with a write-time counter, plus tests and a comment cleanup.",
     "description": "Currently MemTable::ApproximateMemoryUsage() reads from arena, which the PR description claims is expensive. This change introduces a tracked_bytes_ counter updated in Add(). Includes tests for the new tracking and an unrelated comment fix in the header."
   },
+  "diff_hunks": [
+    {
+      "file": "db/memtable.cc",
+      "lines": [
+        {
+          "line_num": 17,
+          "content": "      table_(comparator_, &arena_),",
+          "change": "added"
+        },
+        {
+          "line_num": 17,
+          "content": "      table_(comparator_, &arena_) {}",
+          "change": "removed"
+        },
+        {
+          "line_num": 18,
+          "content": "      tracked_bytes_(0) {}",
+          "change": "added"
+        },
+        {
+          "line_num": 27,
+          "content": "  return tracked_bytes_;",
+          "change": "added"
+        },
+        {
+          "line_num": 27,
+          "content": "  return arena_.MemoryUsage();",
+          "change": "removed"
+        },
+        {
+          "line_num": 94,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 95,
+          "content": "  // Track size: entry bytes + an estimate of skiplist node overhead.",
+          "change": "added"
+        },
+        {
+          "line_num": 96,
+          "content": "  tracked_bytes_ += encoded_len + kApproxSkipListNodeOverhead;",
+          "change": "added"
+        }
+      ]
+    },
+    {
+      "file": "db/memtable.h",
+      "lines": [
+        {
+          "line_num": 40,
+          "content": "  // Returns a cached counter updated at write time; O(1).",
+          "change": "added"
+        },
+        {
+          "line_num": 40,
+          "content": "  // Note: this iterates arena blocks; do not call in tight loops.",
+          "change": "removed"
+        },
+        {
+          "line_num": 77,
+          "content": "  // Cached approximate byte usage, updated in Add().",
+          "change": "added"
+        },
+        {
+          "line_num": 78,
+          "content": "  // Includes both encoded entry bytes and skiplist node overhead.",
+          "change": "added"
+        },
+        {
+          "line_num": 79,
+          "content": "  size_t tracked_bytes_;",
+          "change": "added"
+        }
+      ]
+    },
+    {
+      "file": "db/memtable_test.cc",
+      "lines": [
+        {
+          "line_num": 47,
+          "content": "TEST(MemTableTest, TrackedSizeMonotonic) {",
+          "change": "added"
+        },
+        {
+          "line_num": 48,
+          "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+          "change": "added"
+        },
+        {
+          "line_num": 49,
+          "content": "  MemTable* mem = new MemTable(cmp);",
+          "change": "added"
+        },
+        {
+          "line_num": 50,
+          "content": "  mem->Ref();",
+          "change": "added"
+        },
+        {
+          "line_num": 51,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 52,
+          "content": "  size_t prev = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 53,
+          "content": "  for (int i = 0; i < 100; i++) {",
+          "change": "added"
+        },
+        {
+          "line_num": 54,
+          "content": "    mem->Add(i, kTypeValue, \"k\" + std::to_string(i), \"v\");",
+          "change": "added"
+        },
+        {
+          "line_num": 55,
+          "content": "    size_t now = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 56,
+          "content": "    ASSERT_GT(now, prev) << \"size should grow after each Add\";",
+          "change": "added"
+        },
+        {
+          "line_num": 57,
+          "content": "    prev = now;",
+          "change": "added"
+        },
+        {
+          "line_num": 58,
+          "content": "  }",
+          "change": "added"
+        },
+        {
+          "line_num": 59,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 60,
+          "content": "  mem->Unref();",
+          "change": "added"
+        },
+        {
+          "line_num": 61,
+          "content": "}",
+          "change": "added"
+        },
+        {
+          "line_num": 63,
+          "content": "TEST(MemTableTest, TrackedSizeApproximatesArena) {",
+          "change": "added"
+        },
+        {
+          "line_num": 64,
+          "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+          "change": "added"
+        },
+        {
+          "line_num": 65,
+          "content": "  MemTable* mem = new MemTable(cmp);",
+          "change": "added"
+        },
+        {
+          "line_num": 66,
+          "content": "  mem->Ref();",
+          "change": "added"
+        },
+        {
+          "line_num": 67,
+          "content": "  for (int i = 0; i < 1000; i++) {",
+          "change": "added"
+        },
+        {
+          "line_num": 68,
+          "content": "    mem->Add(i, kTypeValue, \"key\" + std::to_string(i), \"value\");",
+          "change": "added"
+        },
+        {
+          "line_num": 69,
+          "content": "  }",
+          "change": "added"
+        },
+        {
+          "line_num": 70,
+          "content": "  size_t tracked = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 71,
+          "content": "  // Tracked size should be in the same order of magnitude as arena.",
+          "change": "added"
+        },
+        {
+          "line_num": 72,
+          "content": "  // We allow 50% slop in either direction.",
+          "change": "added"
+        },
+        {
+          "line_num": 73,
+          "content": "  // (No direct arena access in test; this is a placeholder for",
+          "change": "added"
+        },
+        {
+          "line_num": 74,
+          "content": "  //  whatever ground-truth comparison the team agrees on.)",
+          "change": "added"
+        },
+        {
+          "line_num": 75,
+          "content": "  ASSERT_GT(tracked, 1000 * 10);",
+          "change": "added"
+        },
+        {
+          "line_num": 76,
+          "content": "  ASSERT_LT(tracked, 1000 * 1000);",
+          "change": "added"
+        },
+        {
+          "line_num": 77,
+          "content": "  mem->Unref();",
+          "change": "added"
+        },
+        {
+          "line_num": 78,
+          "content": "}",
+          "change": "added"
+        }
+      ]
+    }
+  ],
   "storylines": [
     {
       "id": "S1",

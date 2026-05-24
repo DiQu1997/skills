@@ -3,18 +3,17 @@
 Skill that produces interactive HTML review documents from git diffs,
 organized by **logical groups (storylines)** rather than file-by-file.
 
-**v0.3** keeps the v0.2 rich factual context (behavior_delta, usage_context,
-test_coverage, codebase_patterns, alternative_approaches) and storyline-level
-overview (purpose, architectural_context, change_overview, reading_roadmap),
-and adds:
+**v0.4** adds a top-level `diff_hunks` field listing every +/- line in the
+diff, and a coverage check in `render.py` that refuses to render unless
+every `(file, change, line_num)` triple from `diff_hunks` appears in some
+step's `code_view`. Coverage becomes a hard guarantee — the agent can no
+longer silently summarize a change away.
 
-- `prior_role` — what an existing function/class/struct was doing before this
-  change, so the delta is readable
-- `function_purpose` on FileView — function-level motivation
-  (`problem_solved` / `without_it`), single- or multi-section
-- `walkthrough` on FileView — sparse code-attached annotations that connect
-  the +/- lines to the surrounding logic
-- `concerns` on each step — explicit issues with `{concern, evidence, severity}`
+Keeps v0.3 additions (`prior_role`, `function_purpose`, `walkthrough`,
+`concerns`) and v0.2 rich factual context (behavior_delta, usage_context,
+test_coverage, codebase_patterns, alternative_approaches) plus
+storyline-level overview (purpose, architectural_context, change_overview,
+reading_roadmap).
 
 ## What you get
 
@@ -53,22 +52,24 @@ open demo/sample_review.html  # or xdg-open / open in browser manually
 code-review-narrative/
 ├── README.md
 ├── SKILL.md                     ← skill definition
-├── render.py                    ← inject JSON → HTML
+├── render.py                    ← inject JSON → HTML; enforces coverage check
 ├── prompts/
-│   ├── schema.md                ← v0.3 JSON schema
-│   └── analyze_diff.md          ← v0.3 analysis prompt
+│   ├── schema.md                ← v0.4 JSON schema
+│   └── analyze_diff.md          ← v0.4 analysis prompt
 ├── template/
 │   └── review.html              ← single-file HTML/CSS/JS template
 └── demo/
-    ├── sample_review.json       ← v0.3 demo data (rich context + walkthrough)
+    ├── sample_review.json       ← v0.4 demo data (includes diff_hunks)
     └── sample_review.html       ← rendered output
 ```
 
 ## Status
 
-v0.3. Schema enriched with `prior_role`, FileView-level `function_purpose`
-and `walkthrough`, and structured `concerns`. Template supports collapsible
-sections, storyline view, PR view, inline walkthrough annotations.
+v0.4. Schema adds top-level `diff_hunks` (every +/- line in the diff);
+`render.py` cross-checks it against each step's `code_view` and refuses to
+render uncovered reviews. Keeps v0.3 additions (`prior_role`,
+`function_purpose`, `walkthrough`, `concerns`).
 
-Backward-compatible with v0.2 data: documents without v0.3 fields render
-with those sections omitted.
+NOT backward-compatible with v0.3 by default: `render.py` requires
+`diff_hunks` to be present and complete. Use `--no-coverage-check` as
+an escape hatch when rendering legacy data.
