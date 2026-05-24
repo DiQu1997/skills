@@ -1,17 +1,20 @@
-# Review JSON Schema (v0.3)
+# Review JSON Schema (v0.4)
 
 This is the JSON contract between the analysis prompt and the HTML template.
-v0.3 adds `function_purpose` and `walkthrough` to FileView, enabling
-inline code-attached annotations and function-level rationale.
-(v0.2 added rich context fields and storyline-level context; those are unchanged.)
+v0.4 adds a top-level `diff_hunks` field that lists every +/- line in the
+diff, used by `render.py` to verify that the storylines/steps actually
+cover all modifications (refuses to render otherwise).
+(v0.3 added `function_purpose` and `walkthrough` to FileView; v0.2 added
+rich context fields and storyline-level context. Both unchanged.)
 
 ## Top level
 
 ```jsonc
 {
-  "schema_version": "0.3",
-  "metadata": { ... },
-  "summary": { ... },
+  "schema_version": "0.4",
+  "metadata":   { ... },
+  "summary":    { ... },
+  "diff_hunks": [ ... ],   // NEW in v0.4 — required for coverage check
   "storylines": [ ... ]
 }
 ```
@@ -37,6 +40,41 @@ inline code-attached annotations and function-level rationale.
   "description": "string"
 }
 ```
+
+## diff_hunks  (NEW in v0.4 — coverage truth source)
+
+The exhaustive list of every modification in the diff being reviewed.
+One entry per changed file. `lines[]` lists every added and removed line
+with its exact post-/pre-image line number and content. Unchanged
+context lines are NOT included here (they belong in `code_view`, not in
+the truth source).
+
+`render.py` cross-checks `diff_hunks` against every step's
+`code_view.primary_changes[].lines`: each `{file, change, line_num}`
+triple in `diff_hunks` must appear in at least one step. If anything
+is uncovered, `render.py` exits non-zero and lists the missing lines.
+This forces the agent to either (a) extend an existing step to include
+the missed line, or (b) add a new step for it — never silently omit.
+
+```jsonc
+[
+  {
+    "file": "string",
+    "lines": [
+      { "line_num": "int", "content": "string", "change": "added" },
+      { "line_num": "int", "content": "string", "change": "removed" }
+    ]
+  }
+]
+```
+
+Line-numbering convention (matches unified-diff):
+- `"change": "removed"` → `line_num` is the line's position in the OLD file
+- `"change": "added"`   → `line_num` is the line's position in the NEW file
+- For a pure modification (replace L17), both removed-at-17 and added-at-17 may share the same number
+
+For pure-rename or mode-change diffs with no `+`/`-` lines, emit the file
+with `"lines": []` (coverage gate accepts this — there's nothing to cover).
 
 ## storylines
 
@@ -325,3 +363,5 @@ In addition to JSON-schema validation:
 - All step IDs unique within the document
 - All `prerequisites[].reference_id` of kind `prior_step` resolve to actual step IDs
 - `behavior_delta` is required
+- `diff_hunks` present and non-empty (unless the diff has truly zero +/- lines, e.g. pure rename — in which case still emit the file entry with `"lines": []`)
+- **Coverage**: every `(file, change, line_num)` triple in `diff_hunks` with `change ∈ {added, removed}` appears in at least one step's `code_view.primary_changes[].lines`. `render.py` enforces this and refuses to render uncovered reviews. Bypass with `--no-coverage-check` only as an emergency escape hatch.
