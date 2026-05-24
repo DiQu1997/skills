@@ -971,7 +971,8 @@
     "base_commit": "a5394e1...",
     "head_commit": "b7f2c8d...",
     "title": "Track MemTable size at write time + tests + comment cleanup",
-    "generated_at": "2026-04-26T00:00:00Z"
+    "generated_at": "2026-04-26T00:00:00Z",
+    "locale": "zh"
   },
   "summary": {
     "one_line": "Replace on-demand arena memory query with a write-time counter, plus tests and a comment cleanup.",
@@ -2554,6 +2555,42 @@
   ]
 };
 
+  // ========== i18n (right-pane section labels) ==========
+  const I18N = {
+    en: {
+      prerequisites: 'Prerequisites',
+      summary: 'Summary',
+      prior_role: 'Prior Role',
+      behavior_delta: 'Behavior Delta',
+      usage_context: 'Usage Context',
+      test_coverage: 'Test Coverage',
+      codebase_patterns: 'Codebase Patterns',
+      alternative_approaches: 'Alternative Approaches',
+      evaluation: 'Evaluation',
+      suggestions: 'Suggestions',
+      analysis: 'Analysis',
+      concerns: 'Concerns',
+      qa: '💬 Q&A',
+    },
+    zh: {
+      prerequisites: '前情提要',
+      summary: '简介',
+      prior_role: '前世今生',
+      behavior_delta: '行为差异',
+      usage_context: '使用上下文',
+      test_coverage: '测试覆盖',
+      codebase_patterns: '代码库模式',
+      alternative_approaches: '替代方案',
+      evaluation: '评价',
+      suggestions: '建议',
+      analysis: '分析',
+      concerns: '关切',
+      qa: '💬 问答',
+    },
+  };
+  const LOCALE = (REVIEW_DATA.metadata && REVIEW_DATA.metadata.locale) || 'en';
+  const L = I18N[LOCALE] || I18N.en;
+
   // ========== State ==========
   const state = {
     view: 'pr_overview',     // 'pr_overview' | 'storyline_overview' | 'step'
@@ -3510,17 +3547,17 @@
           <div>${renderInlineMarkdown(p.summary)}</div>
         </div>`;
       }).join('');
-      sections.push(section('prerequisites', 'prereq', '前情提要', 'context', items));
+      sections.push(section('prerequisites', 'prereq', L.prerequisites, 'context', items));
     }
 
     // Summary (factual, default expanded)
     if (step.summary) {
-      sections.push(section('summary', 'summary', '简介 Summary', 'factual', renderInlineMarkdown(step.summary)));
+      sections.push(section('summary', 'summary', L.summary, 'factual', renderInlineMarkdown(step.summary)));
     }
 
     // Prior role (background context for changes to existing code, default expanded)
     if (step.prior_role) {
-      sections.push(section('prior_role', 'prior-role', '前世今生 Prior Role', 'background', renderInlineMarkdown(step.prior_role)));
+      sections.push(section('prior_role', 'prior-role', L.prior_role, 'background', renderInlineMarkdown(step.prior_role)));
     }
 
     // Behavior delta (factual, default expanded)
@@ -3531,7 +3568,7 @@
         ${bd.after ? `<div class="ba-block"><div class="ba-label">After</div><div class="ba-content">${renderInlineMarkdown(bd.after)}</div></div>` : ''}
         ${bd.diff ? `<div class="ba-block"><div class="ba-label">Behavioral diff</div><div class="ba-content">${renderInlineMarkdown(bd.diff)}</div></div>` : ''}
       `;
-      sections.push(section('behavior_delta', 'behavior', 'Behavior Delta', 'factual', html));
+      sections.push(section('behavior_delta', 'behavior', L.behavior_delta, 'factual', html));
     }
 
     // Usage context (factual, default collapsed — can be long)
@@ -3557,7 +3594,7 @@
       if (uc.implicit_dependencies && uc.implicit_dependencies.length > 0) {
         html += `<div class="ba-block"><div class="ba-label">Implicit dependencies</div><ul class="bullet-list">${uc.implicit_dependencies.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
       }
-      if (html) sections.push(section('usage_context', 'usage', 'Usage Context', 'factual', html));
+      if (html) sections.push(section('usage_context', 'usage', L.usage_context, 'factual', html));
     }
 
     // Test coverage (factual, default collapsed)
@@ -3577,7 +3614,7 @@
       if (tc.not_covered && tc.not_covered.length > 0) {
         html += `<div class="ba-block"><div class="ba-label">Not covered</div><ul class="bullet-list">${tc.not_covered.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
       }
-      if (html) sections.push(section('test_coverage', 'tests', 'Test Coverage', 'factual', html));
+      if (html) sections.push(section('test_coverage', 'tests', L.test_coverage, 'factual', html));
     }
 
     // Codebase patterns (factual, default collapsed)
@@ -3599,7 +3636,7 @@
         `).join('');
         html += `<div class="ba-block"><div class="ba-label">Similar elsewhere</div>${items}</div>`;
       }
-      if (html) sections.push(section('codebase_patterns', 'patterns', 'Codebase Patterns', 'factual', html));
+      if (html) sections.push(section('codebase_patterns', 'patterns', L.codebase_patterns, 'factual', html));
     }
 
     // Alternative approaches (factual + analytical mix, default collapsed)
@@ -3610,23 +3647,23 @@
           <div>${renderInlineMarkdown(a.tradeoff_vs_chosen)}</div>
         </div>
       `).join('');
-      sections.push(section('alternative_approaches', 'alternatives', 'Alternative Approaches', '', items));
+      sections.push(section('alternative_approaches', 'alternatives', L.alternative_approaches, '', items));
     }
 
     // Evaluation (opinion, default expanded if present — short)
     if (step.evaluation) {
-      sections.push(section('evaluation', 'evaluation', '评价 Evaluation', 'opinion', renderInlineMarkdown(step.evaluation)));
+      sections.push(section('evaluation', 'evaluation', L.evaluation, 'opinion', renderInlineMarkdown(step.evaluation)));
     }
 
     // Suggestions (action, default expanded if present)
     if (step.suggestions && step.suggestions.length > 0) {
       const list = step.suggestions.map(s => `<li>${renderInlineMarkdown(s)}</li>`).join('');
-      sections.push(section('suggestions', 'suggestions', '建议 Suggestions', 'action', `<ul class="bullet-list">${list}</ul>`));
+      sections.push(section('suggestions', 'suggestions', L.suggestions, 'action', `<ul class="bullet-list">${list}</ul>`));
     }
 
     // Analysis (opinion-deep, default collapsed)
     if (step.analysis) {
-      sections.push(section('analysis', 'analysis', '分析 Analysis', 'deep', renderInlineMarkdown(step.analysis)));
+      sections.push(section('analysis', 'analysis', L.analysis, 'deep', renderInlineMarkdown(step.analysis)));
     }
 
     // Concerns (opinion-with-evidence, default expanded if present and has high/medium severity)
@@ -3639,7 +3676,7 @@
             <div class="concern-evidence">Evidence: ${renderInlineMarkdown(c.evidence)}</div>
           </div>
         `).join('');
-      sections.push(section('concerns', 'concerns', '关切 Concerns', 'risk', items));
+      sections.push(section('concerns', 'concerns', L.concerns, 'risk', items));
     }
 
     // Q&A — only renders in live mode (or when prior followups exist for this step).
@@ -3647,7 +3684,7 @@
     const showQA = state.liveMode || stepFollowups.length > 0;
     if (showQA) {
       const qaTag = state.liveMode ? 'live' : 'static';
-      sections.push(section('qa', 'qa', '💬 Q&A', qaTag, buildQASectionContent(step, found.storyline)));
+      sections.push(section('qa', 'qa', L.qa, qaTag, buildQASectionContent(step, found.storyline)));
     }
 
     if (sections.length === 0) {

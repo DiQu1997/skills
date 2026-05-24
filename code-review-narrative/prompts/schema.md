@@ -24,7 +24,8 @@ inline code-attached annotations and function-level rationale.
   "base_commit": "string",
   "head_commit": "string",
   "title": "string",
-  "generated_at": "ISO8601 timestamp"
+  "generated_at": "ISO8601 timestamp",
+  "locale": "en | zh"   // optional, default "en" — controls right-pane section labels only (Prerequisites/Summary/... vs 前情提要/简介/...); content language is free
 }
 ```
 
