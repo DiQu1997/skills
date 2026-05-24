@@ -65,7 +65,7 @@ python3 render.py demo/sample_walkthrough.json demo/sample_walkthrough.html
 open demo/sample_walkthrough.html  # or xdg-open / open in browser manually
 ```
 
-The demo is a Mode A walkthrough of `code-review-skill` itself —
+The demo is a Mode A walkthrough of `code-review-narrative` itself —
 storyline-grouping the JSON contract, the analysis prompt, the render
 pipeline, the template architecture, and the v0.3 walkthrough-annotation
 system. Four full-depth storylines + three summary cards.
@@ -89,7 +89,7 @@ code-reading-walkthrough/
 
 ## Status
 
-v0.4-reading. Forked from code-review-skill v0.3 with reading-oriented
+v0.4-reading. Forked from code-review-narrative v0.3 with reading-oriented
 schema changes, two-mode scoping front-end, importance-based top-N
 selection with summary-card fallback, localStorage view persistence.
 Backward-compatible with v0.3 field names where reused (`function_purpose`,

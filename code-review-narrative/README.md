@@ -47,7 +47,7 @@ open demo/sample_review.html  # or xdg-open / open in browser manually
 ## Files
 
 ```
-code-review-skill/
+code-review-narrative/
 ├── README.md
 ├── SKILL.md                     ← skill definition
 ├── render.py                    ← inject JSON → HTML
