@@ -340,33 +340,58 @@ Optional extras (populate when substantive, omit otherwise):
 
 ### Phase 8 — Identify edges
 
-Edges visualize **cross-block control flow that matters for
-understanding the lifecycle.** Don't draw an edge for every call —
-draw the structural ones.
+Edges are **reading-flow guideposts**, not a strict call graph. Each
+edge tells the reader *"after this block, your eye should jump here
+next — and here's why (the label)."* The "why" might be a function call,
+a thrown exception, a finally hand-off, a deferred-callback fire, OR
+just a conceptual continuation that helps the reader keep the thread
+across columns. Pick edges that improve reading continuity.
 
-#### When to draw an edge
+**Source authenticity matters but isn't the only criterion.** When the
+label says `CALL`, the `from` block should be the one whose code
+actually contains the call site — not just any block in the column.
+Same for `CATCH` / `FINALLY` / `EMIT`: the source block should be the
+one where the reader would, mid-reading, ask "what happens next?". An
+edge that's "true in spirit" but originates from the wrong block leaves
+the reader scratching their head ("but this block doesn't call that
+function").
 
-- A function in column A calls a function in column B (the call IS the
-  storyline's structure): edge from A's "handoff" block to B's first
-  block. Label `CALL`. Style: solid.
-- A `try { … } catch { F }` where the catch dispatches to a function in
-  another column: edge from the try block to the catch handler's first
-  block. Label `CATCH`. Style: solid. Color: red (`#c54343`).
-- A `try { … } finally { G }` where the finally calls another column's
-  function: edge from the try block to that finalizer's first block.
-  Label `FINALLY`. Style: dashed. Color: purple (`#7a5cc4`).
-- An event/callback registration that fires into another column: edge
-  with label `EMIT` or `CALLBACK`. Style: dashed.
-- Early-return / cancellation paths that hop to a finalizer: dashed.
+#### Common edge shapes (use as a vocabulary, not a checklist)
+
+- **CALL** — `from` block contains `funcB(...)`; `to` is the first block
+  of column B. Label `CALL`. Solid. Default color.
+- **CATCH** — `from` block contains the `try { ... }`; `to` is the first
+  block of the `catch` handler in another column. Label `CATCH`. Solid.
+  Color red `#c54343`.
+- **FINALLY** — `from` block contains the `try { ... }`; `to` is the
+  first block of the `finally` clause body. Label `FINALLY`. Dashed.
+  Color purple `#7a5cc4`.
+- **EMIT** / **CALLBACK** — `from` block fires events or registers a
+  callback; `to` is the consumer block in another column. Label `EMIT`
+  or `CALLBACK`. Dashed.
+- **NEXT** / **RESUMES** — `from` ends one phase; `to` is where the
+  reader's mental model should pick up the thread (e.g., the outer loop
+  resumes here after the inner loop exits). Useful when you want to
+  show conceptual continuity across columns without a literal call.
+  Dashed.
 
 #### When NOT to draw an edge
 
-- Reading a shared variable that another block also reads. Use a
-  `touch` chip instead.
-- A call into a third-party / external function. Not on the canvas →
-  no edge.
-- A call from a block to the very next block in the SAME column. The
-  column's top-to-bottom reading order already implies sequence.
+- A call into a third-party / external function — not on the canvas,
+  use a `touches` chip with `kind: "external"` instead.
+- A call from one block to the very next block in the **same column** —
+  vertical order already implies sequence.
+- Reading a shared variable that another block also reads — `touches`
+  chip, not an edge.
+
+#### Validate every edge against the "reader test"
+
+For each edge, ask: *"If a reader is mid-read on the `from` block and
+follows this edge, will the `to` block be a sensible next stop given
+the label?"* If the answer requires "well actually this is a helper
+that's called via …" hand-waving, either pick a better `from` block
+(usually the one that contains the call site / try block / emit call),
+re-label so the relationship is honest, or drop the edge.
 
 #### Cap
 
