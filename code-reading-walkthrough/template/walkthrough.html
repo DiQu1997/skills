@@ -1,2751 +1,1333 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Code Reading — Walkthrough</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Walkthrough</title>
 <style>
-  /* ========== Reset & base ========== */
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; }
+  :root {
+    --bg:         #f5f5f4;
+    --bg-card:    #ffffff;
+    --fg:         #1f2328;
+    --fg-soft:    #57606a;
+    --fg-faint:   #8b949e;
+    --border:     #e1e4e8;
+    --border-strong: #1f2328;
+    --accent:     #5b6cff;
+    --accent-soft:#eef0ff;
+    --code-bg:    #fbfaf7;
+    --shadow-sm:  0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md:  0 2px 8px rgba(0,0,0,0.06);
+    --shadow-lg:  0 4px 16px rgba(0,0,0,0.08);
+
+    --phase-guard-bg:    #fdf3d6;
+    --phase-guard-fg:    #9a7409;
+    --phase-setup-bg:    #d6e4f5;
+    --phase-setup-fg:    #205493;
+    --phase-main-bg:     #ddd3f0;
+    --phase-main-fg:     #5b3e9c;
+    --phase-handoff-bg:  #d4ead4;
+    --phase-handoff-fg:  #2f7a2f;
+    --phase-error-bg:    #f5cdc6;
+    --phase-error-fg:    #a4332a;
+    --phase-cleanup-bg:  #dfe3e6;
+    --phase-cleanup-fg:  #4a5560;
+    --phase-persist-bg:  #f1d9b3;
+    --phase-persist-fg:  #8a5a14;
+    --phase-emit-bg:     #c3dfd8;
+    --phase-emit-fg:     #2b6b5e;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Helvetica, Arial, sans-serif;
     font-size: 14px;
-    line-height: 1.55;
-    color: #1a1a1a;
-    background: #ffffff;
-    -webkit-font-smoothing: antialiased;
-  }
-  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-
-  /* ========== Layout ========== */
-  .layout {
-    display: grid;
-    grid-template-columns: 280px minmax(0, 1fr) 400px;
-    height: 100vh;
-  }
-  .pane { overflow-y: auto; height: 100vh; }
-  .left-pane   { background: #f6f8fa; border-right: 1px solid #d0d7de; }
-  .center-pane { background: #ffffff; }
-  .right-pane  { background: #fafbfc; border-left: 1px solid #d0d7de; }
-
-  /* ========== Left pane: navigation ========== */
-  .pr-header {
-    padding: 16px;
-    border-bottom: 1px solid #d0d7de;
-    background: #ffffff;
-    position: sticky; top: 0; z-index: 1;
-  }
-  .pr-title    { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; word-wrap: break-word; }
-  .pr-subtitle { font-size: 11px; color: #656d76; word-wrap: break-word; }
-  .reset-btn {
-    margin-top: 8px;
-    font-size: 10px; font-family: inherit;
-    background: none; border: 1px solid #d0d7de;
-    border-radius: 4px; padding: 2px 8px;
-    cursor: pointer; color: #656d76;
-  }
-  .reset-btn:hover { background: #eaeef2; color: #1a1a1a; }
-  .nav-tree    { padding: 8px 0; }
-
-  .nav-overview-link {
-    padding: 8px 14px;
-    margin: 4px 8px 8px 8px;
-    border: 1px dashed #d0d7de;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
-    color: #656d76;
-    text-align: center;
-    user-select: none;
-  }
-  .nav-overview-link:hover { background: #eaeef2; color: #1a1a1a; }
-  .nav-overview-link.active { background: #ddf4ff; border-color: #0969da; color: #0969da; border-style: solid; }
-
-  .storyline-node { margin-bottom: 4px; }
-  .storyline-header {
-    display: flex; align-items: flex-start; gap: 6px;
-    padding: 8px 12px; cursor: pointer;
-    font-weight: 600; font-size: 13px; color: #1a1a1a;
-    user-select: none;
-  }
-  .storyline-header:hover { background: #eaeef2; }
-  .storyline-header.active-storyline { background: #ddf4ff; border-left: 2px solid #0969da; padding-left: 10px; }
-  .storyline-toggle { flex-shrink: 0; width: 12px; color: #656d76; font-size: 10px; margin-top: 4px; }
-  .storyline-title-block { flex: 1; min-width: 0; }
-  .storyline-title-row { display: flex; align-items: flex-start; gap: 6px; }
-  .storyline-title { word-wrap: break-word; flex: 1; min-width: 0; }
-  .importance-badge {
-    flex-shrink: 0;
-    font-size: 10px; font-weight: 700;
-    padding: 1px 6px;
-    border-radius: 10px;
-    background: #eaeef2;
-    color: #656d76;
-    cursor: help;
     line-height: 1.5;
-  }
-  .importance-badge.imp-high   { background: #ffd6a5; color: #82071e; }
-  .importance-badge.imp-mid    { background: #fff8c5; color: #9a6700; }
-  .importance-badge.imp-low    { background: #eaeef2; color: #656d76; }
-  .storyline-meta {
-    font-size: 11px; font-weight: 400; color: #656d76;
-    margin-top: 2px; display: flex; gap: 6px; flex-wrap: wrap;
-  }
-  .storyline-overview-link {
-    margin-left: 18px;
-    padding: 4px 12px 4px 14px;
-    cursor: pointer;
-    font-size: 12px;
-    color: #0969da;
-    user-select: none;
-    font-style: italic;
-  }
-  .storyline-overview-link:hover { background: #eaeef2; }
-  .storyline-overview-link.active {
-    background: #ddf4ff;
-    border-left: 2px solid #0969da;
-    padding-left: 12px;
-    font-weight: 500;
-  }
-
-  .step-list { list-style: none; margin-left: 18px; padding: 4px 0; }
-  .step-item {
-    padding: 5px 12px 5px 14px;
-    margin: 1px 0;
-    cursor: pointer;
-    font-size: 13px;
-    color: #1a1a1a;
-    border-left: 2px solid transparent;
-    user-select: none;
-    word-wrap: break-word;
-  }
-  .step-item:hover { background: #eaeef2; }
-  .step-item.active {
-    background: #ddf4ff;
-    border-left-color: #0969da;
-    font-weight: 500;
-  }
-  .step-id { font-size: 11px; color: #656d76; margin-right: 6px; font-family: ui-monospace, monospace; }
-
-  .summary-only-pill {
-    display: inline-block;
-    margin-left: 18px;
-    margin-bottom: 4px;
-    padding: 3px 10px;
-    font-size: 10px; font-weight: 600;
-    color: #656d76;
-    background: #eaeef2;
-    border-radius: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-  }
-
-  /* ========== Center pane: header & content ========== */
-  .step-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid #d0d7de;
-    background: #ffffff;
-    position: sticky; top: 0; z-index: 1;
-  }
-  .breadcrumb { font-size: 12px; color: #656d76; margin-bottom: 6px; font-family: ui-monospace, monospace; }
-  .step-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; word-wrap: break-word; }
-  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
-  .badge {
-    font-size: 11px; padding: 2px 8px; border-radius: 12px;
-    font-weight: 500; border: 1px solid transparent;
-    white-space: nowrap;
-  }
-  .badge-track-core      { background: #ddf4ff; color: #0969da; border-color: #b6e3ff; }
-  .badge-track-supporting{ background: #f0e7ff; color: #6f42c1; border-color: #ddc3ff; }
-  .badge-track-utility   { background: #fff8c5; color: #9a6700; border-color: #f8e57b; }
-  .badge-track-data      { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
-  .badge-track-extension { background: #ffe7e7; color: #82071e; border-color: #ffcecb; }
-  .badge-track-test      { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
-  .badge-track-config    { background: #fff8c5; color: #9a6700; border-color: #f8e57b; }
-  .badge-kind { background: #ffffff; color: #656d76; border-color: #d0d7de; }
-  .badge-depth-full    { background: #dafbe1; color: #1a7f37; border-color: #aceebb; }
-  .badge-depth-summary { background: #eaeef2; color: #656d76; border-color: #d0d7de; }
-
-  .step-body { padding: 16px 24px 80px 24px; }
-
-  .section-label {
-    font-size: 11px; font-weight: 600;
-    color: #656d76;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px; margin-top: 24px;
-  }
-  .section-label:first-child { margin-top: 0; }
-
-  /* ========== Code blocks ========== */
-  .file-block {
-    margin: 12px 0 24px 0;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
+    color: var(--fg);
+    background: var(--bg);
     overflow: hidden;
-    background: #ffffff;
   }
-  .file-block.reference { border-color: #d0d7de; border-style: dashed; }
-  .file-header {
-    padding: 8px 12px;
-    background: #f6f8fa;
-    border-bottom: 1px solid #d0d7de;
-    font-family: ui-monospace, monospace;
-    font-size: 12px; color: #1a1a1a;
-    display: flex; justify-content: space-between; align-items: flex-start;
-    gap: 12px; flex-wrap: wrap;
-  }
-  .file-block.reference .file-header { background: #fafbfc; }
-  .file-path { font-weight: 600; word-break: break-all; }
-  .reference-label {
-    font-size: 10px; background: #f0e7ff; color: #6f42c1;
-    padding: 1px 6px; border-radius: 3px;
-    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
-    flex-shrink: 0;
-  }
-  .why-included {
-    font-size: 11px; color: #656d76;
-    padding: 6px 12px; background: #fafbfc;
-    border-bottom: 1px solid #eaeef2; font-style: italic;
-  }
-  .file-block.reference .why-included { background: #f6f3ff; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 
-  .code-table {
-    width: 100%; border-collapse: collapse;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 12px; line-height: 1.5;
-  }
-  .code-table tr.line-added    { background: #e6ffec; }
-  .code-table tr.line-added .change-marker { color: #1a7f37; background: #aceebb; }
-  .code-table tr.line-removed  { background: #ffebe9; }
-  .code-table tr.line-removed .change-marker { color: #82071e; background: #ffcecb; }
-  .code-table tr.line-removed .line-content { text-decoration: line-through; opacity: 0.85; }
-  .code-table td.line-num {
-    width: 1%; min-width: 40px;
-    color: #656d76; text-align: right;
-    padding: 0 8px; user-select: none;
-    border-right: 1px solid #eaeef2; vertical-align: top;
-  }
-  .code-table td.change-marker {
-    width: 1%; min-width: 16px;
-    text-align: center; user-select: none;
-    color: #656d76; vertical-align: top; font-weight: 600;
-  }
-  .code-table td.line-content {
-    padding: 0 12px; white-space: pre;
-    overflow-x: auto; word-break: normal; vertical-align: top;
-  }
-
-  /* ========== Function purpose block ========== */
-  .fn-purpose {
-    padding: 10px 14px;
-    background: #f0f6ff;
-    border-bottom: 1px solid #d0d7de;
-    font-size: 12.5px;
-    line-height: 1.55;
-  }
-  .fn-purpose-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 6px;
-  }
-  .fn-purpose-name {
-    font-family: ui-monospace, monospace;
-    font-weight: 700; font-size: 12px; color: #0550ae;
-  }
-  .fn-purpose-tag {
-    font-size: 9px; padding: 1px 5px; border-radius: 3px;
-    text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px;
-    background: #ddf4ff; color: #0969da;
-  }
-  .fn-purpose .fp-label {
-    font-size: 10px; font-weight: 700; color: #656d76;
-    text-transform: uppercase; letter-spacing: 0.4px;
-    margin-bottom: 2px; margin-top: 8px;
-  }
-  .fn-purpose .fp-label:first-of-type { margin-top: 0; }
-  .fn-purpose-section {
-    padding: 8px 12px; margin-top: 8px;
-    background: rgba(255,255,255,0.6);
-    border-left: 3px solid #b6e3ff;
-    border-radius: 0 4px 4px 0;
-  }
-  .fn-purpose-section .fp-section-name {
-    font-weight: 600; font-size: 11px; color: #0550ae;
-    margin-bottom: 4px;
-  }
-  .fn-purpose-section .fp-section-range {
-    font-family: ui-monospace, monospace;
-    font-size: 10px; color: #656d76;
-    margin-left: 6px; font-weight: 400;
-  }
-
-  /* ========== Syntax highlighting ========== */
-  .sh-kw  { color: #cf222e; font-weight: 600; }
-  .sh-ty  { color: #8250df; }
-  .sh-str { color: #0a3069; }
-  .sh-num { color: #0550ae; }
-  .sh-cmt { color: #6e7781; font-style: italic; }
-  .sh-pp  { color: #953800; }
-  .sh-fn  { color: #8250df; }
-  .sh-op  { color: #24292f; }
-
-  /* ========== v0.4: Semantic block chunking ========== */
-
-  /* --- Preamble region (lines outside any walkthrough chunk) --- */
-  .code-table tr.preamble-line td.line-content { opacity: 0.5; }
-  .code-table tr.preamble-line td.line-num     { opacity: 0.45; }
-  .code-table tr.preamble-line td.change-marker{ opacity: 0.45; }
-
-  /* --- Semantic block wrapper --- */
-  .semantic-block {
-    border: 2px solid #d0d7de;
-    border-radius: 6px;
-    margin: 8px 6px;
-    overflow: hidden;
-    background: #ffffff;
-    transition: border-color 0.15s;
-  }
-  .semantic-block:hover { border-color: #0969da; }
-
-  .semantic-block-header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 5px 12px;
-    background: #f0edff;
-    border-bottom: 1px solid #e0daf5;
-    font-size: 11px;
-  }
-  .sb-chunk-role {
-    font-weight: 700; color: #6f42c1;
-    text-transform: uppercase; letter-spacing: 0.4px;
-  }
-  .sb-line-range {
-    font-family: ui-monospace, monospace;
-    font-size: 10px; color: #656d76;
-  }
-
-  .semantic-block .code-table { margin: 0; }
-
-  /* --- Inline explanation panel --- */
-  .sb-explanation {
-    padding: 10px 16px;
-    background: #f8f5ff;
-    border-top: 1px solid #e0daf5;
-    font-size: 12.5px;
-    line-height: 1.6;
-    color: #24292f;
-  }
-  .file-block.compact-mode .sb-explanation { display: none; }
-
-  /* --- Mode toggle controls --- */
-  .wt-controls {
-    padding: 4px 12px;
-    background: #f6f8fa;
-    border-bottom: 1px solid #eaeef2;
-    display: flex; justify-content: flex-end; gap: 8px;
-    align-items: center;
-  }
-  .wt-controls button {
-    font-size: 10px; font-family: inherit;
-    background: none; border: 1px solid #d0d7de;
-    border-radius: 4px; padding: 2px 8px;
-    cursor: pointer; color: #656d76;
-  }
-  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
-  .wt-controls button.active-mode {
-    background: #ddf4ff; border-color: #0969da; color: #0969da;
-    font-weight: 600;
-  }
-  .wt-mode-label {
-    font-size: 10px; color: #656d76;
-    margin-right: 4px;
-  }
-
-  /* Legacy annotation styles (fallback) */
-  .wt-annotation {
-    background: #f8f5ff;
-    border-left: 3px solid #c9b8ff;
-    padding: 8px 14px 8px 16px;
-    font-size: 12px;
-    line-height: 1.55;
-    color: #1a1a1a;
-  }
-  .wt-annotation-header {
-    display: flex; align-items: center; gap: 6px;
-    margin-bottom: 4px;
-  }
-  .wt-toggle {
-    cursor: pointer; user-select: none;
-    color: #8250df; font-size: 11px; flex-shrink: 0;
-    transition: transform 0.15s;
-  }
-  .wt-toggle.collapsed { transform: rotate(-90deg); }
-  .wt-chunk-role {
-    font-size: 10px; font-weight: 700;
-    color: #6f42c1;
-    text-transform: uppercase; letter-spacing: 0.4px;
-  }
-  .wt-line-range {
-    font-family: ui-monospace, monospace;
-    font-size: 10px; color: #656d76;
-  }
-  .wt-explanation {
-    font-size: 12.5px; color: #24292f;
-    line-height: 1.55;
-  }
-  .wt-annotation.wt-collapsed .wt-explanation { display: none; }
-  .wt-annotation-cell { padding: 0 !important; border: none !important; }
-
-  /* ========== Step navigation footer ========== */
-  .step-nav {
-    position: sticky; bottom: 0;
-    padding: 12px 24px;
-    background: #ffffff;
-    border-top: 1px solid #d0d7de;
-    display: flex; justify-content: space-between; gap: 12px;
-  }
-  .nav-button {
-    padding: 6px 12px;
-    background: #ffffff;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    font-size: 13px;
-    font-family: inherit;
-    cursor: pointer;
-    color: #1a1a1a;
-  }
-  .nav-button:hover:not(:disabled) {
-    background: #f6f8fa;
-    border-color: #1a1a1a;
-  }
-  .nav-button:disabled { color: #afb8c1; cursor: not-allowed; }
-
-  /* ========== Right pane: collapsible sections ========== */
-  .analysis-section {
-    border-bottom: 1px solid #eaeef2;
-    border-left: 4px solid transparent;
-  }
-  .analysis-section .section-header {
-    padding: 12px 16px;
-    cursor: pointer;
-    user-select: none;
+  /* ------- App shell ------- */
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  .topbar {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    z-index: 20;
+  }
+  .topbar-left { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .topbar-back {
+    font-size: 12px;
+    color: var(--fg-soft);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .topbar-back:hover { background: var(--bg); color: var(--fg); }
+  .file-badge {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    color: var(--fg-faint);
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .topbar-title {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .topbar-subtitle {
+    font-size: 13px;
+    color: var(--fg-soft);
+  }
+  .topbar-subtitle::before { content: '·'; margin: 0 6px; color: var(--fg-faint); }
+
+  .legend {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    font-size: 11px;
+    color: var(--fg-soft);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+
+  .topbar-actions { display: flex; gap: 8px; align-items: center; }
+  .icon-btn {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--fg-soft);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--bg); color: var(--fg); }
+
+  /* ------- Main canvas ------- */
+  .main {
+    flex: 1 1 auto;
+    overflow: auto;
+    position: relative;
+    background: var(--bg);
+  }
+  .canvas {
+    padding: 32px;
+    min-height: 100%;
+    position: relative;
+  }
+  .canvas-inner { position: relative; }
+
+  /* ------- Cols grid ------- */
+  .cols {
+    display: grid;
+    grid-template-columns: repeat(var(--col-count, 4), minmax(260px, 1fr));
+    gap: 28px;
+    align-items: start;
+    position: relative;
+    z-index: 1;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .col-header {
+    margin-bottom: 4px;
+  }
+  .step-label {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--fg-faint);
+    font-weight: 600;
+  }
+  .col-title {
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .col-title .glyph { color: var(--accent); margin-right: 4px; font-style: italic; }
+  .col-description {
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    line-height: 1.45;
+  }
+
+  /* ------- Block card ------- */
+  .block {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 120ms, box-shadow 120ms;
+    position: relative;
+  }
+  .block:hover {
+    border-color: #c9cdd2;
+    box-shadow: var(--shadow-md);
+  }
+  .block.selected {
+    border-color: var(--border-strong);
+    border-width: 2px;
+    padding: 11px 13px;
+    box-shadow: var(--shadow-md);
+  }
+  .block-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
     gap: 8px;
   }
-  .analysis-section .section-header:hover { background: rgba(0,0,0,0.03); }
-  .section-title-row {
-    display: flex; align-items: center; gap: 6px;
-    flex: 1; min-width: 0;
-  }
-  .section-title {
-    font-size: 12px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    word-wrap: break-word;
-  }
-  .section-toggle {
-    color: #656d76; font-size: 11px;
-    flex-shrink: 0;
-    transition: transform 0.15s;
-  }
-  .analysis-section.collapsed .section-toggle { transform: rotate(-90deg); }
-  .analysis-section .section-body {
-    font-size: 13px; color: #1a1a1a;
-    padding: 0 16px 14px 16px;
-    line-height: 1.55; word-wrap: break-word;
-    overflow: hidden;
-  }
-  .analysis-section.collapsed .section-body { display: none; }
-  .analysis-section .section-body p { margin-bottom: 8px; }
-  .analysis-section .section-body p:last-child { margin-bottom: 0; }
-  .analysis-section .section-body ul, .analysis-section .section-body ol {
-    margin-left: 20px; margin-bottom: 8px;
-  }
-  .analysis-section .section-body li { margin-bottom: 4px; }
-
-  /* Section types — left border + header bg color */
-  .analysis-section.prereq      { border-left-color: #0969da; }
-  .analysis-section.prereq .section-title { color: #0550ae; }
-  .analysis-section.prereq .section-header { background: #f6fbff; }
-  .analysis-section.summary     { border-left-color: #6e7781; }
-  .analysis-section.summary .section-title { color: #1a1a1a; }
-  .analysis-section.anchor      { border-left-color: #bf8700; }
-  .analysis-section.anchor .section-title { color: #9a6700; }
-  .analysis-section.anchor .section-header { background: #fffbf3; }
-  .analysis-section.invariants  { border-left-color: #1f883d; }
-  .analysis-section.invariants .section-title { color: #1a7f37; }
-  .analysis-section.invariants .section-header { background: #f6fff8; }
-  .analysis-section.usage       { border-left-color: #8250df; }
-  .analysis-section.usage .section-title { color: #6f42c1; }
-  .analysis-section.usage .section-header { background: #faf7ff; }
-  .analysis-section.data-structures { border-left-color: #1f6feb; }
-  .analysis-section.data-structures .section-title { color: #0550ae; }
-  .analysis-section.data-structures .section-header { background: #f6fbff; }
-  .analysis-section.tests       { border-left-color: #1a7f37; }
-  .analysis-section.tests .section-title { color: #1a7f37; }
-  .analysis-section.tests .section-header { background: #f6fff8; }
-  .analysis-section.patterns    { border-left-color: #9a6700; }
-  .analysis-section.patterns .section-title { color: #9a6700; }
-  .analysis-section.patterns .section-header { background: #fffbf3; }
-  .analysis-section.design-rationale { border-left-color: #cf222e; }
-  .analysis-section.design-rationale .section-title { color: #82071e; }
-  .analysis-section.design-rationale .section-header { background: #fff5f5; }
-  .analysis-section.analysis    { border-left-color: #6f42c1; }
-  .analysis-section.analysis .section-title { color: #6f42c1; }
-  .analysis-section.analysis .section-header { background: #faf7ff; }
-
-  .anchor-callout {
-    padding: 12px 14px;
-    background: linear-gradient(180deg, #fffbe8 0%, #fffdf3 100%);
-    border-left: 3px solid #bf8700;
-    border-radius: 0 6px 6px 0;
-    font-size: 13px;
-    line-height: 1.6;
-    color: #1a1a1a;
-  }
-  .anchor-callout::before {
-    content: '💡 ';
-    margin-right: 4px;
-  }
-
-  .tag {
-    font-size: 9px; padding: 1px 5px; border-radius: 3px;
-    text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700;
-    background: rgba(0,0,0,0.06);
-    color: inherit; flex-shrink: 0;
-    white-space: nowrap;
-  }
-
-  /* ========== Right pane content blocks ========== */
-  .ba-block {
-    margin-bottom: 10px;
-  }
-  .ba-block:last-child { margin-bottom: 0; }
-  .ba-label {
-    font-size: 10px; font-weight: 700;
-    color: #656d76;
-    text-transform: uppercase; letter-spacing: 0.4px;
-    margin-bottom: 3px;
-  }
-  .ba-content {
-    font-size: 12.5px;
-  }
-
-  .prereq-item {
-    margin-bottom: 10px; padding-bottom: 10px;
-    border-bottom: 1px dashed #d0d7de;
-  }
-  .prereq-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
-  .prereq-kind {
-    font-size: 10px; color: #656d76;
-    text-transform: uppercase; letter-spacing: 0.4px;
-    margin-bottom: 4px;
-  }
-  .prereq-ref {
-    font-family: ui-monospace, monospace;
-    font-size: 11px; color: #0969da;
-    cursor: pointer; margin-left: 4px;
-  }
-  .prereq-ref:hover { text-decoration: underline; }
-
-  .caller-item {
-    margin-bottom: 12px; padding-bottom: 10px;
-    border-bottom: 1px dashed #d0d7de;
-  }
-  .caller-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
-  .caller-loc {
-    font-family: ui-monospace, monospace;
-    font-size: 11px; color: #656d76;
-    margin-bottom: 4px;
-  }
-  .caller-snippet {
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
-    background: #f6f8fa;
-    padding: 4px 8px; border-radius: 4px;
-    margin-bottom: 4px;
-    white-space: pre-wrap; word-break: break-all;
-    color: #24292f;
-  }
-
-  .test-item {
-    margin-bottom: 8px;
-    padding: 6px 8px;
-    background: rgba(0,0,0,0.03);
-    border-radius: 4px;
-    font-size: 12px;
-  }
-  .test-item:last-child { margin-bottom: 0; }
-  .test-name {
-    font-family: ui-monospace, monospace;
-    font-weight: 600;
-    color: #1a1a1a;
-  }
-  .test-loc {
-    font-family: ui-monospace, monospace;
-    font-size: 10.5px;
-    color: #656d76;
-  }
-
-  ul.bullet-list {
-    list-style: none; padding: 0; margin: 0;
-  }
-  ul.bullet-list li {
-    padding-left: 16px; position: relative;
-    margin-bottom: 6px; font-size: 13px;
-  }
-  ul.bullet-list li:last-child { margin-bottom: 0; }
-  ul.bullet-list li::before {
-    content: '▸'; position: absolute; left: 0;
-    color: #656d76;
-  }
-
-  .ds-item {
-    margin-bottom: 12px; padding: 8px 10px;
-    background: #f6fbff;
-    border-left: 3px solid #b6e3ff;
-    border-radius: 0 4px 4px 0;
-  }
-  .ds-item:last-child { margin-bottom: 0; }
-  .ds-name {
-    font-family: ui-monospace, monospace;
-    font-weight: 700; color: #0550ae;
-    font-size: 12px;
-  }
-  .ds-shape {
-    font-size: 11px; color: #656d76;
-    font-style: italic;
-    margin: 2px 0;
-  }
-  .ds-role { font-size: 12px; }
-
-  .alt-item {
-    margin-bottom: 12px; padding-bottom: 10px;
-    border-bottom: 1px dashed #d0d7de;
-  }
-  .alt-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
-  .alt-approach { font-weight: 600; margin-bottom: 4px; }
-  .alt-evidence-tag {
-    font-size: 9px; padding: 1px 5px; border-radius: 3px;
-    margin-left: 4px;
-    text-transform: uppercase; font-weight: 700;
-  }
-  .alt-evidence-tag.evidenced { background: #dafbe1; color: #1a7f37; }
-  .alt-evidence-tag.analytical { background: #fff8c5; color: #9a6700; }
-
-  /* Inline markdown */
-  .section-body strong { font-weight: 600; }
-  .section-body code {
-    font-family: ui-monospace, monospace;
-    font-size: 0.92em;
-    background: rgba(0,0,0,0.05);
-    padding: 1px 4px; border-radius: 3px;
-  }
-
-  /* ========== Empty state & overview pages ========== */
-  .empty-state {
-    padding: 40px 20px;
-    text-align: center;
-    color: #656d76; font-size: 13px;
-  }
-
-  .pr-overview, .storyline-overview {
-    padding: 24px 32px 80px 32px;
-    max-width: 800px;
-  }
-  .pr-overview h1 { font-size: 22px; margin-bottom: 12px; word-wrap: break-word; }
-  .storyline-overview h1 { font-size: 20px; margin-bottom: 12px; word-wrap: break-word; }
-  .pr-overview h2, .storyline-overview h2 {
-    font-size: 14px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    color: #656d76;
-    margin-top: 28px; margin-bottom: 12px;
-    padding-bottom: 4px; border-bottom: 1px solid #d0d7de;
-  }
-  .pr-overview .one-liner, .storyline-overview .one-liner {
-    font-size: 15px; color: #1a1a1a; margin-bottom: 12px;
-  }
-  .pr-overview .description, .storyline-overview .description {
-    color: #1a1a1a; font-size: 14px;
-    padding: 12px 16px;
-    background: #f6f8fa;
-    border-left: 3px solid #d0d7de;
-    border-radius: 0 6px 6px 0;
-    margin-bottom: 8px;
-  }
-  .pr-overview .storyline-summary {
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 12px 16px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: border-color 0.1s;
-  }
-  .pr-overview .storyline-summary:hover { border-color: #0969da; }
-  .pr-overview .storyline-summary.depth-summary { border-style: dashed; background: #fbfcfd; }
-  .pr-overview .ss-title-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-  .pr-overview .ss-title { font-weight: 600; flex: 1; min-width: 0; }
-  .pr-overview .ss-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-  .pr-overview .ss-summary { font-size: 13px; color: #656d76; }
-  .pr-overview .ss-anchor {
-    font-size: 12.5px; color: #1a1a1a;
-    margin-top: 8px; padding: 8px 12px;
-    background: #fffbe8; border-left: 2px solid #bf8700;
-    border-radius: 0 4px 4px 0;
-  }
-  .pr-overview .ss-anchor::before { content: '💡 '; }
-  .promote-btn {
-    margin-top: 8px;
-    font-size: 11px; font-family: inherit;
-    background: #ffffff; border: 1px solid #d0d7de;
-    border-radius: 4px; padding: 3px 10px;
-    cursor: pointer; color: #656d76;
-  }
-  .promote-btn:hover { background: #ddf4ff; color: #0969da; border-color: #0969da; }
-
-  /* Scope panel on Reading Overview */
-  .scope-panel {
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 14px 18px;
-    margin-bottom: 16px;
-    background: #fafbfc;
-  }
-  .scope-mode-tag {
-    display: inline-block;
-    font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    padding: 2px 8px; border-radius: 10px;
-    margin-bottom: 8px;
-  }
-  .scope-mode-tag.mode-files { background: #dafbe1; color: #1a7f37; }
-  .scope-mode-tag.mode-topic { background: #ddf4ff; color: #0969da; }
-  .scope-input {
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
-    background: #ffffff;
-    padding: 6px 10px;
-    border-radius: 4px;
-    border: 1px solid #eaeef2;
-    margin-bottom: 12px;
-    word-break: break-all;
-  }
-  .scope-list { margin-top: 6px; }
-  .scope-item {
-    font-size: 12px;
-    padding: 4px 0;
-    border-bottom: 1px dashed #eaeef2;
-  }
-  .scope-item:last-child { border-bottom: 0; }
-  .scope-item-path {
-    font-family: ui-monospace, monospace;
-    color: #1a1a1a;
-  }
-  .scope-item-reason {
-    color: #656d76;
-    font-size: 11px;
-    margin-left: 6px;
-  }
-  .scope-confirmed-caption {
-    font-size: 11px; color: #1a7f37;
-    font-style: italic;
-    margin-top: 8px;
-  }
-  .scope-criteria {
-    font-size: 12.5px; color: #1a1a1a;
-    padding: 8px 12px;
-    background: #ffffff;
-    border-left: 3px solid #d0d7de;
-    border-radius: 0 4px 4px 0;
-    margin-top: 10px;
-  }
-
-  /* Storyline-overview scoped */
-  .storyline-overview .anchor-prominent {
-    padding: 14px 18px;
-    background: linear-gradient(180deg, #fffbe8 0%, #fffdf3 100%);
-    border-left: 4px solid #bf8700;
-    border-radius: 0 6px 6px 0;
-    font-size: 14px;
-    line-height: 1.6;
-    margin-bottom: 16px;
-  }
-  .storyline-overview .anchor-prominent .label {
-    font-size: 11px; font-weight: 700; color: #9a6700;
-    text-transform: uppercase; letter-spacing: 0.4px;
-    margin-bottom: 6px;
-  }
-  .storyline-overview .anchor-prominent::before { content: ''; }
-
-  .storyline-overview .purpose-block, .storyline-overview .arch-block {
-    margin-bottom: 14px;
-  }
-  .storyline-overview .purpose-block .label,
-  .storyline-overview .arch-block .label {
-    font-size: 11px; font-weight: 700;
-    color: #656d76;
-    text-transform: uppercase; letter-spacing: 0.4px;
-    margin-bottom: 4px;
-  }
-  .storyline-overview .discrepancy {
-    background: #fff8c5; border-left: 3px solid #bf8700;
-    padding: 10px 14px; border-radius: 0 6px 6px 0;
-    margin-top: 8px;
-  }
-  .storyline-overview .discrepancy .label { color: #9a6700; }
-
-  .storyline-overview .modules-list {
-    list-style: none; padding: 0;
-  }
-  .storyline-overview .modules-list li {
-    padding: 6px 10px; margin-bottom: 4px;
-    background: #f6f8fa; border-radius: 4px;
-    font-size: 13px;
-  }
-  .storyline-overview .module-name {
-    font-family: ui-monospace, monospace;
-    font-weight: 600;
-    color: #1a1a1a;
-  }
-
-  .storyline-overview .diagram-box {
-    background: #f6f8fa;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 14px;
-    overflow-x: auto;
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
-    white-space: pre;
-    line-height: 1.5;
-  }
-
-  .storyline-overview .step-list-roadmap {
-    list-style: none; padding: 0;
-    margin-top: 8px;
-  }
-  .storyline-overview .step-list-roadmap li {
-    padding: 8px 12px;
-    margin-bottom: 4px;
-    border: 1px solid #d0d7de;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    transition: border-color 0.1s, background 0.1s;
-  }
-  .storyline-overview .step-list-roadmap li:hover {
-    border-color: #0969da; background: #f6fbff;
-  }
-  .storyline-overview .step-list-roadmap .step-id-roadmap {
-    font-family: ui-monospace, monospace;
-    font-size: 11px;
-    color: #656d76;
-    margin-right: 10px;
-  }
-  .storyline-overview .step-list-roadmap .step-track-roadmap {
+  .block-phase {
     font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 10px;
-    margin-left: 8px;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     font-weight: 600;
-    letter-spacing: 0.3px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--phase-bg, var(--bg));
+    color: var(--phase-fg, var(--fg-soft));
   }
-  .storyline-overview .start-reading-btn {
-    display: inline-block;
-    padding: 8px 16px;
-    background: #1a7f37; color: white;
-    border: none; border-radius: 6px;
-    font-size: 13px; font-weight: 600;
-    cursor: pointer; margin-top: 16px;
-    font-family: inherit;
-  }
-  .storyline-overview .start-reading-btn:hover { background: #1f883d; }
-
-  /* ========== Step-graph diagram (storyline overview + reading overview) ========== */
-  .step-diagram-canvas {
-    position: relative;
-    background: #fafbfc;
-    border: 1px solid #d0d7de;
-    border-radius: 8px;
-    margin-top: 8px;
-    overflow: auto;
-  }
-  .step-diagram-canvas svg.connectors {
-    position: absolute; top: 0; left: 0;
-    pointer-events: none;
-  }
-  .step-box {
-    position: absolute;
-    background: #ffffff;
-    border: 1px solid #d0d7de;
-    border-radius: 8px;
-    padding: 9px 12px;
-    cursor: pointer;
-    transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    user-select: none;
-  }
-  .step-box:hover {
-    border-color: #0969da;
-    box-shadow: 0 2px 8px rgba(9, 105, 218, 0.18);
-    transform: translateY(-1px);
-  }
-  .step-box.track-core      { border-left: 4px solid #0969da; }
-  .step-box.track-supporting{ border-left: 4px solid #6f42c1; }
-  .step-box.track-utility   { border-left: 4px solid #9a6700; }
-  .step-box.track-data      { border-left: 4px solid #1f6feb; }
-  .step-box.track-extension { border-left: 4px solid #d18c1a; }
-  .step-box .top-row {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 10px; color: #656d76; margin-bottom: 4px;
-  }
-  .step-box .step-id { font-family: ui-monospace, monospace; font-weight: 600; color: #1a1a1a; }
-  .step-box .track-tag {
-    text-transform: uppercase; letter-spacing: 0.4px;
-    padding: 1px 6px; border-radius: 8px; font-weight: 700;
-  }
-  .step-box.track-core      .track-tag { background: #ddf4ff; color: #0969da; }
-  .step-box.track-supporting .track-tag{ background: #f0e7ff; color: #6f42c1; }
-  .step-box.track-utility   .track-tag { background: #fff8c5; color: #9a6700; }
-  .step-box.track-data      .track-tag { background: #ddf4ff; color: #1f6feb; }
-  .step-box.track-extension .track-tag { background: #ffe7ce; color: #b04600; }
-  .step-box .step-title { font-weight: 600; font-size: 12.5px; margin-bottom: 4px; line-height: 1.32; }
-  .step-box .step-summary { font-size: 11px; color: #444; line-height: 1.4; }
-
-  /* Storyline cluster: full and summary depth */
-  .storyline-cluster {
-    position: absolute;
-    background: rgba(255,255,255,0.55);
-    border: 1.5px dashed #c9d1d9;
-    border-radius: 12px;
-    padding-top: 30px;
-    transition: border-color 0.12s;
-  }
-  /* Reading-skill kind palette */
-  .storyline-cluster.kind-core_flow      { border-color: #b6e3ff; background: rgba(221, 244, 255, 0.30); }
-  .storyline-cluster.kind-entry_point    { border-color: #b6e3ff; background: rgba(221, 244, 255, 0.30); }
-  .storyline-cluster.kind-algorithm      { border-color: #ddc3ff; background: rgba(240, 231, 255, 0.30); }
-  .storyline-cluster.kind-data_model     { border-color: #aceebb; background: rgba(218, 251, 225, 0.30); }
-  .storyline-cluster.kind-extension_point{ border-color: #ffd6a5; background: rgba(255, 231, 206, 0.30); }
-  .storyline-cluster.kind-utility        { border-color: #d0d7de; background: rgba(246, 248, 250, 0.50); }
-  .storyline-cluster.kind-glue           { border-color: #d0d7de; background: rgba(246, 248, 250, 0.50); }
-  .storyline-cluster.kind-config         { border-color: #f8e57b; background: rgba(255, 248, 197, 0.30); }
-  .storyline-cluster.kind-mixed          { border-color: #d0d7de; background: rgba(246, 248, 250, 0.40); }
-
-  .storyline-cluster.depth-summary {
-    border-style: dashed;
-    background: rgba(246, 248, 250, 0.55);
-    opacity: 0.95;
-  }
-  .storyline-cluster .cluster-label {
-    position: absolute;
-    top: 6px; left: 14px; right: 14px;
-    font-size: 11px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    color: #1a1a1a;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    cursor: pointer;
-    display: flex; align-items: center; gap: 6px;
-  }
-  .storyline-cluster .cluster-label:hover { color: #0969da; }
-  .storyline-cluster .cluster-label .cluster-id {
-    font-family: ui-monospace, monospace; color: #656d76;
-  }
-  .storyline-cluster .cluster-label .cluster-imp {
-    font-family: ui-monospace, monospace; font-size: 10px; font-weight: 700;
-    padding: 1px 6px; border-radius: 8px;
-    background: #eaeef2; color: #656d76;
-    cursor: help;
-  }
-  .storyline-cluster .cluster-label .cluster-imp.imp-high { background: #ffd6a5; color: #82071e; }
-  .storyline-cluster .cluster-label .cluster-imp.imp-mid  { background: #fff8c5; color: #9a6700; }
-  .storyline-cluster .cluster-label .cluster-imp.imp-low  { background: #eaeef2; color: #656d76; }
-  .storyline-cluster .cluster-label .cluster-title {
-    flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis;
-  }
-
-  /* Empty body for summary-only clusters */
-  .storyline-cluster .summary-only-body {
-    position: absolute;
-    top: 36px; left: 14px; right: 14px;
-    text-align: center;
-    color: #656d76;
+  .block-range {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
-    font-style: italic;
-    text-transform: none;
-    letter-spacing: normal;
+    color: var(--fg-faint);
   }
-  .storyline-cluster .summary-only-body .pill {
-    display: inline-block;
-    margin-top: 4px;
-    padding: 3px 10px;
-    border-radius: 10px;
-    background: #eaeef2;
-    color: #656d76;
-    font-size: 10px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.4px;
-  }
-
-  .step-diagram-legend {
-    margin-top: 10px;
-    font-size: 11px; color: #656d76;
-    display: flex; gap: 18px; flex-wrap: wrap;
-  }
-  .step-diagram-legend .legend-item { display: flex; align-items: center; gap: 6px; }
-  .step-diagram-legend .legend-line {
-    display: inline-block; width: 22px; height: 0;
-    border-top: 2px solid #0969da;
-  }
-  .step-diagram-legend .legend-line.dashed {
-    border-top-style: dashed; border-top-color: #6f42c1;
-  }
-
-  /* ========== Live-mode Q&A section ========== */
-  .analysis-section.qa { border-left-color: #1f883d; }
-  .analysis-section.qa .section-title { color: #1a7f37; }
-  .analysis-section.qa .section-header { background: #f6fff8; }
-
-  .qa-input-row {
-    display: flex; flex-direction: column; gap: 6px;
-    margin-bottom: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px dashed #d0d7de;
-  }
-  .qa-textarea {
-    width: 100%;
-    min-height: 56px;
-    max-height: 200px;
-    resize: vertical;
-    padding: 8px 10px;
-    border: 1px solid #d0d7de;
-    border-radius: 4px;
-    font-family: inherit;
+  .block-title {
+    margin-top: 8px;
     font-size: 13px;
-    line-height: 1.45;
-    color: #1a1a1a;
-    background: #ffffff;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg);
   }
-  .qa-textarea:focus {
-    outline: none;
-    border-color: #0969da;
-    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.15);
-  }
-  .qa-textarea:disabled {
-    background: #f6f8fa; color: #656d76;
-  }
-  .qa-input-controls {
-    display: flex; align-items: center; gap: 8px;
-    justify-content: space-between;
-  }
-  .qa-hint {
-    font-size: 10.5px; color: #656d76;
-  }
-  .qa-ask-btn {
-    padding: 5px 14px;
-    background: #1a7f37; color: white;
-    border: 1px solid #1a7f37; border-radius: 4px;
-    font-size: 12px; font-weight: 600;
-    font-family: inherit; cursor: pointer;
-  }
-  .qa-ask-btn:hover:not(:disabled) { background: #1f883d; }
-  .qa-ask-btn:disabled {
-    background: #94d3a2; border-color: #94d3a2; cursor: not-allowed;
-  }
-  .qa-cancel-btn {
-    padding: 5px 10px;
-    background: #ffffff; color: #cf222e;
-    border: 1px solid #d0d7de; border-radius: 4px;
-    font-size: 11px; font-family: inherit; cursor: pointer;
-  }
-  .qa-cancel-btn:hover { border-color: #cf222e; }
-
-  .qa-pending {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 10px;
-    background: #f6fff8;
-    border-left: 3px solid #1f883d;
-    border-radius: 0 4px 4px 0;
-    font-size: 12px; color: #1a7f37;
-    margin-bottom: 10px;
-  }
-  .qa-spinner {
-    display: inline-block;
-    width: 12px; height: 12px;
-    border: 2px solid #aceebb;
-    border-top-color: #1a7f37;
-    border-radius: 50%;
-    animation: qa-spin 0.7s linear infinite;
-  }
-  @keyframes qa-spin { to { transform: rotate(360deg); } }
-  .qa-elapsed {
-    font-family: ui-monospace, monospace;
-    font-size: 10.5px; color: #656d76;
-  }
-
-  .qa-error {
-    padding: 8px 10px;
-    background: #ffebe9;
-    border-left: 3px solid #cf222e;
-    border-radius: 0 4px 4px 0;
-    font-size: 12px; color: #82071e;
-    margin-bottom: 10px;
-    word-break: break-word;
-  }
-
-  .qa-list { display: flex; flex-direction: column; gap: 12px; }
-  .qa-item {
-    border: 1px solid #d0d7de;
-    border-radius: 4px;
-    background: #ffffff;
-    overflow: hidden;
-  }
-  .qa-item-question {
-    padding: 8px 10px;
-    background: #f6f8fa;
+  .block-one-liner {
+    margin-top: 6px;
     font-size: 12.5px;
-    font-weight: 600;
-    color: #1a1a1a;
-    border-bottom: 1px solid #eaeef2;
-    word-break: break-word;
+    color: var(--fg-soft);
+    line-height: 1.5;
   }
-  .qa-item-question::before { content: '❯ '; color: #1a7f37; font-weight: 700; }
-  .qa-item-answer {
-    padding: 10px 12px;
-    font-size: 12.5px;
+
+  /* ------- Block expanded code ------- */
+  .block-code {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
     line-height: 1.55;
-  }
-  .qa-item-answer p { margin-bottom: 8px; }
-  .qa-item-answer p:last-child { margin-bottom: 0; }
-  .qa-item-answer ul, .qa-item-answer ol {
-    margin-left: 20px; margin-bottom: 8px;
-  }
-  .qa-item-answer li { margin-bottom: 4px; }
-  .qa-item-answer pre {
-    background: #f6f8fa;
-    padding: 8px 10px;
+    background: var(--code-bg);
     border-radius: 4px;
     overflow-x: auto;
-    font-family: ui-monospace, monospace;
-    font-size: 11.5px;
-    line-height: 1.5;
-    margin: 6px 0;
   }
-  .qa-item-answer code {
-    font-family: ui-monospace, monospace;
-    font-size: 0.92em;
-    background: rgba(0,0,0,0.05);
-    padding: 1px 4px; border-radius: 3px;
+  .code-line { display: flex; gap: 12px; padding: 0 8px; }
+  .code-line .ln {
+    color: var(--fg-faint);
+    user-select: none;
+    text-align: right;
+    min-width: 30px;
+    flex-shrink: 0;
   }
-  .qa-item-answer pre code { background: transparent; padding: 0; }
-  .qa-item-meta {
-    padding: 4px 10px;
-    background: #fafbfc;
-    border-top: 1px solid #eaeef2;
-    font-family: ui-monospace, monospace;
+  .code-line .src { white-space: pre; }
+  .code-line.context .ln, .code-line.context .src { opacity: 0.45; }
+
+  /* ------- Reading overview ------- */
+  .overview {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 32px 0;
+  }
+  .overview h1 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+  .overview .pitch {
+    font-size: 15px;
+    color: var(--fg-soft);
+    margin-bottom: 24px;
+  }
+  .scope-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 28px;
+  }
+  .scope-panel h3 {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+  .scope-item { display: flex; gap: 10px; padding: 4px 0; font-size: 13px; }
+  .scope-item .reason {
     font-size: 10px;
-    color: #656d76;
-    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-soft);
+    background: var(--bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    align-self: center;
+  }
+  .scope-item .path {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    color: var(--fg);
+  }
+  .scope-item .note { color: var(--fg-soft); flex: 1; }
+  .scope-criteria {
+    margin-top: 12px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    font-style: italic;
   }
 
-  /* Live/static badge in left pane header */
-  .live-badge {
-    display: inline-block;
-    margin-top: 6px;
-    font-size: 10px; font-weight: 700;
-    padding: 1px 6px; border-radius: 8px;
-    text-transform: uppercase; letter-spacing: 0.4px;
+  .storyline-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    cursor: pointer;
+    transition: border-color 120ms, box-shadow 120ms;
   }
-  .live-badge.live   { background: #dafbe1; color: #1a7f37; }
-  .live-badge.static { background: #eaeef2; color: #656d76; }
+  .storyline-card:hover {
+    border-color: #c9cdd2;
+    box-shadow: var(--shadow-md);
+  }
+  .storyline-card.summary { background: var(--bg); cursor: default; }
+  .sc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .sc-title { font-size: 16px; font-weight: 600; margin: 0; }
+  .sc-badges { display: flex; gap: 6px; flex-shrink: 0; }
+  .sc-badge {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-soft);
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .sc-badge.score { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .sc-anchor {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+  .sc-files {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--fg-faint);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  .promote-btn {
+    margin-top: 12px;
+    font-size: 11px;
+    padding: 4px 10px;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-soft);
+    cursor: pointer;
+  }
+  .promote-btn:hover { background: var(--bg-card); color: var(--fg); border-style: solid; }
+
+  /* ------- Edges SVG overlay ------- */
+  .edges-svg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    overflow: visible;
+  }
+  .edge-path { fill: none; stroke-width: 1.5; }
+  .edge-path.dashed { stroke-dasharray: 5 4; }
+  .edge-label {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    fill: var(--edge-color, var(--fg-soft));
+  }
+  .edge-label-bg {
+    fill: var(--bg);
+    stroke: none;
+  }
+
+  /* ------- Right dock ------- */
+  .dock {
+    position: absolute;
+    top: 0; right: 0;
+    width: 400px;
+    height: 100%;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    padding: 24px 24px 80px;
+    overflow-y: auto;
+    box-shadow: -2px 0 12px rgba(0,0,0,0.05);
+    transform: translateX(100%);
+    transition: transform 180ms ease;
+    z-index: 10;
+  }
+  .dock.open { transform: translateX(0); }
+  .dock-breadcrumb {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    margin-bottom: 4px;
+  }
+  .dock-breadcrumb .sep { margin: 0 6px; color: var(--border); }
+  .dock-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: var(--fg-faint);
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+  }
+  .dock-close:hover { color: var(--fg); }
+  .dock-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 8px 0 4px;
+  }
+  .dock-subtitle {
+    font-size: 12px;
+    color: var(--fg-soft);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    margin-bottom: 18px;
+  }
+  .dock-section { margin-bottom: 20px; }
+  .dock-section h4 {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    margin: 0 0 8px;
+    font-weight: 600;
+  }
+  .dock-section p { margin: 0 0 8px; font-size: 13px; line-height: 1.55; }
+  .dock-section ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; }
+  .dock-section ul li { margin-bottom: 4px; }
+
+  .touch-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .touch-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-size: 11.5px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  .touch-chip.linked { cursor: pointer; }
+  .touch-chip.linked:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+  .kds-item { margin-bottom: 10px; }
+  .kds-item .name {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .kds-item .shape, .kds-item .role { font-size: 12.5px; color: var(--fg-soft); }
+
+  .prereq-item { margin-bottom: 8px; font-size: 12.5px; }
+  .prereq-item .kind {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    margin-right: 6px;
+  }
+  .prereq-item.linked { cursor: pointer; }
+  .prereq-item.linked:hover { color: var(--accent); }
+
+  /* ------- Q&A (live mode) ------- */
+  .qa-section { margin-top: 12px; }
+  .qa-input-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .qa-input {
+    flex: 1;
+    font-size: 13px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 32px;
+    max-height: 120px;
+  }
+  .qa-input:focus { border-color: var(--accent); outline: none; }
+  .qa-submit {
+    padding: 0 12px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: white;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .qa-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+  .qa-cancel {
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--fg-soft);
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .qa-item {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    background: var(--bg);
+    border-radius: 4px;
+    font-size: 12.5px;
+  }
+  .qa-q {
+    font-weight: 600;
+    color: var(--fg);
+    margin-bottom: 4px;
+  }
+  .qa-a { color: var(--fg-soft); line-height: 1.5; }
+  .qa-a p { margin: 0 0 6px; }
+  .qa-a pre {
+    background: var(--code-bg);
+    border-radius: 3px;
+    padding: 6px 8px;
+    overflow-x: auto;
+    font-size: 11.5px;
+  }
+  .qa-a code { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .qa-meta {
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--fg-faint);
+  }
+  .qa-pending {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg-soft);
+    font-size: 12px;
+  }
+  .qa-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-soft);
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .live-badge.live { color: #2f7a2f; border-color: #c7ddc7; background: #f0f8f0; }
+  .live-badge.live::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: #2f7a2f;
+    border-radius: 50%;
+  }
+
+  /* ------- Empty / error states ------- */
+  .empty-state {
+    padding: 60px 40px;
+    text-align: center;
+    color: var(--fg-soft);
+  }
 
 </style>
 </head>
 <body>
-
-<div class="layout">
-
-  <!-- ============ LEFT PANE ============ -->
-  <aside class="pane left-pane">
-    <div class="pr-header">
-      <div class="pr-title" id="pr-title">Loading...</div>
-      <div class="pr-subtitle" id="pr-subtitle"></div>
-      <button class="reset-btn" id="reset-btn" onclick="resetView()" title="Clear saved view state for this walkthrough">↺ Reset view</button>
-    </div>
-    <div class="nav-overview-link" id="pr-overview-link" onclick="goToReadingOverview()">📖 Reading Overview</div>
-    <div class="nav-tree" id="nav-tree"></div>
-  </aside>
-
-  <!-- ============ CENTER PANE ============ -->
-  <main class="pane center-pane" id="center-pane">
-    <div class="empty-state">Loading...</div>
+<div class="app" id="app">
+  <header class="topbar" id="topbar"></header>
+  <main class="main" id="main">
+    <div class="canvas" id="canvas"></div>
+    <aside class="dock" id="dock"></aside>
   </main>
-
-  <!-- ============ RIGHT PANE ============ -->
-  <aside class="pane right-pane" id="right-pane">
-    <div class="empty-state">Select a step to see context.</div>
-  </aside>
-
 </div>
 
 <script>
-  // ========== Data injection point ==========
   const WALKTHROUGH_DATA = /*WALKTHROUGH_DATA_PLACEHOLDER*/;
 
-  // ========== State ==========
+  // -------- State --------
   const state = {
-    view: 'reading_overview',     // 'reading_overview' | 'storyline_overview' | 'step'
-    currentStorylineId: null,
-    currentStepId: null,
-    sectionCollapsed: {},
+    view: 'overview',
+    storylineId: null,
+    selectedBlockId: null,
 
-    // Live mode (companion server detected via /__alive)
     liveMode: false,
-    serverInfo: null,        // { cli, model, walkthrough_key, ... } when liveMode
-    followups: {},           // { [stepId]: [qaEntry, ...] } newest-first
-    pendingAsk: null,        // { stepId, storylineId, question, startedAt, controller, error }
+    serverInfo: null,
+    followups: {},
+    pendingAsk: null,
   };
 
-  // Default-collapsed sections (others default-expanded). Reading-mode set:
-  // surface mental_model_anchor, invariants, walkthrough by default; tuck
-  // away the longer factual context until the reader asks for it.
-  const DEFAULT_COLLAPSED = new Set([
-    'usage_context',
-    'codebase_patterns',
-    'design_rationale',
-    'key_data_structures',
-    'analysis',
-  ]);
-
-  function isCollapsed(name) {
-    if (state.sectionCollapsed[name] !== undefined) return state.sectionCollapsed[name];
-    return DEFAULT_COLLAPSED.has(name);
-  }
-
-  function toggleSection(name) {
-    state.sectionCollapsed[name] = !isCollapsed(name);
-    const sec = document.querySelector(`.analysis-section[data-section="${name}"]`);
-    if (sec) sec.classList.toggle('collapsed');
-    saveState();
-  }
-
-  // ========== localStorage persistence ==========
-  function storageKey() {
-    const m = WALKTHROUGH_DATA.metadata || {};
-    // Cheap stable hash so we don't store giant strings as keys
-    function djb2(s) {
-      let h = 5381;
-      for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i);
-      return (h >>> 0).toString(36);
-    }
-    return 'crw:' + djb2((m.commit || '') + '|' + (m.target || ''));
-  }
+  const STORAGE_PREFIX = 'walkthrough.v0.5.' +
+    (WALKTHROUGH_DATA?.metadata?.commit ?? 'nocommit') + '.' +
+    (WALKTHROUGH_DATA?.metadata?.target ?? 'notarget') + '.';
 
   function saveState() {
     try {
-      const payload = {
+      localStorage.setItem(STORAGE_PREFIX + 'view', JSON.stringify({
         view: state.view,
-        currentStorylineId: state.currentStorylineId,
-        currentStepId: state.currentStepId,
-        sectionCollapsed: state.sectionCollapsed,
-      };
-      localStorage.setItem(storageKey(), JSON.stringify(payload));
-    } catch (_) { /* localStorage may be disabled — silently ignore */ }
+        storylineId: state.storylineId,
+        selectedBlockId: state.selectedBlockId,
+      }));
+    } catch (e) {}
   }
-
   function loadState() {
     try {
-      const raw = localStorage.getItem(storageKey());
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch (_) { return null; }
+      const raw = localStorage.getItem(STORAGE_PREFIX + 'view');
+      if (!raw) return;
+      const v = JSON.parse(raw);
+      Object.assign(state, v);
+    } catch (e) {}
   }
 
+  // -------- Lookup helpers --------
+  function getStoryline(id) {
+    return (WALKTHROUGH_DATA?.storylines ?? []).find(s => s.id === id);
+  }
+  function findBlock(storyline, blockId) {
+    if (!storyline?.diagram) return null;
+    for (const col of storyline.diagram.cols ?? []) {
+      for (const block of col.blocks ?? []) {
+        if (block.id === blockId) return { block, col };
+      }
+    }
+    return null;
+  }
+  function getPhaseDef(storyline, phaseId) {
+    return (storyline?.diagram?.phases ?? []).find(p => p.id === phaseId);
+  }
+  function phaseColorVars(phaseTokenOrColor) {
+    const namedTokens = ['guard','setup','main','handoff','cleanup','error','persist','emit'];
+    if (!phaseTokenOrColor) return { bg: 'var(--bg)', fg: 'var(--fg-soft)' };
+    if (namedTokens.includes(phaseTokenOrColor)) {
+      return {
+        bg: `var(--phase-${phaseTokenOrColor}-bg)`,
+        fg: `var(--phase-${phaseTokenOrColor}-fg)`,
+      };
+    }
+    return { bg: phaseTokenOrColor, fg: 'var(--fg)' };
+  }
+
+  // -------- Rendering: topbar --------
+  function renderTopbar() {
+    const top = document.getElementById('topbar');
+    if (state.view === 'overview' || !state.storylineId) {
+      top.innerHTML = `
+        <div class="topbar-left">
+          <div class="topbar-title">${escapeHtml(WALKTHROUGH_DATA?.metadata?.title ?? 'Walkthrough')}</div>
+        </div>
+        <div class="topbar-actions">
+          ${renderLiveBadge()}
+          <button class="icon-btn" id="reset-btn">↺ Reset view</button>
+        </div>
+      `;
+      document.getElementById('reset-btn').onclick = resetView;
+      return;
+    }
+
+    const storyline = getStoryline(state.storylineId);
+    const diagram = storyline?.diagram;
+    const fileBadge = diagram?.file_badge;
+    const subtitle = diagram?.subtitle;
+
+    top.innerHTML = `
+      <div class="topbar-left">
+        <span class="topbar-back" id="back-btn">← Storylines</span>
+        ${fileBadge ? `<span class="file-badge">File</span>` : ''}
+        <span class="topbar-title">${escapeHtml(fileBadge || storyline.title)}</span>
+        ${subtitle ? `<span class="topbar-subtitle">${escapeHtml(subtitle)}</span>` : ''}
+      </div>
+      <div class="legend">
+        ${renderPhaseLegend(diagram)}
+      </div>
+      <div class="topbar-actions">
+        ${renderLiveBadge()}
+        <button class="icon-btn" id="reset-btn">↺ Reset</button>
+      </div>
+    `;
+    document.getElementById('back-btn').onclick = () => goToOverview();
+    document.getElementById('reset-btn').onclick = resetView;
+  }
+
+  function renderPhaseLegend(diagram) {
+    if (!diagram?.phases?.length) return '';
+    return diagram.phases.map(p => {
+      const { bg } = phaseColorVars(p.color ?? p.id);
+      return `<span class="legend-item"><span class="legend-swatch" style="background:${bg}"></span>${escapeHtml(p.label)}</span>`;
+    }).join('');
+  }
+
+  // -------- Rendering: overview --------
+  function renderOverview() {
+    const canvas = document.getElementById('canvas');
+    const data = WALKTHROUGH_DATA;
+    if (!data) {
+      canvas.innerHTML = '<div class="empty-state">No walkthrough data loaded.</div>';
+      return;
+    }
+    const storylines = data.storylines ?? [];
+    canvas.innerHTML = `
+      <div class="overview">
+        <h1>${escapeHtml(data.metadata?.title ?? 'Walkthrough')}</h1>
+        <div class="pitch">${escapeHtml(data.summary?.one_line ?? '')}</div>
+        ${data.summary?.description ? `<p style="font-size:14px;color:var(--fg-soft);line-height:1.6;margin:0 0 24px;">${escapeHtml(data.summary.description)}</p>` : ''}
+        ${renderScopePanel(data.scope)}
+        <h3 style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--fg-faint);margin:8px 0 12px;">Storylines</h3>
+        ${storylines.map(renderStorylineCard).join('')}
+      </div>
+    `;
+    storylines.forEach(s => {
+      if (s.depth === 'full') {
+        const el = document.querySelector(`[data-storyline-id="${cssEscape(s.id)}"]`);
+        if (el) el.onclick = () => goToStoryline(s.id);
+      }
+    });
+  }
+
+  function renderScopePanel(scope) {
+    if (!scope) return '';
+    return `
+      <div class="scope-panel">
+        <h3>Scope (${escapeHtml(scope.mode || 'unknown')})</h3>
+        ${(scope.discovered_scope ?? []).map(s => `
+          <div class="scope-item">
+            <span class="reason">${escapeHtml(s.reason)}</span>
+            <span class="path">${escapeHtml(s.path)}</span>
+            <span class="note">${escapeHtml(s.note ?? '')}</span>
+          </div>
+        `).join('')}
+        ${scope.importance_criteria ? `<div class="scope-criteria">${escapeHtml(scope.importance_criteria)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  function renderStorylineCard(s) {
+    const isSummary = s.depth === 'summary';
+    const total = s.importance_scores?.total ?? '';
+    return `
+      <div class="storyline-card${isSummary ? ' summary' : ''}" data-storyline-id="${escapeAttr(s.id)}">
+        <div class="sc-head">
+          <h3 class="sc-title">${escapeHtml(s.title)}</h3>
+          <div class="sc-badges">
+            <span class="sc-badge">${escapeHtml(s.kind || '')}</span>
+            <span class="sc-badge score">${total}</span>
+            ${isSummary ? '<span class="sc-badge">summary</span>' : ''}
+          </div>
+        </div>
+        ${s.mental_model_anchor ? `<div class="sc-anchor">${escapeHtml(s.mental_model_anchor)}</div>` : ''}
+        ${isSummary && s.summary ? `<div class="sc-anchor">${escapeHtml(s.summary)}</div>` : ''}
+        ${(s.files_touched ?? []).length ? `<div class="sc-files">${s.files_touched.map(escapeHtml).join(' · ')}</div>` : ''}
+        ${isSummary ? '<button class="promote-btn" disabled title="Promote-to-full not implemented yet">Promote to full</button>' : ''}
+      </div>
+    `;
+  }
+
+  // -------- Rendering: storyline (flow inspector) --------
+  function renderStoryline() {
+    const canvas = document.getElementById('canvas');
+    const storyline = getStoryline(state.storylineId);
+    if (!storyline || !storyline.diagram) {
+      canvas.innerHTML = '<div class="empty-state">Storyline not found or has no diagram.</div>';
+      return;
+    }
+    const diagram = storyline.diagram;
+    const cols = diagram.cols ?? [];
+    canvas.innerHTML = `
+      <div class="canvas-inner">
+        <div class="cols" style="--col-count:${cols.length}">
+          ${cols.map((c, i) => renderCol(c, i, storyline)).join('')}
+        </div>
+        <svg class="edges-svg" id="edges-svg"></svg>
+      </div>
+    `;
+    bindBlockClicks();
+    renderEdges(storyline);
+  }
+
+  function renderCol(col, idx, storyline) {
+    return `
+      <div class="col" data-col-id="${escapeAttr(col.id)}">
+        <div class="col-header">
+          <div class="step-label">STEP ${idx + 1}</div>
+          <div class="col-title"><span class="glyph">ƒ</span>${escapeHtml(col.label || col.function || col.id)}</div>
+          ${col.description ? `<div class="col-description">${escapeHtml(col.description)}</div>` : ''}
+        </div>
+        ${(col.blocks ?? []).map(b => renderBlock(b, storyline)).join('')}
+      </div>
+    `;
+  }
+
+  function renderBlock(block, storyline) {
+    const phaseDef = getPhaseDef(storyline, block.phase);
+    const { bg, fg } = phaseColorVars(phaseDef?.color ?? block.phase);
+    const isSelected = state.selectedBlockId === block.id;
+    return `
+      <div class="block${isSelected ? ' selected' : ''}" data-block-id="${escapeAttr(block.id)}"
+           data-phase="${escapeAttr(block.phase)}"
+           style="--phase-bg:${bg};--phase-fg:${fg};">
+        <div class="block-head">
+          <span class="block-phase">${escapeHtml(phaseDef?.label || block.phase || '')}</span>
+          <span class="block-range">${escapeHtml(block.line_range || '')}</span>
+        </div>
+        <div class="block-title">${escapeHtml(block.title || '')}</div>
+        <div class="block-one-liner">${escapeHtml(block.one_liner || '')}</div>
+        ${isSelected ? renderBlockCode(block) : ''}
+      </div>
+    `;
+  }
+
+  function renderBlockCode(block) {
+    const cv = block.code_view;
+    if (!cv || !cv.lines?.length) return '';
+    const rangeLines = parseLineRange(block.line_range);
+    const html = cv.lines.map(l => {
+      const inRange = rangeLines && l.line_num >= rangeLines[0] && l.line_num <= rangeLines[1];
+      return `<div class="code-line${inRange ? '' : ' context'}"><span class="ln">${l.line_num}</span><span class="src">${escapeHtml(l.content)}</span></div>`;
+    }).join('');
+    return `<div class="block-code">${html}</div>`;
+  }
+
+  function parseLineRange(range) {
+    if (!range) return null;
+    const m = String(range).match(/L?(\d+)(?:[–—-](\d+))?/);
+    if (!m) return null;
+    const lo = parseInt(m[1], 10);
+    const hi = m[2] ? parseInt(m[2], 10) : lo;
+    return [lo, hi];
+  }
+
+  function bindBlockClicks() {
+    document.querySelectorAll('#canvas .block').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        selectBlock(el.dataset.blockId);
+      };
+    });
+  }
+
+  // -------- Selection --------
+  function selectBlock(id) {
+    state.selectedBlockId = (state.selectedBlockId === id) ? null : id;
+    saveState();
+    renderStoryline();
+    renderDock();
+    requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+  }
+
+  // -------- Edges --------
+  function renderEdges(storyline) {
+    const svg = document.getElementById('edges-svg');
+    if (!svg || !storyline?.diagram) return;
+    const edges = storyline.diagram.edges ?? [];
+    const inner = document.querySelector('.canvas-inner');
+    if (!inner) return;
+    const innerRect = inner.getBoundingClientRect();
+    svg.setAttribute('width', innerRect.width);
+    svg.setAttribute('height', innerRect.height);
+    svg.setAttribute('viewBox', `0 0 ${innerRect.width} ${innerRect.height}`);
+    const parts = [];
+    for (const e of edges) {
+      const fromEl = document.querySelector(`#canvas [data-block-id="${cssEscape(e.from)}"]`);
+      const toEl   = document.querySelector(`#canvas [data-block-id="${cssEscape(e.to)}"]`);
+      if (!fromEl || !toEl) continue;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const fromX = fr.right - innerRect.left;
+      const fromY = fr.top + fr.height / 2 - innerRect.top;
+      const toX   = tr.left  - innerRect.left;
+      const toY   = tr.top + tr.height / 2 - innerRect.top;
+      const sweep = Math.max(40, (toX - fromX) * 0.4);
+      const c1x = fromX + sweep;
+      const c2x = toX - sweep;
+      const d = `M ${fromX} ${fromY} C ${c1x} ${fromY}, ${c2x} ${toY}, ${toX} ${toY}`;
+      const color = e.color || '#777';
+      const cls = `edge-path${e.style === 'dashed' ? ' dashed' : ''}`;
+      parts.push(`<path class="${cls}" d="${d}" stroke="${color}" />`);
+      if (e.label) {
+        const midX = (fromX + toX) / 2;
+        const midY = (fromY + toY) / 2;
+        const labelW = e.label.length * 6 + 12;
+        parts.push(`<rect class="edge-label-bg" x="${midX - labelW/2}" y="${midY - 8}" width="${labelW}" height="14" rx="2"/>`);
+        parts.push(`<text class="edge-label" x="${midX}" y="${midY + 3}" text-anchor="middle" style="--edge-color:${color}">${escapeHtml(e.label)}</text>`);
+      }
+    }
+    svg.innerHTML = parts.join('');
+  }
+
+  function cssEscape(s) {
+    return String(s).replace(/[^a-zA-Z0-9_\-]/g, c => `\\${c}`);
+  }
+
+  // -------- Dock --------
+  function renderDock() {
+    const dock = document.getElementById('dock');
+    if (!state.selectedBlockId) {
+      dock.classList.remove('open');
+      dock.innerHTML = '';
+      return;
+    }
+    const storyline = getStoryline(state.storylineId);
+    const hit = findBlock(storyline, state.selectedBlockId);
+    if (!hit) { dock.classList.remove('open'); dock.innerHTML = ''; return; }
+    const { block, col } = hit;
+    const phaseDef = getPhaseDef(storyline, block.phase);
+    const rp = block.right_panel ?? {};
+    const lineCount = countLines(block.line_range);
+
+    dock.innerHTML = `
+      <button class="dock-close" id="dock-close">×</button>
+      <div class="dock-breadcrumb">${escapeHtml(col.label || col.function || col.id)}<span class="sep">·</span>${escapeHtml(phaseDef?.label || block.phase || '')}</div>
+      <div class="dock-title">${escapeHtml(block.title || '')}</div>
+      <div class="dock-subtitle">${escapeHtml(block.line_range || '')}${lineCount ? ` · ${lineCount} line${lineCount === 1 ? '' : 's'}` : ''}</div>
+
+      ${rp.what_it_does ? `<div class="dock-section"><h4>What it does</h4><p>${escapeHtml(rp.what_it_does)}</p></div>` : ''}
+      ${rp.why_its_here ? `<div class="dock-section"><h4>Why it's here</h4><p>${escapeHtml(rp.why_its_here)}</p></div>` : ''}
+      ${renderTouches(rp.touches)}
+      ${renderFailureMode(rp.failure_mode)}
+      ${renderInvariants(rp.invariants)}
+      ${renderKDS(rp.key_data_structures)}
+      ${renderPrereqs(rp.prerequisites)}
+      ${renderQASection(block, storyline, col)}
+    `;
+    dock.classList.add('open');
+    document.getElementById('dock-close').onclick = () => selectBlock(state.selectedBlockId);
+    bindTouchClicks();
+    bindPrereqClicks();
+    bindQAControls(block, storyline, col);
+  }
+
+  function renderTouches(touches) {
+    if (!touches?.length) return '';
+    return `
+      <div class="dock-section">
+        <h4>Touches</h4>
+        <div class="touch-chips">
+          ${touches.map(t => `<span class="touch-chip${t.block ? ' linked' : ''}" data-touch-block="${escapeAttr(t.block || '')}">${escapeHtml(t.label)}</span>`).join('')}
+        </div>
+      </div>
+    `;
+  }
+  function renderFailureMode(items) {
+    if (!items?.length) return '';
+    return `
+      <div class="dock-section">
+        <h4>Failure mode</h4>
+        <ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+      </div>
+    `;
+  }
+  function renderInvariants(items) {
+    if (!items?.length) return '';
+    return `
+      <div class="dock-section">
+        <h4>Invariants</h4>
+        <ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+      </div>
+    `;
+  }
+  function renderKDS(items) {
+    if (!items?.length) return '';
+    return `
+      <div class="dock-section">
+        <h4>Key data structures</h4>
+        ${items.map(k => `
+          <div class="kds-item">
+            <span class="name">${escapeHtml(k.name)}</span> — <span class="shape">${escapeHtml(k.shape)}</span>
+            <div class="role">${escapeHtml(k.role)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+  function renderPrereqs(items) {
+    if (!items?.length) return '';
+    return `
+      <div class="dock-section">
+        <h4>Prerequisites</h4>
+        ${items.map(p => `<div class="prereq-item${p.kind === 'prior_block' ? ' linked' : ''}" data-prereq-block="${escapeAttr(p.kind === 'prior_block' ? p.reference_id : '')}"><span class="kind">${escapeHtml(p.kind)}</span>${escapeHtml(p.summary)}</div>`).join('')}
+      </div>
+    `;
+  }
+  function bindTouchClicks() {
+    document.querySelectorAll('.touch-chip.linked').forEach(el => {
+      el.onclick = () => {
+        const id = el.dataset.touchBlock;
+        if (!id) return;
+        if (state.selectedBlockId !== id) {
+          state.selectedBlockId = id;
+          saveState();
+          renderStoryline();
+          renderDock();
+          requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+        }
+        scrollBlockIntoView(id);
+      };
+    });
+  }
+  function bindPrereqClicks() {
+    document.querySelectorAll('.prereq-item.linked').forEach(el => {
+      el.onclick = () => {
+        const id = el.dataset.prereqBlock;
+        if (!id) return;
+        if (state.selectedBlockId !== id) {
+          state.selectedBlockId = id;
+          saveState();
+          renderStoryline();
+          renderDock();
+          requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+        }
+        scrollBlockIntoView(id);
+      };
+    });
+  }
+  function scrollBlockIntoView(id) {
+    const el = document.querySelector(`#canvas [data-block-id="${cssEscape(id)}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function countLines(range) {
+    const r = parseLineRange(range);
+    if (!r) return 0;
+    return r[1] - r[0] + 1;
+  }
+
+  // -------- Q&A --------
+  function blockKey(storyline, col, block) {
+    return `${storyline.id}/${col.id}/${block.id}`;
+  }
+  function renderQASection(block, storyline, col) {
+    const key = blockKey(storyline, col, block);
+    const list = state.followups[key] ?? [];
+    const pending = state.pendingAsk && state.pendingAsk.blockKey === key;
+    if (!state.liveMode && list.length === 0) return '';
+    return `
+      <div class="dock-section qa-section">
+        <h4>Q&amp;A${state.liveMode ? '' : ' (snapshot — server offline)'}</h4>
+        ${list.map(renderQAItem).join('')}
+        ${pending ? `<div class="qa-pending"><div class="qa-spinner"></div>Asking… <button class="qa-cancel" id="qa-cancel">cancel</button></div>` : ''}
+        ${state.liveMode && !pending ? renderQAInput() : ''}
+      </div>
+    `;
+  }
+  function renderQAItem(item) {
+    return `
+      <div class="qa-item">
+        <div class="qa-q">Q: ${escapeHtml(item.question)}</div>
+        <div class="qa-a">${renderRichMarkdown(item.answer || '')}</div>
+        <div class="qa-meta">${escapeHtml(formatRelTime(item.ts))}</div>
+      </div>
+    `;
+  }
+  function renderQAInput() {
+    return `
+      <div class="qa-input-row">
+        <textarea class="qa-input" id="qa-input" placeholder="Ask about this block… (Enter to send, Shift+Enter for newline)"></textarea>
+        <button class="qa-submit" id="qa-submit">Ask</button>
+      </div>
+    `;
+  }
+  function bindQAControls(block, storyline, col) {
+    const key = blockKey(storyline, col, block);
+    const cancelBtn = document.getElementById('qa-cancel');
+    if (cancelBtn) cancelBtn.onclick = () => cancelAsk();
+    const submitBtn = document.getElementById('qa-submit');
+    const input = document.getElementById('qa-input');
+    if (submitBtn) submitBtn.onclick = () => submitQuestion(key, block, storyline, col);
+    if (input) input.addEventListener('keydown', e => qaKeyDown(e, key, block, storyline, col));
+  }
+  function qaKeyDown(e, key, block, storyline, col) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitQuestion(key, block, storyline, col);
+    }
+  }
+  async function submitQuestion(key, block, storyline, col) {
+    const input = document.getElementById('qa-input');
+    if (!input) return;
+    const q = input.value.trim();
+    if (!q) return;
+    const abort = new AbortController();
+    state.pendingAsk = { blockKey: key, q, abort, startedAt: Date.now() };
+    renderDock();
+    try {
+      const body = {
+        storyline_id: storyline.id,
+        col_id: col.id,
+        block_id: block.id,
+        question: q,
+      };
+      const res = await fetch('/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: abort.signal,
+      });
+      if (!res.ok) throw new Error(`/ask returned HTTP ${res.status}`);
+      const payload = await res.json();
+      const item = {
+        question: q,
+        answer: payload.answer ?? '(no answer)',
+        ts: payload.ts ?? new Date().toISOString(),
+      };
+      state.followups[key] = [...(state.followups[key] ?? []), item];
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        const item = {
+          question: q,
+          answer: `**Error:** ${err.message ?? String(err)}`,
+          ts: new Date().toISOString(),
+        };
+        state.followups[key] = [...(state.followups[key] ?? []), item];
+      }
+    } finally {
+      state.pendingAsk = null;
+      renderDock();
+    }
+  }
+  function cancelAsk() {
+    if (state.pendingAsk?.abort) state.pendingAsk.abort.abort();
+    state.pendingAsk = null;
+    renderDock();
+  }
+  async function preflight() {
+    try {
+      const res = await fetch('/__alive', { signal: AbortSignal.timeout(800) });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) { return null; }
+  }
+  async function loadFollowups() {
+    try {
+      const res = await fetch('/followups', { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) return;
+      const data = await res.json();
+      state.followups = data.followups ?? {};
+    } catch (e) {}
+  }
+  function renderLiveBadge() {
+    if (state.liveMode) return `<span class="live-badge live">live</span>`;
+    return `<span class="live-badge">static</span>`;
+  }
+
+  // -------- Markdown helpers --------
+  function renderRichMarkdown(text) {
+    if (!text) return '';
+    const escaped = escapeHtml(text);
+    const parts = escaped.split(/(```[\s\S]*?```)/g);
+    return parts.map(part => {
+      if (part.startsWith('```') && part.endsWith('```')) {
+        const inner = part.slice(3, -3).replace(/^\w+\n/, '');
+        return `<pre><code>${inner}</code></pre>`;
+      }
+      return part
+        .split(/\n{2,}/)
+        .map(para => {
+          const lines = para.split('\n');
+          const isList = lines.length > 0 && lines.every(l => /^\s*[-*]\s+/.test(l));
+          if (isList) {
+            return '<ul>' + lines.map(l => `<li>${renderInlineMarkdown(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('') + '</ul>';
+          }
+          return '<p>' + renderInlineMarkdown(para).replace(/\n/g, '<br>') + '</p>';
+        })
+        .join('');
+    }).join('');
+  }
+  function renderInlineMarkdown(s) {
+    return s
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  }
+  function formatRelTime(ts) {
+    if (!ts) return '';
+    const t = new Date(ts).getTime();
+    if (Number.isNaN(t)) return '';
+    const dt = Date.now() - t;
+    const s = Math.floor(dt / 1000);
+    if (s < 5) return 'just now';
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return new Date(ts).toLocaleString();
+  }
+
+  // -------- Nav --------
+  function goToOverview() {
+    state.view = 'overview';
+    state.storylineId = null;
+    state.selectedBlockId = null;
+    saveState();
+    render();
+  }
+  function goToStoryline(id) {
+    state.view = 'storyline';
+    state.storylineId = id;
+    state.selectedBlockId = null;
+    saveState();
+    render();
+  }
   function resetView() {
-    try { localStorage.removeItem(storageKey()); } catch (_) {}
-    state.view = 'reading_overview';
-    state.currentStorylineId = null;
-    state.currentStepId = null;
-    state.sectionCollapsed = {};
-    rerender();
+    state.selectedBlockId = null;
+    saveState();
+    if (state.view === 'storyline') {
+      renderStoryline();
+      renderDock();
+      requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+    } else {
+      render();
+    }
   }
 
-  // ========== Helpers ==========
+  // -------- Keyboard --------
+  function bindKeyboard() {
+    document.addEventListener('keydown', e => {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+      if (e.key === 'Escape') {
+        if (state.selectedBlockId) { state.selectedBlockId = null; saveState(); renderStoryline(); renderDock(); requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId))); }
+        else if (state.view === 'storyline') goToOverview();
+        return;
+      }
+      if (e.key === 'o') { goToOverview(); return; }
+      if ((e.key === 'j' || e.key === 'k') && state.view === 'storyline') {
+        const ids = collectBlockIds(getStoryline(state.storylineId));
+        if (!ids.length) return;
+        const idx = ids.indexOf(state.selectedBlockId);
+        const next = e.key === 'j' ? (idx < 0 ? 0 : Math.min(ids.length - 1, idx + 1)) : Math.max(0, idx - 1);
+        const id = ids[next];
+        state.selectedBlockId = id;
+        saveState();
+        renderStoryline();
+        renderDock();
+        scrollBlockIntoView(id);
+        requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+      }
+    });
+  }
+  function collectBlockIds(storyline) {
+    if (!storyline?.diagram) return [];
+    const out = [];
+    for (const c of storyline.diagram.cols ?? []) {
+      for (const b of c.blocks ?? []) out.push(b.id);
+    }
+    return out;
+  }
+
+  function setupResize() {
+    window.addEventListener('resize', () => {
+      if (state.view === 'storyline') {
+        requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+      }
+    });
+  }
+
+  // -------- Escape helpers --------
   function escapeHtml(s) {
-    if (s == null) return '';
-    return String(s)
+    return String(s ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
+  function escapeAttr(s) { return escapeHtml(s); }
 
-  // ========== Syntax highlighting ==========
-  const _SH_KEYWORDS = new Set([
-    'auto','break','case','catch','class','const','constexpr','continue',
-    'default','delete','do','else','enum','explicit','export','extern',
-    'false','final','for','friend','goto','if','inline','mutable',
-    'namespace','new','noexcept','nullptr','operator','override',
-    'private','protected','public','register','return','sizeof','static',
-    'static_assert','struct','switch','template','this','throw','true',
-    'try','typedef','typename','union','using','virtual','void','volatile',
-    'while','yield',
-    'async','await','const','debugger','export','extends','function',
-    'import','in','instanceof','let','of','super','typeof','var',
-    'and','as','assert','async','await','class','def','del','elif',
-    'except','finally','from','global','import','in','is','lambda',
-    'nonlocal','not','or','pass','raise','with',
-    'chan','defer','fallthrough','func','go','interface','map','package',
-    'range','select','type',
-    'crate','dyn','fn','impl','let','loop','match','mod','move','mut',
-    'pub','ref','self','Self','trait','unsafe','use','where',
-    'abstract','boolean','byte','extends','final','implements','interface',
-    'native','package','synchronized','throws','transient',
-  ]);
-
-  const _SH_TYPES = new Set([
-    'int','long','short','float','double','char','bool','unsigned','signed',
-    'int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t',
-    'size_t','ssize_t','ptrdiff_t','uintptr_t',
-    'string','String','str','Vec','Box','Option','Result','HashMap','HashSet',
-    'Array','Map','Set','Promise','Iterator',
-    'std','vector','unordered_map','shared_ptr','unique_ptr',
-    'i8','i16','i32','i64','u8','u16','u32','u64','f32','f64','usize','isize',
-    'any','never','unknown','undefined','null','None','True','False',
-    'number','boolean','object','symbol','bigint',
-  ]);
-
-  let _shMultilineComment = false;
-  function resetHighlightState() { _shMultilineComment = false; }
-
-  function highlightLine(raw, lang) {
-    if (raw == null) return '';
-    let s = escapeHtml(raw);
-    if (!s.trim()) return s;
-    const PH = [];
-    let out = '';
-    if (_shMultilineComment) {
-      const endIdx = s.indexOf('*/');
-      if (endIdx === -1) return `<span class="sh-cmt">${s}</span>`;
-      out += `<span class="sh-cmt">${s.slice(0, endIdx + 2)}</span>`;
-      s = s.slice(endIdx + 2);
-      _shMultilineComment = false;
-      if (!s) return out;
-    }
-    function ph(cls, text) {
-      const idx = PH.length;
-      PH.push(`<span class="${cls}">${text}</span>`);
-      return `\x00${idx}\x00`;
-    }
-    if (/^\s*#(include|define|ifdef|ifndef|endif|pragma|if|else|elif|undef|error|warning)/.test(s))
-      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
-    if (/^\s*@\w/.test(s) && (lang === 'python' || lang === 'py'))
-      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
-    s = s.replace(/&quot;((?:[^&]|&(?!quot;))*)&quot;/g, (m) => ph('sh-str', m));
-    s = s.replace(/&#39;((?:[^&]|&(?!#39;))*)&#39;/g, (m) => ph('sh-str', m));
-    s = s.replace(/`([^`]*)`/g, (m) => ph('sh-str', escapeHtml(m)));
-    s = s.replace(/(\/\/.*)$/, (m) => ph('sh-cmt', m));
-    if (['python','py','ruby','rb','shell','bash','sh','yaml','yml','toml'].includes(lang))
-      s = s.replace(/(#.*)$/, (m) => ph('sh-cmt', m));
-    const mlStart = s.indexOf('/*');
-    if (mlStart !== -1) {
-      const mlEnd = s.indexOf('*/', mlStart + 2);
-      if (mlEnd !== -1) {
-        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart, mlEnd + 2)) + s.slice(mlEnd + 2);
-      } else {
-        _shMultilineComment = true;
-        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart));
-      }
-    }
-    s = s.replace(/\b(0x[0-9a-fA-F]+[uUlL]*)\b/g, '<span class="sh-num">$1</span>');
-    s = s.replace(/\b(\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*)\b/g, '<span class="sh-num">$1</span>');
-    s = s.replace(/\b([a-zA-Z_]\w*)\b/g, (m, w) => {
-      if (_SH_KEYWORDS.has(w)) return `<span class="sh-kw">${w}</span>`;
-      if (_SH_TYPES.has(w)) return `<span class="sh-ty">${w}</span>`;
-      return m;
-    });
-    s = s.replace(/\b([a-zA-Z_]\w*)\s*(?=\()/g, (m, fn) => {
-      if (_SH_KEYWORDS.has(fn) || _SH_TYPES.has(fn)) return m;
-      return `<span class="sh-fn">${fn}</span>`;
-    });
-    s = s.replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
-    return out + s;
-  }
-
-  function renderInlineMarkdown(s) {
-    if (s == null) return '';
-    let out = escapeHtml(s);
-    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
-    if (out.indexOf('\n\n') !== -1) {
-      out = out.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  // -------- Top-level render --------
+  function render() {
+    renderTopbar();
+    if (state.view === 'overview') {
+      renderOverview();
+      const dock = document.getElementById('dock');
+      dock.classList.remove('open');
+      dock.innerHTML = '';
     } else {
-      out = out.replace(/\n/g, '<br>');
-    }
-    return out;
-  }
-
-  // Richer markdown renderer for Q&A answer bodies — handles fenced
-  // code blocks, bullet lists, and paragraphs. Used only for live-mode
-  // CLI replies, which come back in markdown.
-  function renderRichMarkdown(s) {
-    if (s == null) return '';
-    // 1. Extract fenced code blocks first to placeholders so their content
-    //    isn't touched by the other transforms.
-    const codeBlocks = [];
-    let body = String(s).replace(/```([a-zA-Z0-9_+\-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
-      const idx = codeBlocks.length;
-      codeBlocks.push({ lang: (lang || '').trim(), code });
-      return ` FENCED_${idx} `;
-    });
-    // 2. Now safely escape everything outside fences.
-    body = escapeHtml(body);
-    // 3. Inline markup (run BEFORE list/paragraph splitting so they nest).
-    body = body.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    body = body.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // 4. Convert paragraphs and bullet lists block-by-block.
-    const blocks = body.split(/\n{2,}/).map(block => {
-      const lines = block.split('\n');
-      const isBulletList = lines.length > 0 && lines.every(l => /^\s*[-*]\s+/.test(l));
-      if (isBulletList) {
-        const items = lines.map(l => l.replace(/^\s*[-*]\s+/, '')).map(li => `<li>${li}</li>`).join('');
-        return `<ul class="bullet-list">${items}</ul>`;
-      }
-      return `<p>${block.replace(/\n/g, '<br>')}</p>`;
-    });
-    let out = blocks.join('');
-    // 5. Restore fenced code blocks (escape their content for safety).
-    out = out.replace(/ FENCED_(\d+) /g, (m, n) => {
-      const cb = codeBlocks[Number(n)];
-      const langAttr = cb.lang ? ` data-lang="${escapeHtml(cb.lang)}"` : '';
-      return `<pre><code${langAttr}>${escapeHtml(cb.code)}</code></pre>`;
-    });
-    return out;
-  }
-
-  function findStep(stepId) {
-    for (const sl of WALKTHROUGH_DATA.storylines) {
-      const steps = sl.steps || [];
-      for (const st of steps) {
-        if (st.id === stepId) return { storyline: sl, step: st };
-      }
-    }
-    return null;
-  }
-
-  function findStoryline(slId) {
-    return WALKTHROUGH_DATA.storylines.find(s => s.id === slId);
-  }
-
-  function getAllSteps() {
-    const result = [];
-    for (const sl of WALKTHROUGH_DATA.storylines) {
-      const steps = sl.steps || [];
-      for (const st of steps) {
-        result.push({ storyline: sl, step: st });
-      }
-    }
-    return result;
-  }
-
-  function getAdjacentStep(stepId, direction) {
-    const all = getAllSteps();
-    const idx = all.findIndex(x => x.step.id === stepId);
-    if (idx === -1) return null;
-    const target = idx + direction;
-    if (target < 0 || target >= all.length) return null;
-    return all[target].step.id;
-  }
-
-  function importanceClass(total) {
-    if (total >= 9) return 'imp-high';
-    if (total >= 6) return 'imp-mid';
-    return 'imp-low';
-  }
-
-  function importanceTooltip(scores) {
-    if (!scores) return '';
-    return `centrality ${scores.centrality} · conceptual_weight ${scores.conceptual_weight} · entry_point ${scores.entry_point} · novelty ${scores.novelty}`;
-  }
-
-  // ========== Left nav ==========
-  function renderNav() {
-    const root = document.getElementById('nav-tree');
-    const sls = WALKTHROUGH_DATA.storylines;
-    const html = sls.map(sl => {
-      const steps = sl.steps || [];
-      const isSummary = sl.depth === 'summary';
-      const imp = sl.importance_scores || {};
-      const impClass = importanceClass(imp.total || 0);
-      const impTip = importanceTooltip(imp);
-
-      const headerHtml = `
-        <div class="storyline-header" onclick="toggleStoryline('${sl.id}')">
-          <span class="storyline-toggle" id="toggle-${sl.id}">▼</span>
-          <div class="storyline-title-block">
-            <div class="storyline-title-row">
-              <div class="storyline-title">${escapeHtml(sl.title)}</div>
-              ${imp.total != null ? `<span class="importance-badge ${impClass}" title="${escapeHtml(impTip)}">${imp.total}</span>` : ''}
-            </div>
-            <div class="storyline-meta">
-              <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
-              ${isSummary
-                ? '<span class="badge badge-depth-summary">summary</span>'
-                : `<span>${steps.length} step${steps.length === 1 ? '' : 's'}</span>`}
-            </div>
-          </div>
-        </div>`;
-
-      const bodyHtml = isSummary ? `
-        <div id="content-${sl.id}">
-          <div class="storyline-overview-link" data-storyline-id="${sl.id}" onclick="event.stopPropagation(); goToStorylineOverview('${sl.id}')">
-            ↪ Open summary card
-          </div>
-          <div class="summary-only-pill">summary only</div>
-        </div>
-      ` : `
-        <div id="content-${sl.id}">
-          <div class="storyline-overview-link" data-storyline-id="${sl.id}" onclick="event.stopPropagation(); goToStorylineOverview('${sl.id}')">
-            ↪ Storyline overview
-          </div>
-          <ul class="step-list" id="steps-${sl.id}">
-            ${steps.map(st => `
-              <li class="step-item" data-step-id="${st.id}" onclick="navigateToStep('${st.id}')">
-                <span class="step-id">${escapeHtml(st.id)}</span>${escapeHtml(st.title)}
-              </li>
-            `).join('')}
-          </ul>
-        </div>
-      `;
-
-      return `<div class="storyline-node">${headerHtml}${bodyHtml}</div>`;
-    }).join('');
-    root.innerHTML = html;
-  }
-
-  function toggleStoryline(slId) {
-    const content = document.getElementById('content-' + slId);
-    const toggle = document.getElementById('toggle-' + slId);
-    if (content.style.display === 'none') {
-      content.style.display = '';
-      toggle.textContent = '▼';
-    } else {
-      content.style.display = 'none';
-      toggle.textContent = '▶';
+      renderStoryline();
+      renderDock();
     }
   }
 
-  function highlightCurrentNav() {
-    document.querySelectorAll('.step-item').forEach(el => {
-      el.classList.toggle('active', state.view === 'step' && el.dataset.stepId === state.currentStepId);
-    });
-    document.querySelectorAll('.storyline-overview-link').forEach(el => {
-      el.classList.toggle('active', state.view === 'storyline_overview' && el.dataset.storylineId === state.currentStorylineId);
-    });
-    document.getElementById('pr-overview-link').classList.toggle('active', state.view === 'reading_overview');
-    document.querySelectorAll('.storyline-header').forEach(el => el.classList.remove('active-storyline'));
-  }
-
-  // ========== Header ==========
-  function renderHeader() {
-    const m = WALKTHROUGH_DATA.metadata;
-    document.getElementById('pr-title').textContent = m.title;
-    const subParts = [];
-    if (m.repo) subParts.push(m.repo);
-    if (m.commit) subParts.push(m.commit.length > 12 ? m.commit.slice(0, 10) : m.commit);
-    if (m.target) subParts.push(m.target.length > 64 ? m.target.slice(0, 60) + '…' : m.target);
-    document.getElementById('pr-subtitle').textContent = subParts.join(' · ');
-  }
-
-  // ========== Center: reading overview ==========
-  function renderScopePanel() {
-    const sc = WALKTHROUGH_DATA.scope;
-    if (!sc) return '';
-    const modeClass = sc.mode === 'topic' ? 'mode-topic' : 'mode-files';
-    const inBoundsHtml = (sc.discovered_scope || []).map(d => `
-      <div class="scope-item">
-        <span class="scope-item-path">${escapeHtml(d.path)}</span>
-        <span class="scope-item-reason">— ${escapeHtml(d.reason)}${d.note ? `: ${escapeHtml(d.note)}` : ''}</span>
-      </div>
-    `).join('');
-    const excludedHtml = (sc.excluded || []).map(e => `
-      <div class="scope-item">
-        <span class="scope-item-path">${escapeHtml(e.path)}</span>
-        <span class="scope-item-reason">— excluded: ${escapeHtml(e.reason)}</span>
-      </div>
-    `).join('');
-    return `
-      <div class="scope-panel">
-        <div><span class="scope-mode-tag ${modeClass}">${escapeHtml(sc.mode)} mode</span></div>
-        <div class="scope-input">${escapeHtml(sc.input)}</div>
-        ${sc.mode === 'topic' ? '<div class="scope-confirmed-caption">✓ Scope confirmed by reader before reading.</div>' : ''}
-        ${inBoundsHtml ? `<div class="ba-label" style="margin-top: 12px;">In scope (${(sc.discovered_scope||[]).length})</div><div class="scope-list">${inBoundsHtml}</div>` : ''}
-        ${excludedHtml ? `<div class="ba-label" style="margin-top: 12px;">Considered but excluded</div><div class="scope-list">${excludedHtml}</div>` : ''}
-        ${sc.importance_criteria ? `<div class="scope-criteria"><strong>Importance criteria:</strong> ${renderInlineMarkdown(sc.importance_criteria)}</div>` : ''}
-      </div>`;
-  }
-
-  // ========== Step-graph diagram helpers ==========
-  // Used by both reading overview (cross-storyline clusters) and storyline
-  // overview (single storyline as a DAG of its steps). Edges come from
-  // step.prerequisites entries with kind === 'prior_step'. No external
-  // libs — pure SVG over absolutely-positioned HTML cards. Summary-depth
-  // storylines render as small pill-only clusters (no boxes inside).
-  const _STEP_BOX_W = 230;
-  const _STEP_BOX_H = 84;
-  const _LAYER_V_GAP = 60;
-  const _LAYER_H_GAP = 22;
-  const _CANVAS_PAD = 24;
-  const _SUMMARY_CLUSTER_W = 230 + 2 * 16;  // box-width + padding
-  const _SUMMARY_CLUSTER_H = 96;
-
-  function _stepBoxSummary(step) {
-    const s = step.summary || '';
-    return s.length > 130 ? s.slice(0, 130).replace(/[\s,;:.!?]+$/, '') + '…' : s;
-  }
-
-  function _layerNodes(nodes, edges) {
-    const idSet = new Set(nodes.map(n => n.id));
-    const localEdges = edges.filter(e => idSet.has(e.from) && idSet.has(e.to));
-    const indeg = {};
-    nodes.forEach(n => { indeg[n.id] = 0; });
-    localEdges.forEach(e => { indeg[e.to]++; });
-    const layers = [];
-    const placed = new Set();
-    let frontier = nodes.filter(n => indeg[n.id] === 0);
-    while (frontier.length) {
-      layers.push(frontier);
-      frontier.forEach(n => placed.add(n.id));
-      const nextIds = new Set();
-      localEdges.forEach(e => {
-        if (placed.has(e.from) && !placed.has(e.to)) {
-          indeg[e.to]--;
-          if (indeg[e.to] === 0) nextIds.add(e.to);
-        }
-      });
-      frontier = Array.from(nextIds).map(id => nodes.find(n => n.id === id));
+  // -------- Init --------
+  async function init() {
+    loadState();
+    if (!state.view) state.view = 'overview';
+    if (state.view === 'storyline' && !getStoryline(state.storylineId)) {
+      state.view = 'overview';
+      state.storylineId = null;
+      state.selectedBlockId = null;
     }
-    nodes.forEach(n => { if (!placed.has(n.id)) layers.push([n]); });
-    return layers;
-  }
-
-  function _curvePath(x1, y1, x2, y2) {
-    const midY = (y1 + y2) / 2;
-    return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
-  }
-
-  function _hCurvePath(x1, y1, x2, y2) {
-    const midX = (x1 + x2) / 2;
-    return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-  }
-
-  function _arrowDefs(prefix) {
-    return `
-      <defs>
-        <marker id="${prefix}-arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0969da" />
-        </marker>
-        <marker id="${prefix}-arrow-cross" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f42c1" />
-        </marker>
-      </defs>`;
-  }
-
-  function _renderStepBox(step, x, y, w, onclickAttr) {
-    return `
-      <div class="step-box track-${escapeHtml(step.track)}"
-           style="left:${x}px; top:${y}px; width:${w}px;"
-           ${onclickAttr}>
-        <div class="top-row">
-          <span class="step-id">${escapeHtml(step.id)}</span>
-          <span class="track-tag">${escapeHtml(step.track)}</span>
-        </div>
-        <div class="step-title">${escapeHtml(step.title)}</div>
-        <div class="step-summary">${escapeHtml(_stepBoxSummary(step))}</div>
-      </div>`;
-  }
-
-  function _buildPriorStepEdges(steps) {
-    const out = [];
-    const idSet = new Set(steps.map(s => s.id));
-    steps.forEach(st => {
-      (st.prerequisites || []).forEach(p => {
-        if (p.kind === 'prior_step' && idSet.has(p.reference_id)) {
-          out.push({ from: p.reference_id, to: st.id });
-        }
-      });
-    });
-    return out;
-  }
-
-  function _clusterLabel(sl) {
-    const imp = sl.importance_scores || {};
-    const impTotal = imp.total;
-    const impCls = impTotal != null ? importanceClass(impTotal) : '';
-    const impTip = impTotal != null ? importanceTooltip(imp) + ' — core-functionality importance' : '';
-    return `
-      <span class="cluster-label" onclick="goToStorylineOverview('${escapeHtml(sl.id)}')">
-        <span class="cluster-id">${escapeHtml(sl.id)}</span>
-        ${impTotal != null ? `<span class="cluster-imp ${impCls}" title="${escapeHtml(impTip)}">${impTotal}</span>` : ''}
-        <span class="cluster-title">${escapeHtml(sl.title)}</span>
-      </span>`;
-  }
-
-  // Render a single storyline as a top-down DAG of its steps (full-depth only).
-  function renderStorylineDiagram(sl) {
-    const steps = sl.steps || [];
-    if (steps.length === 0) return '<div class="empty-state">No steps in this storyline (summary depth).</div>';
-    const edges = _buildPriorStepEdges(steps);
-    const layers = _layerNodes(steps, edges);
-    const maxLen = Math.max(...layers.map(l => l.length));
-    const canvasW = maxLen * _STEP_BOX_W + (maxLen - 1) * _LAYER_H_GAP + 2 * _CANVAS_PAD;
-    const positions = {};
-    let y = _CANVAS_PAD;
-    layers.forEach(layer => {
-      const layerW = layer.length * _STEP_BOX_W + (layer.length - 1) * _LAYER_H_GAP;
-      const startX = (canvasW - layerW) / 2;
-      layer.forEach((s, i) => {
-        positions[s.id] = { x: startX + i * (_STEP_BOX_W + _LAYER_H_GAP), y, w: _STEP_BOX_W, h: _STEP_BOX_H };
-      });
-      y += _STEP_BOX_H + _LAYER_V_GAP;
-    });
-    const canvasH = y - _LAYER_V_GAP + _CANVAS_PAD;
-
-    const arrows = edges.map(e => {
-      const a = positions[e.from], b = positions[e.to];
-      const x1 = a.x + a.w / 2, y1 = a.y + a.h;
-      const x2 = b.x + b.w / 2, y2 = b.y;
-      return `<path d="${_curvePath(x1, y1, x2, y2)}" stroke="#0969da" stroke-width="2"
-              fill="none" marker-end="url(#sl-${escapeHtml(sl.id)}-arrow)" />`;
-    }).join('');
-    const boxes = steps.map(s => _renderStepBox(s, positions[s.id].x, positions[s.id].y, _STEP_BOX_W,
-      `onclick="navigateToStep('${escapeHtml(s.id)}')"`)).join('');
-
-    return `
-      <div class="step-diagram-canvas" style="width:${canvasW}px; max-width:100%; height:${canvasH}px;">
-        <svg class="connectors" width="${canvasW}" height="${canvasH}">
-          ${_arrowDefs('sl-' + sl.id)}
-          ${arrows}
-        </svg>
-        ${boxes}
-      </div>
-      <div class="step-diagram-legend">
-        <div class="legend-item"><span class="legend-line"></span> prerequisite (<code>prior_step</code>)</div>
-        <div class="legend-item">Click any box to open the step's detailed view.</div>
-      </div>`;
-  }
-
-  // Render all storylines as side-by-side dashed clusters with cross-storyline
-  // prereq arrows. Summary-depth storylines render as compact label-only clusters.
-  function renderCrossStorylineDiagram() {
-    const stls = WALKTHROUGH_DATA.storylines || [];
-    if (stls.length === 0) return '';
-
-    const positions = {};
-    const clusters = [];
-    const stepToStoryline = {};
-    const allEdges = [];
-    stls.forEach(sl => {
-      (sl.steps || []).forEach(s => {
-        stepToStoryline[s.id] = sl.id;
-        (s.prerequisites || []).forEach(p => {
-          if (p.kind === 'prior_step') allEdges.push({ from: p.reference_id, to: s.id });
-        });
-      });
-    });
-
-    const CLUSTER_GAP = 56;
-    const CLUSTER_PAD = 16;
-    const CLUSTER_HEAD = 28;
-    let cursorX = _CANVAS_PAD;
-    let canvasH = 0;
-
-    stls.forEach(sl => {
-      const isSummary = sl.depth === 'summary';
-      const cy = _CANVAS_PAD;
-      let cx = cursorX, cw, ch;
-
-      if (isSummary || (sl.steps || []).length === 0) {
-        cw = _SUMMARY_CLUSTER_W;
-        ch = _SUMMARY_CLUSTER_H;
-      } else {
-        const innerEdges = _buildPriorStepEdges(sl.steps);
-        const layers = _layerNodes(sl.steps, innerEdges);
-        const maxLen = Math.max(...layers.map(l => l.length));
-        const innerW = maxLen * _STEP_BOX_W + (maxLen - 1) * _LAYER_H_GAP;
-        const innerH = layers.length * _STEP_BOX_H + (layers.length - 1) * _LAYER_V_GAP;
-        cw = innerW + 2 * CLUSTER_PAD;
-        ch = innerH + 2 * CLUSTER_PAD + CLUSTER_HEAD;
-
-        let y = cy + CLUSTER_HEAD + CLUSTER_PAD;
-        layers.forEach(layer => {
-          const layerW = layer.length * _STEP_BOX_W + (layer.length - 1) * _LAYER_H_GAP;
-          const sx = cx + (cw - layerW) / 2;
-          layer.forEach((s, i) => {
-            positions[s.id] = { x: sx + i * (_STEP_BOX_W + _LAYER_H_GAP), y, w: _STEP_BOX_W, h: _STEP_BOX_H };
-          });
-          y += _STEP_BOX_H + _LAYER_V_GAP;
-        });
-      }
-
-      clusters.push({
-        id: sl.id, title: sl.title, kind: sl.kind, depth: sl.depth || 'full',
-        importance_scores: sl.importance_scores,
-        x: cx, y: cy, w: cw, h: ch, isSummary,
-      });
-      cursorX += cw + CLUSTER_GAP;
-      canvasH = Math.max(canvasH, cy + ch + _CANVAS_PAD);
-    });
-
-    const canvasW = cursorX - CLUSTER_GAP + _CANVAS_PAD;
-
-    const edgesHtml = allEdges.map(e => {
-      const a = positions[e.from], b = positions[e.to];
-      if (!a || !b) return '';
-      const isCross = stepToStoryline[e.from] !== stepToStoryline[e.to];
-      let x1, y1, x2, y2, path, stroke, marker, dash;
-      if (isCross) {
-        x1 = a.x + a.w; y1 = a.y + a.h / 2;
-        x2 = b.x;       y2 = b.y + b.h / 2;
-        path = _hCurvePath(x1, y1, x2, y2);
-        stroke = '#6f42c1'; marker = 'cross-overview-arrow-cross'; dash = 'stroke-dasharray="5,5"';
-      } else {
-        x1 = a.x + a.w / 2; y1 = a.y + a.h;
-        x2 = b.x + b.w / 2; y2 = b.y;
-        path = _curvePath(x1, y1, x2, y2);
-        stroke = '#0969da'; marker = 'cross-overview-arrow'; dash = '';
-      }
-      return `<path d="${path}" stroke="${stroke}" stroke-width="2" ${dash}
-              fill="none" marker-end="url(#${marker})" />`;
-    }).join('');
-
-    const clustersHtml = clusters.map(c => {
-      const sl = stls.find(x => x.id === c.id);
-      const labelHtml = _clusterLabel(c);
-      const summaryBody = c.isSummary
-        ? `<div class="summary-only-body">${escapeHtml(sl.summary || '').slice(0, 80)}${(sl.summary || '').length > 80 ? '…' : ''}<br><span class="pill">summary only</span></div>`
-        : '';
-      return `
-        <div class="storyline-cluster kind-${escapeHtml(c.kind)} depth-${escapeHtml(c.depth)}"
-             style="left:${c.x}px; top:${c.y}px; width:${c.w}px; height:${c.h}px;">
-          ${labelHtml}
-          ${summaryBody}
-        </div>`;
-    }).join('');
-
-    const boxesHtml = stls.flatMap(sl => sl.steps || [])
-      .map(s => positions[s.id]
-        ? _renderStepBox(s, positions[s.id].x, positions[s.id].y, _STEP_BOX_W,
-            `onclick="navigateToStep('${escapeHtml(s.id)}')"`)
-        : '').join('');
-
-    return `
-      <div class="step-diagram-canvas" style="width:${canvasW}px; max-width:100%; height:${canvasH}px;">
-        <svg class="connectors" width="${canvasW}" height="${canvasH}">
-          ${_arrowDefs('cross-overview')}
-          ${edgesHtml}
-        </svg>
-        ${clustersHtml}
-        ${boxesHtml}
-      </div>
-      <div class="step-diagram-legend">
-        <div class="legend-item"><span class="legend-line"></span> prerequisite within storyline</div>
-        <div class="legend-item"><span class="legend-line dashed"></span> cross-storyline prerequisite</div>
-        <div class="legend-item">Cluster header → storyline overview · Box → step detail · Number = core-functionality importance (4–12)</div>
-      </div>`;
-  }
-
-  function renderReadingOverview() {
-    const m = WALKTHROUGH_DATA.metadata;
-    const s = WALKTHROUGH_DATA.summary;
-    const sls = WALKTHROUGH_DATA.storylines.map(sl => {
-      const isSummary = sl.depth === 'summary';
-      const imp = sl.importance_scores || {};
-      const impClass = importanceClass(imp.total || 0);
-      const stepCount = (sl.steps || []).length;
-      const promoteBtn = isSummary ? `<button class="promote-btn" onclick="event.stopPropagation(); alert('To promote this summary to a full walkthrough, ask the agent: \\'Promote storyline ${sl.id} to full depth.\\'')">Promote to full</button>` : '';
-      return `
-        <div class="storyline-summary ${isSummary ? 'depth-summary' : ''}" onclick="goToStorylineOverview('${sl.id}')">
-          <div class="ss-title-row">
-            <div class="ss-title">${escapeHtml(sl.title)}</div>
-            ${imp.total != null ? `<span class="importance-badge ${impClass}" title="${escapeHtml(importanceTooltip(imp))}">${imp.total}</span>` : ''}
-          </div>
-          <div class="ss-meta">
-            <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
-            <span class="badge badge-depth-${sl.depth || 'full'}">${escapeHtml(sl.depth || 'full')}</span>
-            ${!isSummary ? `<span class="badge" style="background:#f6f8fa; color:#656d76; border-color:#d0d7de;">${stepCount} step${stepCount === 1 ? '' : 's'}</span>` : ''}
-          </div>
-          <div class="ss-summary">${escapeHtml(sl.summary)}</div>
-          ${sl.mental_model_anchor ? `<div class="ss-anchor">${escapeHtml(sl.mental_model_anchor)}</div>` : ''}
-          ${promoteBtn}
-        </div>
-      `;
-    }).join('');
-    const crossDiagram = renderCrossStorylineDiagram();
-    return `
-      <div class="pr-overview">
-        <h1>${escapeHtml(m.title)}</h1>
-        <div class="one-liner">${escapeHtml(s.one_line)}</div>
-        <div class="description">${renderInlineMarkdown(s.description)}</div>
-
-        ${WALKTHROUGH_DATA.scope ? '<h2>Scope</h2>' + renderScopePanel() : ''}
-
-        ${crossDiagram ? `<h2>Storyline graph</h2>${crossDiagram}` : ''}
-
-        <h2>Storylines (${WALKTHROUGH_DATA.storylines.length})</h2>
-        ${sls}
-      </div>
-    `;
-  }
-
-  // ========== Center: storyline overview ==========
-  function renderStorylineOverview(sl) {
-    if (!sl) return '<div class="empty-state">Storyline not found.</div>';
-
-    const isSummary = sl.depth === 'summary';
-    const purpose = sl.purpose || {};
-    const arch = sl.architectural_context || {};
-    const imp = sl.importance_scores || {};
-
-    let purposeBlocks = '';
-    if (purpose.stated || purpose.evident) {
-      purposeBlocks = `
-        ${purpose.stated ? `
-          <div class="purpose-block">
-            <div class="label">As documented (existing comments / docs)</div>
-            <div>${renderInlineMarkdown(purpose.stated)}</div>
-          </div>` : ''}
-        ${purpose.evident ? `
-          <div class="purpose-block">
-            <div class="label">As evident from the code</div>
-            <div>${renderInlineMarkdown(purpose.evident)}</div>
-          </div>` : ''}
-        ${purpose.discrepancy ? `
-          <div class="discrepancy">
-            <div class="label">⚠ Discrepancy</div>
-            <div>${renderInlineMarkdown(purpose.discrepancy)}</div>
-          </div>` : ''}
-      `;
+    render();
+    bindKeyboard();
+    setupResize();
+    const info = await preflight();
+    if (info) {
+      state.liveMode = true;
+      state.serverInfo = info;
+      await loadFollowups();
+      render();
     }
-
-    let archBlocks = '';
-    if (arch.system_role) {
-      archBlocks += `
-        <div class="arch-block">
-          <div class="label">System role</div>
-          <div>${renderInlineMarkdown(arch.system_role)}</div>
-        </div>`;
-    }
-    if (arch.involved_modules && arch.involved_modules.length > 0) {
-      archBlocks += `
-        <div class="arch-block">
-          <div class="label">Involved modules</div>
-          <ul class="modules-list">
-            ${arch.involved_modules.map(m => `
-              <li><span class="module-name">${escapeHtml(m.module)}</span> — ${escapeHtml(m.role_in_storyline)}</li>
-            `).join('')}
-          </ul>
-        </div>`;
-    }
-    if (arch.data_flow) {
-      archBlocks += `
-        <div class="arch-block">
-          <div class="label">Data flow</div>
-          <div>${renderInlineMarkdown(arch.data_flow)}</div>
-        </div>`;
-    }
-    if (arch.diagram && arch.diagram.type !== 'none' && arch.diagram.content) {
-      archBlocks += `
-        <div class="arch-block">
-          <div class="label">Diagram (${escapeHtml(arch.diagram.type)})</div>
-          <div class="diagram-box">${escapeHtml(arch.diagram.content)}</div>
-        </div>`;
-    }
-
-    const steps = sl.steps || [];
-
-    const impBadges = imp.total != null ? `
-      <span class="badge badge-kind" title="${escapeHtml(importanceTooltip(imp))}">importance ${imp.total}</span>
-      <span class="badge badge-depth-${sl.depth || 'full'}">${escapeHtml(sl.depth || 'full')}</span>
-    ` : '';
-
-    return `
-      <div class="storyline-overview">
-        <h1>${escapeHtml(sl.title)}</h1>
-        <div class="badges" style="margin-bottom: 16px;">
-          <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
-          ${impBadges}
-        </div>
-        <div class="one-liner">${escapeHtml(sl.summary)}</div>
-
-        ${sl.mental_model_anchor ? `
-          <div class="anchor-prominent">
-            <div class="label">💡 Mental model anchor</div>
-            <div>${renderInlineMarkdown(sl.mental_model_anchor)}</div>
-          </div>` : ''}
-
-        ${imp.rationale ? `
-          <div class="purpose-block">
-            <div class="label">Why this importance score</div>
-            <div>${renderInlineMarkdown(imp.rationale)}</div>
-          </div>` : ''}
-
-        ${isSummary ? `
-          <div class="empty-state" style="text-align: left; padding: 16px 0;">
-            This storyline was kept at <strong>summary depth</strong> by the importance ranking.
-            To get a step-by-step walkthrough with code annotations, ask the agent:
-            <br><br>
-            <code style="background:#f6f8fa; padding: 2px 6px; border-radius: 3px;">Promote storyline ${escapeHtml(sl.id)} to full depth.</code>
-          </div>` : ''}
-
-        ${purposeBlocks ? `<h2>Purpose</h2>${purposeBlocks}` : ''}
-
-        ${archBlocks ? `<h2>Architectural context</h2>${archBlocks}` : ''}
-
-        ${sl.change_overview ? `
-          <h2>Overview</h2>
-          <div>${renderInlineMarkdown(sl.change_overview)}</div>
-        ` : ''}
-
-        ${sl.reading_roadmap ? `
-          <h2>Reading roadmap</h2>
-          <div>${renderInlineMarkdown(sl.reading_roadmap)}</div>
-        ` : ''}
-
-        ${steps.length > 0 ? `
-          <h2>Step graph</h2>
-          ${renderStorylineDiagram(sl)}
-          <button class="start-reading-btn" onclick="navigateToStep('${steps[0].id}')">Start reading from ${escapeHtml(steps[0].id)} →</button>
-        ` : ''}
-      </div>
-    `;
-  }
-
-  // ========== Center: step view ==========
-  function renderStepCenter(storyline, step) {
-    const steps = storyline.steps || [];
-    const stepIndex = steps.findIndex(x => x.id === step.id);
-    const totalSteps = steps.length;
-    const prevId = getAdjacentStep(step.id, -1);
-    const nextId = getAdjacentStep(step.id, +1);
-
-    const primaryHtml = step.code_view.primary_changes.map(fv => renderFileBlock(fv, false)).join('');
-    const supportingHtml = (step.code_view.supporting_definitions || []).map(fv => renderFileBlock(fv, true)).join('');
-    const imp = storyline.importance_scores || {};
-
-    return `
-      <div class="step-header">
-        <div class="breadcrumb">${escapeHtml(storyline.title)} · Step ${stepIndex + 1} of ${totalSteps} · ${escapeHtml(step.id)}</div>
-        <div class="step-title">${escapeHtml(step.title)}</div>
-        <div class="badges">
-          <span class="badge badge-track-${step.track}">${escapeHtml(step.track)}</span>
-          <span class="badge badge-kind">${escapeHtml(storyline.kind)}</span>
-          ${imp.total != null ? `<span class="badge badge-kind" title="${escapeHtml(importanceTooltip(imp))}">storyline importance: ${imp.total}</span>` : ''}
-        </div>
-      </div>
-      <div class="step-body">
-        <div class="section-label">Code</div>
-        ${primaryHtml || '<div class="empty-state">No code attached to this step.</div>'}
-        ${supportingHtml ? `<div class="section-label">Supporting definitions</div>${supportingHtml}` : ''}
-      </div>
-      <div class="step-nav">
-        <button class="nav-button" onclick="navigateToStep(${prevId ? `'${prevId}'` : 'null'})" ${prevId ? '' : 'disabled'}>← Previous step</button>
-        <button class="nav-button" onclick="goToStorylineOverview('${storyline.id}')">↑ Storyline overview</button>
-        <button class="nav-button" onclick="navigateToStep(${nextId ? `'${nextId}'` : 'null'})" ${nextId ? '' : 'disabled'}>Next step →</button>
-      </div>
-    `;
-  }
-
-  let _fileBlockSeq = 0;
-
-  function renderFunctionPurpose(fp) {
-    if (!fp) return '';
-    const nameLabel = fp.function_name ? escapeHtml(fp.function_name) : '(anonymous block)';
-    if (fp.structure === 'multi_section' && fp.sections && fp.sections.length > 0) {
-      const secs = fp.sections.map(s => `
-        <div class="fn-purpose-section">
-          <div class="fp-section-name">${escapeHtml(s.section_name)}<span class="fp-section-range">lines ${s.line_start}–${s.line_end}</span></div>
-          <div class="fp-label">Problem solved</div>
-          <div>${renderInlineMarkdown(s.problem_solved)}</div>
-          <div class="fp-label">Without it</div>
-          <div>${renderInlineMarkdown(s.without_it)}</div>
-        </div>
-      `).join('');
-      return `
-        <div class="fn-purpose">
-          <div class="fn-purpose-header">
-            <span class="fn-purpose-name">${nameLabel}</span>
-            <span class="fn-purpose-tag">multi-section</span>
-          </div>
-          ${secs}
-        </div>`;
-    }
-    return `
-      <div class="fn-purpose">
-        <div class="fn-purpose-header">
-          <span class="fn-purpose-name">${nameLabel}</span>
-          <span class="fn-purpose-tag">function purpose</span>
-        </div>
-        <div class="fp-label">Problem solved</div>
-        <div>${renderInlineMarkdown(fp.problem_solved)}</div>
-        <div class="fp-label">Without it</div>
-        <div>${renderInlineMarkdown(fp.without_it)}</div>
-      </div>`;
-  }
-
-  function renderFileBlock(fv, isReference) {
-    const blockId = 'fb-' + (++_fileBlockSeq);
-    const klass = isReference ? 'file-block reference' : 'file-block';
-    const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
-    const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
-    const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
-    const lang = (fv.language || '').toLowerCase();
-
-    const fpHtml = renderFunctionPurpose(fv.function_purpose);
-
-    const wt = fv.walkthrough || [];
-    const hasWt = wt.length > 0;
-
-    // --- v0.4: Semantic block rendering ---
-    if (hasWt) {
-      const sortedWt = [...wt].sort((a, b) => a.line_start - b.line_start);
-
-      const lineChunkMap = {};
-      sortedWt.forEach((ann, ci) => {
-        for (let ln = ann.line_start; ln <= ann.line_end; ln++) {
-          lineChunkMap[ln] = ci;
-        }
-      });
-
-      const segments = [];
-      let curSeg = null;
-      for (let i = 0; i < fv.lines.length; i++) {
-        const line = fv.lines[i];
-        const ci = lineChunkMap[line.line_num];
-        const segType = ci !== undefined ? 'chunk' : 'preamble';
-        const segKey = segType === 'chunk' ? ci : -1;
-
-        if (!curSeg || curSeg.type !== segType || curSeg.key !== segKey) {
-          curSeg = { type: segType, key: segKey, rows: [] };
-          segments.push(curSeg);
-        }
-        curSeg.rows.push(line);
-      }
-
-      const segParts = [];
-      segments.forEach(seg => {
-        resetHighlightState();
-        const rows = seg.rows.map(line => {
-          const cls = `line-${line.change}` + (seg.type === 'preamble' ? ' preamble-line' : '');
-          const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
-          return `<tr class="${cls}">
-            <td class="line-num">${line.line_num}</td>
-            <td class="change-marker">${marker}</td>
-            <td class="line-content">${highlightLine(line.content, lang)}</td>
-          </tr>`;
-        }).join('');
-
-        if (seg.type === 'preamble') {
-          segParts.push(`<table class="code-table">${rows}</table>`);
-        } else {
-          const ann = sortedWt[seg.key];
-          const rangeLabel = ann.line_start === ann.line_end
-            ? `Line ${ann.line_start}`
-            : `Lines ${ann.line_start}–${ann.line_end}`;
-          segParts.push(`
-            <div class="semantic-block">
-              <div class="semantic-block-header">
-                <span class="sb-chunk-role">${escapeHtml(ann.chunk_role)}</span>
-                <span class="sb-line-range">${rangeLabel}</span>
-              </div>
-              <table class="code-table">${rows}</table>
-              <div class="sb-explanation">${renderInlineMarkdown(ann.explanation)}</div>
-            </div>`);
-        }
-      });
-
-      const wtControls = `
-        <div class="wt-controls">
-          <span class="wt-mode-label">View:</span>
-          <button class="active-mode" onclick="setBlockMode('${blockId}', 'inline', this)">Inline</button>
-          <button onclick="setBlockMode('${blockId}', 'compact', this)">Compact</button>
-        </div>`;
-
-      return `
-        <div class="${klass}" id="${blockId}">
-          <div class="file-header">
-            <span class="file-path">${escapeHtml(fv.file)}</span>
-            <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
-            ${refLabel}
-          </div>
-          ${why}
-          ${fpHtml}
-          ${wtControls}
-          <div class="semantic-blocks-container">${segParts.join('')}</div>
-        </div>
-      `;
-    }
-
-    // --- Fallback: no walkthrough chunks ---
-    resetHighlightState();
-    const parts = [];
-    for (let i = 0; i < fv.lines.length; i++) {
-      const line = fv.lines[i];
-      const cls = `line-${line.change}`;
-      const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
-      parts.push(`<tr class="${cls}">
-        <td class="line-num">${line.line_num}</td>
-        <td class="change-marker">${marker}</td>
-        <td class="line-content">${highlightLine(line.content, lang)}</td>
-      </tr>`);
-    }
-
-    return `
-      <div class="${klass}" id="${blockId}">
-        <div class="file-header">
-          <span class="file-path">${escapeHtml(fv.file)}</span>
-          <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
-          ${refLabel}
-        </div>
-        ${why}
-        ${fpHtml}
-        <table class="code-table">${parts.join('')}</table>
-      </div>
-    `;
-  }
-
-  // v0.4: Toggle between inline and compact mode for a file-block
-  function setBlockMode(blockId, mode, btnEl) {
-    const block = document.getElementById(blockId);
-    if (!block) return;
-    if (mode === 'compact') {
-      block.classList.add('compact-mode');
-    } else {
-      block.classList.remove('compact-mode');
-    }
-    const controls = block.querySelector('.wt-controls');
-    if (controls) {
-      controls.querySelectorAll('button').forEach(b => b.classList.remove('active-mode'));
-      if (btnEl) btnEl.classList.add('active-mode');
-    }
-  }
-
-  // Legacy toggle functions (kept for backward compat)
-  function toggleAnnotation(toggleEl) {
-    const ann = toggleEl.closest('.wt-annotation');
-    ann.classList.toggle('wt-collapsed');
-    toggleEl.classList.toggle('collapsed');
-    toggleEl.textContent = ann.classList.contains('wt-collapsed') ? '▸' : '▾';
-  }
-
-  function toggleAllAnnotations(blockId, show) {
-    const block = document.getElementById(blockId);
-    if (!block) return;
-    block.querySelectorAll('.wt-annotation').forEach(ann => {
-      const toggle = ann.querySelector('.wt-toggle');
-      if (show) {
-        ann.classList.remove('wt-collapsed');
-        if (toggle) { toggle.classList.remove('collapsed'); toggle.textContent = '▾'; }
-      } else {
-        ann.classList.add('wt-collapsed');
-        if (toggle) { toggle.classList.add('collapsed'); toggle.textContent = '▸'; }
-      }
-    });
-  }
-
-  // ========== Right pane ==========
-  function section(name, klass, label, tag, contentHtml) {
-    if (!contentHtml) return '';
-    const collapsed = isCollapsed(name);
-    return `
-      <div class="analysis-section ${klass} ${collapsed ? 'collapsed' : ''}" data-section="${name}">
-        <div class="section-header" onclick="toggleSection('${name}')">
-          <div class="section-title-row">
-            <span class="section-title">${label}</span>
-            ${tag ? `<span class="tag">${tag}</span>` : ''}
-          </div>
-          <span class="section-toggle">▼</span>
-        </div>
-        <div class="section-body">${contentHtml}</div>
-      </div>
-    `;
-  }
-
-  // ========== Live-mode Q&A ==========
-
-  function formatRelTime(iso) {
-    if (!iso) return '';
-    try {
-      const t = new Date(iso).getTime();
-      const now = Date.now();
-      const dsec = Math.max(0, Math.round((now - t) / 1000));
-      if (dsec < 60) return `${dsec}s ago`;
-      if (dsec < 3600) return `${Math.round(dsec/60)}m ago`;
-      if (dsec < 86400) return `${Math.round(dsec/3600)}h ago`;
-      return new Date(iso).toLocaleDateString();
-    } catch (_) { return iso; }
-  }
-
-  function renderQAItem(qa) {
-    const meta = [
-      formatRelTime(qa.asked_at),
-      qa.cli ? `${qa.cli}${qa.model ? ' · ' + qa.model : ''}` : '',
-      qa.elapsed_s != null ? `${qa.elapsed_s.toFixed(1)}s` : '',
-    ].filter(Boolean).join(' · ');
-    return `
-      <div class="qa-item" data-qa-id="${escapeHtml(qa.id)}">
-        <div class="qa-item-question">${escapeHtml(qa.question)}</div>
-        <div class="qa-item-answer">${renderRichMarkdown(qa.answer_markdown)}</div>
-        <div class="qa-item-meta"><span>${escapeHtml(meta)}</span></div>
-      </div>`;
-  }
-
-  function renderQAInput(stepId, storylineId, isPending) {
-    if (isPending) {
-      const elapsed = state.pendingAsk && state.pendingAsk.startedAt
-        ? Math.round((Date.now() - state.pendingAsk.startedAt) / 1000) : 0;
-      return `
-        <div class="qa-pending">
-          <span class="qa-spinner"></span>
-          <span>Thinking… <span class="qa-elapsed" id="qa-elapsed">${elapsed}s</span></span>
-          <button class="qa-cancel-btn" onclick="cancelAsk()">Cancel</button>
-        </div>`;
-    }
-    return `
-      <div class="qa-input-row">
-        <textarea class="qa-textarea" id="qa-input-${escapeHtml(stepId)}"
-                  placeholder="Ask a follow-up about this step…"
-                  onkeydown="qaKeyDown(event, '${escapeHtml(stepId)}', '${escapeHtml(storylineId)}')"></textarea>
-        <div class="qa-input-controls">
-          <span class="qa-hint">⌘/Ctrl + Enter to ask · ${escapeHtml(state.serverInfo && state.serverInfo.cli || 'cli')}${state.serverInfo && state.serverInfo.model ? ' · ' + escapeHtml(state.serverInfo.model) : ''}</span>
-          <button class="qa-ask-btn" onclick="askFromInput('${escapeHtml(stepId)}', '${escapeHtml(storylineId)}')">Ask</button>
-        </div>
-      </div>`;
-  }
-
-  function qaKeyDown(ev, stepId, storylineId) {
-    if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
-      ev.preventDefault();
-      askFromInput(stepId, storylineId);
-    }
-  }
-
-  function askFromInput(stepId, storylineId) {
-    const ta = document.getElementById('qa-input-' + stepId);
-    if (!ta) return;
-    const question = ta.value.trim();
-    if (!question) { ta.focus(); return; }
-    submitQuestion(stepId, storylineId, question);
-  }
-
-  function cancelAsk() {
-    if (state.pendingAsk && state.pendingAsk.controller) {
-      try { state.pendingAsk.controller.abort(); } catch (_) {}
-    }
-    state.pendingAsk = null;
-    if (_qaElapsedTimer) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; }
-    renderRight();
-  }
-
-  let _qaElapsedTimer = null;
-
-  function submitQuestion(stepId, storylineId, question) {
-    if (!state.liveMode) return;
-    const controller = ('AbortController' in window) ? new AbortController() : null;
-    state.pendingAsk = {
-      stepId, storylineId, question,
-      startedAt: Date.now(),
-      controller,
-      error: null,
-    };
-    renderRight();
-    // Tick the elapsed counter every second while pending
-    if (_qaElapsedTimer) clearInterval(_qaElapsedTimer);
-    _qaElapsedTimer = setInterval(() => {
-      if (!state.pendingAsk) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; return; }
-      const el = document.getElementById('qa-elapsed');
-      if (el) el.textContent = Math.round((Date.now() - state.pendingAsk.startedAt) / 1000) + 's';
-    }, 1000);
-
-    fetch('/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ step_id: stepId, storyline_id: storylineId, question }),
-      signal: controller ? controller.signal : undefined,
-    })
-      .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
-      .then(({ ok, status, body }) => {
-        if (_qaElapsedTimer) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; }
-        if (!state.pendingAsk) return;  // cancelled
-        if (!ok) {
-          state.pendingAsk = {
-            ...state.pendingAsk,
-            error: (body && (body.error || body.stderr)) || `HTTP ${status}`,
-          };
-          renderRight();
-          return;
-        }
-        // Success — prepend to followups[stepId]
-        if (!state.followups[stepId]) state.followups[stepId] = [];
-        state.followups[stepId] = [body, ...state.followups[stepId]];
-        state.pendingAsk = null;
-        renderRight();
-      })
-      .catch(err => {
-        if (_qaElapsedTimer) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; }
-        if (!state.pendingAsk) return;  // cancelled
-        if (err && err.name === 'AbortError') {
-          state.pendingAsk = null;
-          renderRight();
-          return;
-        }
-        state.pendingAsk = {
-          ...state.pendingAsk,
-          error: 'Network error: ' + (err && err.message ? err.message : 'unknown'),
-        };
-        renderRight();
-      });
-  }
-
-  function buildQASectionContent(step, storyline) {
-    const stepFollowups = state.followups[step.id] || [];
-    const isPending = !!(state.pendingAsk && state.pendingAsk.stepId === step.id);
-    const errorMsg = (state.pendingAsk && state.pendingAsk.stepId === step.id && state.pendingAsk.error) || null;
-
-    let html = '';
-    html += renderQAInput(step.id, storyline.id, isPending);
-    if (errorMsg) {
-      html += `<div class="qa-error">${escapeHtml(errorMsg)}</div>`;
-    }
-    if (stepFollowups.length > 0) {
-      html += `<div class="qa-list">${stepFollowups.map(renderQAItem).join('')}</div>`;
-    }
-    return html;
-  }
-
-  function renderRight() {
-    const right = document.getElementById('right-pane');
-
-    if (state.view === 'reading_overview') {
-      right.innerHTML = `<div class="empty-state">Reading-level overview is shown in the main pane.<br><br>Click a storyline to see its overview, or a step to see detailed walkthrough.</div>`;
-      return;
-    }
-
-    if (state.view === 'storyline_overview') {
-      const sl = findStoryline(state.currentStorylineId);
-      if (!sl) { right.innerHTML = ''; return; }
-      const isSummary = sl.depth === 'summary';
-      const steps = sl.steps || [];
-      const trackCounts = steps.reduce((acc, st) => { acc[st.track] = (acc[st.track] || 0) + 1; return acc; }, {});
-      const trackSummary = Object.entries(trackCounts).map(([k,v]) => `${v} ${k}`).join(', ');
-      right.innerHTML = `
-        <div class="empty-state" style="padding: 24px 20px; text-align: left;">
-          <div style="font-size: 12px; font-weight: 600; color: #656d76; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Storyline at a glance</div>
-          ${isSummary
-            ? `<div>Depth: <strong>summary</strong> — no steps. See the main pane to promote.</div>`
-            : `<div><strong>${steps.length}</strong> step${steps.length === 1 ? '' : 's'}: ${trackSummary}</div>`}
-          <div style="margin-top: 12px; font-size: 12px; color: #656d76;">Files: ${(sl.files_touched || []).map(f => `<code style="font-size: 11px;">${escapeHtml(f)}</code>`).join(', ')}</div>
-          ${!isSummary ? `<div style="margin-top: 24px; font-size: 12px; color: #656d76;">Click "Start reading" or any step in the roadmap to begin.</div>` : ''}
-        </div>
-      `;
-      return;
-    }
-
-    // step view
-    const found = findStep(state.currentStepId);
-    if (!found) { right.innerHTML = ''; return; }
-    const { storyline, step } = found;
-
-    const sections = [];
-
-    // Prerequisites (factual context-recall, default expanded)
-    if (step.prerequisites && step.prerequisites.length > 0) {
-      const items = step.prerequisites.map(p => {
-        const refLink = p.kind === 'prior_step'
-          ? `<span class="prereq-ref" onclick="navigateToStep('${p.reference_id}')">jump to ${escapeHtml(p.reference_id)}</span>`
-          : '';
-        return `<div class="prereq-item">
-          <div class="prereq-kind">${escapeHtml(p.kind.replace(/_/g, ' '))}${refLink}</div>
-          <div>${renderInlineMarkdown(p.summary)}</div>
-        </div>`;
-      }).join('');
-      sections.push(section('prerequisites', 'prereq', '前情提要 Prerequisites', 'context', items));
-    }
-
-    // Mental model anchor — surface via storyline's anchor when on first step
-    // (the anchor lives on the storyline; show it on every step as a quick recall).
-    if (storyline.mental_model_anchor) {
-      sections.push(section(
-        'mental_model_anchor', 'anchor',
-        '心智模型 Mental Model', 'anchor',
-        `<div class="anchor-callout">${renderInlineMarkdown(storyline.mental_model_anchor)}</div>`
-      ));
-    }
-
-    // Summary (factual, default expanded)
-    if (step.summary) {
-      sections.push(section('summary', 'summary', '简介 Summary', 'factual', renderInlineMarkdown(step.summary)));
-    }
-
-    // Invariants (factual, default expanded — central to mental model)
-    if (step.invariants && step.invariants.length > 0) {
-      const list = step.invariants.map(s => `<li>${renderInlineMarkdown(s)}</li>`).join('');
-      sections.push(section('invariants', 'invariants', '不变量 Invariants', 'factual', `<ul class="bullet-list">${list}</ul>`));
-    }
-
-    // Key data structures (factual, default collapsed — table of nouns)
-    if (step.key_data_structures && step.key_data_structures.length > 0) {
-      const items = step.key_data_structures.map(d => `
-        <div class="ds-item">
-          <div class="ds-name">${escapeHtml(d.name)}</div>
-          ${d.shape ? `<div class="ds-shape">${escapeHtml(d.shape)}</div>` : ''}
-          ${d.role ? `<div class="ds-role">${renderInlineMarkdown(d.role)}</div>` : ''}
-        </div>
-      `).join('');
-      sections.push(section('key_data_structures', 'data-structures', 'Key Data Structures', 'factual', items));
-    }
-
-    // Usage context — "where this is called from in the larger system"
-    if (step.usage_context) {
-      const uc = step.usage_context;
-      let html = '';
-      if (uc.primary_usage_scenario) {
-        html += `<div class="ba-block"><div class="ba-label">Primary usage scenario</div><div class="ba-content">${renderInlineMarkdown(uc.primary_usage_scenario)}</div></div>`;
-      }
-      if (uc.callers && uc.callers.length > 0) {
-        const callers = uc.callers.map(c => `
-          <div class="caller-item">
-            <div class="caller-loc">${escapeHtml(c.file)}:${c.line}</div>
-            ${c.snippet ? `<div class="caller-snippet">${escapeHtml(c.snippet)}</div>` : ''}
-            <div>${renderInlineMarkdown(c.context)}</div>
-          </div>
-        `).join('');
-        html += `<div class="ba-block"><div class="ba-label">Callers (${uc.callers.length})</div>${callers}</div>`;
-      }
-      if (uc.call_patterns && uc.call_patterns.length > 0) {
-        html += `<div class="ba-block"><div class="ba-label">Call patterns</div><ul class="bullet-list">${uc.call_patterns.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
-      }
-      if (uc.implicit_dependencies && uc.implicit_dependencies.length > 0) {
-        html += `<div class="ba-block"><div class="ba-label">Implicit dependencies</div><ul class="bullet-list">${uc.implicit_dependencies.map(p => `<li>${renderInlineMarkdown(p)}</li>`).join('')}</ul></div>`;
-      }
-      if (html) sections.push(section('usage_context', 'usage', 'Where This Is Called From', 'factual', html));
-    }
-
-    // Codebase patterns (factual, default collapsed)
-    if (step.codebase_patterns) {
-      const cp = step.codebase_patterns;
-      let html = '';
-      if (cp.convention_alignment) {
-        html += `<div class="ba-block"><div class="ba-label">Convention alignment</div><div class="ba-content">${renderInlineMarkdown(cp.convention_alignment)}</div></div>`;
-      }
-      if (cp.deviations) {
-        html += `<div class="ba-block"><div class="ba-label">Deviations</div><div class="ba-content">${renderInlineMarkdown(cp.deviations)}</div></div>`;
-      }
-      const similar = cp.similar_code_elsewhere || cp.similar_changes_elsewhere || [];
-      if (similar.length > 0) {
-        const items = similar.map(s => `
-          <div class="caller-item">
-            <div class="caller-loc">${escapeHtml(s.file)}:${s.line}</div>
-            <div>${renderInlineMarkdown(s.note)}</div>
-          </div>
-        `).join('');
-        html += `<div class="ba-block"><div class="ba-label">Similar elsewhere</div>${items}</div>`;
-      }
-      if (html) sections.push(section('codebase_patterns', 'patterns', 'Codebase Patterns', 'factual', html));
-    }
-
-    // Design rationale (was alternative_approaches in v0.3)
-    const dr = step.design_rationale || step.alternative_approaches;
-    if (dr && dr.length > 0) {
-      const items = dr.map(a => `
-        <div class="alt-item">
-          <div class="alt-approach">${escapeHtml(a.approach)}<span class="alt-evidence-tag ${a.evidence_kind}">${escapeHtml(a.evidence_kind)}</span></div>
-          <div>${renderInlineMarkdown(a.tradeoff_vs_chosen_design || a.tradeoff_vs_chosen)}</div>
-        </div>
-      `).join('');
-      sections.push(section('design_rationale', 'design-rationale', '设计取舍 Design Rationale', '', items));
-    }
-
-    // Analysis (deeper technical reasoning, default collapsed)
-    if (step.analysis) {
-      sections.push(section('analysis', 'analysis', '分析 Analysis', 'deep', renderInlineMarkdown(step.analysis)));
-    }
-
-    // Q&A — only renders in live mode (or when prior followups exist for this step).
-    const stepFollowups = state.followups[step.id] || [];
-    const showQA = state.liveMode || stepFollowups.length > 0;
-    if (showQA) {
-      const qaTag = state.liveMode ? 'live' : 'static';
-      sections.push(section('qa', 'qa', '💬 Q&A', qaTag, buildQASectionContent(step, storyline)));
-    }
-
-    if (sections.length === 0) {
-      right.innerHTML = '<div class="empty-state">No context attached to this step.</div>';
-    } else {
-      right.innerHTML = sections.join('');
-    }
-  }
-
-  // ========== Navigation ==========
-  function goToReadingOverview() {
-    state.view = 'reading_overview';
-    state.currentStorylineId = null;
-    state.currentStepId = null;
-    saveState();
-    rerender();
-  }
-
-  function goToStorylineOverview(slId) {
-    state.view = 'storyline_overview';
-    state.currentStorylineId = slId;
-    state.currentStepId = null;
-    saveState();
-    rerender();
-  }
-
-  function navigateToStep(stepId) {
-    if (stepId === null || stepId === undefined) return;
-    const found = findStep(stepId);
-    if (!found) return;
-    state.view = 'step';
-    state.currentStorylineId = found.storyline.id;
-    state.currentStepId = stepId;
-    saveState();
-    rerender();
-  }
-
-  function rerender() {
-    _fileBlockSeq = 0;
-    const center = document.getElementById('center-pane');
-    if (state.view === 'reading_overview') {
-      center.innerHTML = renderReadingOverview();
-    } else if (state.view === 'storyline_overview') {
-      const sl = findStoryline(state.currentStorylineId);
-      center.innerHTML = renderStorylineOverview(sl);
-    } else if (state.view === 'step') {
-      const found = findStep(state.currentStepId);
-      if (found) center.innerHTML = renderStepCenter(found.storyline, found.step);
-    }
-    renderRight();
-    highlightCurrentNav();
-    document.getElementById('center-pane').scrollTop = 0;
-    document.getElementById('right-pane').scrollTop = 0;
-  }
-
-  // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
-    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'j') {
-      const next = state.currentStepId ? getAdjacentStep(state.currentStepId, +1) : (() => {
-        for (const sl of WALKTHROUGH_DATA.storylines) {
-          if (sl.steps && sl.steps.length > 0) return sl.steps[0].id;
-        }
-        return null;
-      })();
-      if (next) navigateToStep(next);
-      e.preventDefault();
-    } else if (e.key === 'k') {
-      const prev = getAdjacentStep(state.currentStepId, -1);
-      if (prev) navigateToStep(prev);
-      e.preventDefault();
-    } else if (e.key === 'o' || e.key === 'O') {
-      goToReadingOverview();
-      e.preventDefault();
-    } else if (e.key === 's' || e.key === 'S') {
-      if (state.currentStorylineId) goToStorylineOverview(state.currentStorylineId);
-      e.preventDefault();
-    }
-  });
-
-  // ========== Live-mode preflight ==========
-  // Detects whether a companion live_server.py is serving this page,
-  // and loads any prior follow-up Q&As from the sidecar. Both fetches
-  // are time-boxed so the page renders normally even if /__alive hangs.
-  function preflight() {
-    const timeoutMs = 1500;
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('preflight-timeout')), timeoutMs));
-    const probe = (url) => Promise.race([
-      fetch(url, { method: 'GET', cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject(new Error('http ' + r.status))),
-      timeout,
-    ]);
-
-    return Promise.allSettled([probe('/__alive'), probe('/followups')]).then(([alive, fups]) => {
-      if (alive.status === 'fulfilled' && alive.value && alive.value.ok) {
-        state.liveMode = true;
-        state.serverInfo = alive.value;
-      }
-      if (fups.status === 'fulfilled' && fups.value && Array.isArray(fups.value.qa)) {
-        // Group by step_id, newest first within each group.
-        const byStep = {};
-        for (const qa of fups.value.qa) {
-          if (!qa.step_id) continue;
-          (byStep[qa.step_id] || (byStep[qa.step_id] = [])).push(qa);
-        }
-        for (const k of Object.keys(byStep)) {
-          byStep[k].sort((a, b) => (b.asked_at || '').localeCompare(a.asked_at || ''));
-        }
-        state.followups = byStep;
-      }
-    });
-  }
-
-  function renderLiveBadge() {
-    const sub = document.getElementById('pr-subtitle');
-    if (!sub) return;
-    const existing = document.getElementById('live-badge');
-    if (existing) existing.remove();
-    const badge = document.createElement('div');
-    badge.id = 'live-badge';
-    badge.className = 'live-badge ' + (state.liveMode ? 'live' : 'static');
-    badge.textContent = state.liveMode
-      ? `live · ${(state.serverInfo && state.serverInfo.cli) || 'cli'}`
-      : 'static';
-    sub.parentNode.insertBefore(badge, sub.nextSibling);
-  }
-
-  // ========== Init ==========
-  function init() {
-    if (typeof WALKTHROUGH_DATA === 'undefined' || WALKTHROUGH_DATA === null) {
-      document.body.innerHTML = '<div style="padding: 40px; font-family: monospace;">No walkthrough data injected. The template placeholder was not replaced.</div>';
-      return;
-    }
-    renderHeader();
-    renderNav();
-
-    // Restore prior view from localStorage if available
-    const saved = loadState();
-    let restored = false;
-    if (saved) {
-      if (saved.sectionCollapsed) state.sectionCollapsed = saved.sectionCollapsed;
-      if (saved.view === 'step' && saved.currentStepId && findStep(saved.currentStepId)) {
-        state.view = 'step';
-        state.currentStorylineId = saved.currentStorylineId;
-        state.currentStepId = saved.currentStepId;
-        rerender();
-        restored = true;
-      } else if (saved.view === 'storyline_overview' && saved.currentStorylineId && findStoryline(saved.currentStorylineId)) {
-        state.view = 'storyline_overview';
-        state.currentStorylineId = saved.currentStorylineId;
-        rerender();
-        restored = true;
-      }
-    }
-    if (!restored) goToReadingOverview();
-
-    // Probe for the live server. If found, refresh the right pane so
-    // the Q&A section appears for the current view.
-    preflight().then(() => {
-      renderLiveBadge();
-      if (state.view === 'step') renderRight();
-    });
   }
   init();
 </script>
-
 </body>
 </html>

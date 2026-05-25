@@ -55,10 +55,17 @@ def main():
     storylines = data.get("storylines", [])
     full_count = sum(1 for s in storylines if s.get("depth", "full") == "full")
     summary_count = sum(1 for s in storylines if s.get("depth") == "summary")
-    total_steps = sum(len(s.get("steps", []) or []) for s in storylines)
+    total_blocks = sum(
+        sum(len(col.get("blocks", []) or []) for col in (s.get("diagram") or {}).get("cols", []) or [])
+        for s in storylines
+    )
+    total_edges = sum(
+        len((s.get("diagram") or {}).get("edges", []) or [])
+        for s in storylines
+    )
     print(f"Wrote {output_path} ({size_kb:.1f} KB)")
     print(f"  Storylines: {len(storylines)} ({full_count} full, {summary_count} summary)")
-    print(f"  Total steps: {total_steps}")
+    print(f"  Total blocks: {total_blocks}, edges: {total_edges}")
 
 if __name__ == "__main__":
     main()

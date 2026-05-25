@@ -1,0 +1,445 @@
+{
+  "schema_version": "0.5-reading",
+  "metadata": {
+    "repo": "example/turn-runner",
+    "commit": "abc1234",
+    "target": "src/turn-runner.ts",
+    "title": "How turn-runner works (toy demo for v0.5-reading)",
+    "generated_at": "2026-05-25T00:00:00Z"
+  },
+  "summary": {
+    "one_line": "Toy demo exercising the v0.5 flow-inspector schema.",
+    "description": "Two storylines: one full-depth diagram showcasing phases / cols / blocks / edges, one summary-depth card. Not a real codebase analysis — fixture only."
+  },
+  "scope": {
+    "mode": "files",
+    "input": "src/turn-runner.ts",
+    "discovered_scope": [
+      { "path": "src/turn-runner.ts", "reason": "core-flow", "note": "the lifecycle wrapper" }
+    ],
+    "excluded": [],
+    "importance_criteria": "Single file, two storylines hand-authored for schema validation."
+  },
+  "storylines": [
+    {
+      "id": "S1",
+      "title": "One turn, one lifecycle",
+      "kind": "core_flow",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 2,
+        "entry_point": 3,
+        "novelty": 2,
+        "total": 10,
+        "rationale": "Pervasive (every turn goes through it); public entry point."
+      },
+      "summary": "How startTurn / runWithLifecycle / handleRunFailure / finishRun compose one turn.",
+      "files_touched": ["src/turn-runner.ts"],
+      "mental_model_anchor": "Think of it as a try/finally wrapped around an executor. startTurn validates and hands off; runWithLifecycle owns the streaming + abort state; handleRunFailure converts thrown errors into synthetic assistant messages; finishRun is the idempotent finalizer.",
+      "purpose": {
+        "stated": "Run one agent turn from input to terminal event.",
+        "evident": "Wraps an arbitrary executor function in lifecycle guarantees: exactly one active turn, streaming flag flipped, abort plumbing wired, errors normalized, finishRun always called.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "Agent loop — sits between the public Agent.send() API and the model-call executor.",
+        "involved_modules": [
+          { "module": "Agent", "role_in_storyline": "owns the lifecycle and event bus" },
+          { "module": "executor", "role_in_storyline": "the user-supplied turn implementation" }
+        ],
+        "data_flow": "turn input → startTurn (guard + bind) → runWithLifecycle (streaming on, executor runs, errors → handleRunFailure, finally → finishRun) → terminal event"
+      },
+      "change_overview": "A turn flows through four functions in a fixed pattern: startTurn validates and hands off to runWithLifecycle, which wraps the executor in a try/catch/finally. The catch path goes to handleRunFailure (synthesizes an error assistant_message). The finally path always invokes finishRun (clears 'busy' state, resolves the lifecycle promise).\n\nThe key invariant: exactly one of the two terminal paths fires, and finishRun runs in both.",
+      "diagram": {
+        "file_badge": "turn-runner.ts",
+        "subtitle": "four functions, one lifecycle",
+        "phases": [
+          { "id": "guard",   "label": "Guard",   "color": "guard" },
+          { "id": "setup",   "label": "Setup",   "color": "setup" },
+          { "id": "main",    "label": "Main",    "color": "main" },
+          { "id": "handoff", "label": "Handoff", "color": "handoff" },
+          { "id": "cleanup", "label": "Cleanup", "color": "cleanup" },
+          { "id": "error",   "label": "Error",   "color": "error" }
+        ],
+        "cols": [
+          {
+            "id": "startTurn",
+            "function": "startTurn",
+            "label": "startTurn",
+            "description": "Entry point. Validates state, wires up the executor, and hands off to the lifecycle wrapper.",
+            "blocks": [
+              {
+                "id": "B1",
+                "phase": "guard",
+                "title": "GUARD",
+                "line_range": "L412–414",
+                "one_liner": "Reject early if the agent is closed — anything past this point assumes a live instance and a healthy event bus.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 411,
+                  "context_end_line": 415,
+                  "lines": [
+                    { "line_num": 411, "content": "async startTurn(input: TurnInput): Promise<void> {", "change": "unchanged" },
+                    { "line_num": 412, "content": "  if (this.closed) {", "change": "unchanged" },
+                    { "line_num": 413, "content": "    throw new Error('agent is closed');", "change": "unchanged" },
+                    { "line_num": 414, "content": "  }", "change": "unchanged" },
+                    { "line_num": 415, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Checks the closed flag and throws synchronously if the agent has already been shut down.",
+                  "why_its_here": "Every downstream block assumes a live instance and a working event bus. Failing fast here avoids zombie turns that try to emit events into a dead bus.",
+                  "touches": [
+                    { "label": "this.closed", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "Throws Error('agent is closed') — caller's responsibility to catch."
+                  ]
+                }
+              },
+              {
+                "id": "B2",
+                "phase": "setup",
+                "title": "BUILD EXECUTOR",
+                "line_range": "L416–417",
+                "one_liner": "Bind the turn input to the loop and surface it as an (signal) ⇒ Promise so runWithLifecycle stays input-agnostic.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 415,
+                  "context_end_line": 418,
+                  "lines": [
+                    { "line_num": 415, "content": "", "change": "unchanged" },
+                    { "line_num": 416, "content": "  const executor = (signal: AbortSignal) =>", "change": "unchanged" },
+                    { "line_num": 417, "content": "    this.loop(input, signal);", "change": "unchanged" },
+                    { "line_num": 418, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Curries the loop function so runWithLifecycle only sees an (signal) ⇒ Promise<void> regardless of turn input shape.",
+                  "why_its_here": "Keeps runWithLifecycle reusable for any per-turn implementation — replaying, simulation, tests can all swap in their own executor without re-implementing the lifecycle."
+                }
+              },
+              {
+                "id": "B3",
+                "phase": "handoff",
+                "title": "HANDOFF",
+                "line_range": "L419",
+                "one_liner": "Return the lifecycle promise so callers can await the full turn — including post-loop listener flushing.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 418,
+                  "context_end_line": 421,
+                  "lines": [
+                    { "line_num": 418, "content": "", "change": "unchanged" },
+                    { "line_num": 419, "content": "  return this.runWithLifecycle(executor);", "change": "unchanged" },
+                    { "line_num": 420, "content": "}", "change": "unchanged" },
+                    { "line_num": 421, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Tail-calls runWithLifecycle and returns its promise verbatim.",
+                  "why_its_here": "Callers await the full turn (including listener flush) by awaiting this promise. Returning verbatim — not awaiting and re-throwing — preserves the promise's identity for cancellation handles.",
+                  "touches": [
+                    { "label": "runWithLifecycle", "kind": "function", "block": "B4" }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "runWithLifecycle",
+            "function": "runWithLifecycle",
+            "label": "runWithLifecycle",
+            "description": "Owns the canonical 'busy' indicator, the abort wiring, and the message lifecycle around any executor.",
+            "blocks": [
+              {
+                "id": "B4",
+                "phase": "guard",
+                "title": "GUARD",
+                "line_range": "L451–453",
+                "one_liner": "Only one active turn at a time — overlapping runs would race on the streaming message buffer and the abort controller.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 450,
+                  "context_end_line": 454,
+                  "lines": [
+                    { "line_num": 450, "content": "async runWithLifecycle(executor: Executor): Promise<void> {", "change": "unchanged" },
+                    { "line_num": 451, "content": "  if (this.activeRun) {", "change": "unchanged" },
+                    { "line_num": 452, "content": "    throw new Error('turn already in flight');", "change": "unchanged" },
+                    { "line_num": 453, "content": "  }", "change": "unchanged" },
+                    { "line_num": 454, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Checks the activeRun handle and throws if a turn is already in flight.",
+                  "why_its_here": "Two overlapping turns would corrupt the streaming message buffer and race on the abort controller. We reject the second turn rather than queuing — queueing semantics belong to the caller.",
+                  "failure_mode": [
+                    "Throws Error('turn already in flight') — caller may catch and queue, retry, or surface."
+                  ]
+                }
+              },
+              {
+                "id": "B5",
+                "phase": "main",
+                "title": "MAIN LOGIC",
+                "line_range": "L455–460",
+                "one_liner": "activeRun is the canonical 'agent is busy' indicator. It owns the AbortController so agent.abort() can cancel from anywhere, and the promise so waitForIdle() can await completion (after listeners settle, not just after the loop returns).",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 454,
+                  "context_end_line": 461,
+                  "lines": [
+                    { "line_num": 454, "content": "", "change": "unchanged" },
+                    { "line_num": 455, "content": "  const controller = new AbortController();", "change": "unchanged" },
+                    { "line_num": 456, "content": "  const lifecycle = Promise.withResolvers<void>();", "change": "unchanged" },
+                    { "line_num": 457, "content": "  this.activeRun = { controller, lifecycle };", "change": "unchanged" },
+                    { "line_num": 458, "content": "  this.isStreaming = true;", "change": "unchanged" },
+                    { "line_num": 459, "content": "  this.emit('turn_start');", "change": "unchanged" },
+                    { "line_num": 460, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Sets up the abort controller, the deferred lifecycle promise, registers them in activeRun, flips the streaming flag, and emits turn_start.",
+                  "why_its_here": "Centralizes 'a turn is in flight' state in one place. Subscribers re-render on the isStreaming flip; emit() drives any external listeners; controller.signal threads through executor for cooperative cancellation.",
+                  "touches": [
+                    { "label": "AbortController", "kind": "external", "block": null },
+                    { "label": "this.activeRun", "kind": "variable", "block": null },
+                    { "label": "emit", "kind": "function", "block": null }
+                  ],
+                  "invariants": [
+                    "this.activeRun is non-null until finishRun clears it.",
+                    "this.isStreaming === true until finishRun flips it false."
+                  ]
+                }
+              },
+              {
+                "id": "B6",
+                "phase": "error",
+                "title": "ERROR PATH",
+                "line_range": "L466–472",
+                "one_liner": "Errors are not propagated — they're converted into a synthetic 'error' or 'aborted' assistant message via handleRunFailure, so subscribers always see a clean turn lifecycle (message_start → message_end → turn_end → agent_end) regardless of how the loop ended.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 465,
+                  "context_end_line": 473,
+                  "lines": [
+                    { "line_num": 465, "content": "  try {", "change": "unchanged" },
+                    { "line_num": 466, "content": "    await executor(controller.signal);", "change": "unchanged" },
+                    { "line_num": 467, "content": "  } catch (error) {", "change": "unchanged" },
+                    { "line_num": 468, "content": "    await this.handleRunFailure(error);", "change": "unchanged" },
+                    { "line_num": 469, "content": "  } finally {", "change": "unchanged" },
+                    { "line_num": 470, "content": "    this.finishRun();", "change": "unchanged" },
+                    { "line_num": 471, "content": "  }", "change": "unchanged" },
+                    { "line_num": 472, "content": "  return lifecycle.promise;", "change": "unchanged" },
+                    { "line_num": 473, "content": "}", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "try { run executor } catch { handleRunFailure } finally { finishRun }. Returns the lifecycle promise so callers can await the full turn including post-loop listener flushing.",
+                  "why_its_here": "Errors are converted into a synthetic assistant_message so subscribers always see a clean message_start → message_end → turn_end → agent_end sequence regardless of how the loop ended. The finally guarantees finishRun runs on both paths.",
+                  "touches": [
+                    { "label": "handleRunFailure", "kind": "function", "block": "B7" },
+                    { "label": "finishRun",        "kind": "function", "block": "B10" }
+                  ],
+                  "failure_mode": [
+                    "No throw — handled & emitted as synthetic message."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "handleRunFailure",
+            "function": "handleRunFailure",
+            "label": "handleRunFailure",
+            "description": "Converts thrown errors and aborts into a synthetic assistant message so listeners see a normal end-of-turn.",
+            "blocks": [
+              {
+                "id": "B7",
+                "phase": "setup",
+                "title": "CLASSIFY",
+                "line_range": "L488–489",
+                "one_liner": "aborted is the source-of-truth signal — distinguishes a user-initiated cancel (don't surface) from a real failure (surface).",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 487,
+                  "context_end_line": 490,
+                  "lines": [
+                    { "line_num": 487, "content": "async handleRunFailure(error: unknown): Promise<void> {", "change": "unchanged" },
+                    { "line_num": 488, "content": "  const aborted = this.activeRun?.controller.signal.aborted;", "change": "unchanged" },
+                    { "line_num": 489, "content": "  const kind = aborted ? 'aborted' : 'error';", "change": "unchanged" },
+                    { "line_num": 490, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Reads the abort signal and picks 'aborted' vs 'error' as the failure kind.",
+                  "why_its_here": "controller.signal.aborted is set by agent.abort() and is the only reliable signal that this was a user-initiated cancel — exception type alone isn't sufficient because abort can manifest as DOMException, AbortError, or wrapped variants."
+                }
+              },
+              {
+                "id": "B8",
+                "phase": "main",
+                "title": "EMIT",
+                "line_range": "L491–495",
+                "one_liner": "Wrap the failure in the same assistant_message envelope the loop would have emitted, so downstream listeners need no special-case for errors.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 490,
+                  "context_end_line": 496,
+                  "lines": [
+                    { "line_num": 490, "content": "", "change": "unchanged" },
+                    { "line_num": 491, "content": "  this.emit('message_start', { role: 'assistant' });", "change": "unchanged" },
+                    { "line_num": 492, "content": "  const errorMessage = aborted ? '' : String(error);", "change": "unchanged" },
+                    { "line_num": 493, "content": "  this.emit('message_chunk', { text: errorMessage });", "change": "unchanged" },
+                    { "line_num": 494, "content": "  this.emit('message_end', { kind, errorMessage });", "change": "unchanged" },
+                    { "line_num": 495, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Emits the three-event assistant message sequence with kind=error|aborted.",
+                  "why_its_here": "Downstream listeners (UIs, loggers, analytics) already handle the assistant_message envelope. Wrapping errors in the same envelope means no listener needs an error-specific code path — they get a normal end-of-turn that happens to carry kind=error.",
+                  "failure_mode": [
+                    "Aborts are intentional — leave errorMessage empty. Real errors stick around so the UI can show a retry banner."
+                  ]
+                }
+              },
+              {
+                "id": "B9",
+                "phase": "main",
+                "title": "PERSIST",
+                "line_range": "L497",
+                "one_liner": "Append the failure-message to the conversation transcript so replays / context windows include the failure.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 496,
+                  "context_end_line": 498,
+                  "lines": [
+                    { "line_num": 496, "content": "", "change": "unchanged" },
+                    { "line_num": 497, "content": "  await this.transcript.append({ role: 'assistant', kind, content: errorMessage });", "change": "unchanged" },
+                    { "line_num": 498, "content": "}", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Awaits transcript.append() so the failure persists before the function returns.",
+                  "why_its_here": "Without this the next turn's context window would silently lose the failure — the model would forget it just made an error and might repeat it. await blocks finishRun until durable so order is preserved."
+                }
+              }
+            ]
+          },
+          {
+            "id": "finishRun",
+            "function": "finishRun",
+            "label": "finishRun",
+            "description": "Resolves the lifecycle promise and clears all 'agent is busy' state. Always runs, even after failure.",
+            "blocks": [
+              {
+                "id": "B10",
+                "phase": "guard",
+                "title": "GUARD",
+                "line_range": "L506",
+                "one_liner": "Idempotent — calling finishRun twice (e.g. from finally + close()) is a no-op rather than a crash.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 505,
+                  "context_end_line": 507,
+                  "lines": [
+                    { "line_num": 505, "content": "finishRun(): void {", "change": "unchanged" },
+                    { "line_num": 506, "content": "  if (!this.activeRun) return;", "change": "unchanged" },
+                    { "line_num": 507, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Returns early if there's no activeRun.",
+                  "why_its_here": "Both runWithLifecycle's finally AND Agent.close() call finishRun. Making it idempotent means callers don't need to coordinate."
+                }
+              },
+              {
+                "id": "B11",
+                "phase": "cleanup",
+                "title": "CLEANUP",
+                "line_range": "L508–510",
+                "one_liner": "Drop the active run handle before resolving so any await-er that re-enters synchronously sees the agent as idle.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 507,
+                  "context_end_line": 511,
+                  "lines": [
+                    { "line_num": 507, "content": "", "change": "unchanged" },
+                    { "line_num": 508, "content": "  const run = this.activeRun;", "change": "unchanged" },
+                    { "line_num": 509, "content": "  this.activeRun = null;", "change": "unchanged" },
+                    { "line_num": 510, "content": "  this.isStreaming = false;", "change": "unchanged" },
+                    { "line_num": 511, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Captures activeRun in a local, then clears the field and flips isStreaming false.",
+                  "why_its_here": "Order matters: clear state BEFORE resolving the lifecycle promise (next block). A re-entrant caller awaiting waitForIdle() that fires startTurn synchronously must see isStreaming === false, otherwise the new turn rejects with 'turn already in flight'.",
+                  "invariants": [
+                    "After this block, this.activeRun === null and this.isStreaming === false.",
+                    "Subscribers' re-renders will show the agent as idle."
+                  ]
+                }
+              },
+              {
+                "id": "B12",
+                "phase": "handoff",
+                "title": "RESOLVE",
+                "line_range": "L512",
+                "one_liner": "Resolution happens last — waitForIdle() consumers can rely on isStreaming === false the moment their await returns.",
+                "code_view": {
+                  "file": "src/turn-runner.ts",
+                  "language": "typescript",
+                  "context_start_line": 511,
+                  "context_end_line": 514,
+                  "lines": [
+                    { "line_num": 511, "content": "", "change": "unchanged" },
+                    { "line_num": 512, "content": "  run.lifecycle.resolve();", "change": "unchanged" },
+                    { "line_num": 513, "content": "  this.emit('turn_end');", "change": "unchanged" },
+                    { "line_num": 514, "content": "}", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Resolves the deferred lifecycle promise, then emits turn_end.",
+                  "why_its_here": "Resolution is last so any waitForIdle() consumer's await returns AFTER the state-clearing in the previous block has happened. Emitting turn_end last gives subscribers a clean terminal event."
+                }
+              }
+            ]
+          }
+        ],
+        "edges": [
+          { "from": "B3", "to": "B4",  "label": "CALL",    "style": "solid",  "color": "#c54343" },
+          { "from": "B6", "to": "B7",  "label": "CATCH",   "style": "solid",  "color": "#c54343" },
+          { "from": "B6", "to": "B10", "label": "FINALLY", "style": "dashed", "color": "#7a5cc4" }
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "title": "Event bus & subscriber notification",
+      "kind": "utility",
+      "depth": "summary",
+      "importance_scores": {
+        "centrality": 2,
+        "conceptual_weight": 1,
+        "entry_point": 1,
+        "novelty": 1,
+        "total": 5,
+        "rationale": "Standard pub/sub pattern; only included for context."
+      },
+      "summary": "A thin EventEmitter wrapper used by the lifecycle code above. Subscribers call agent.on('event', handler); the lifecycle blocks call this.emit(name, payload) to push updates. Implementation is a Map<string, Set<Handler>> with synchronous iteration; no buffering, no replay. Listed as summary-depth because there's no project-specific design in it — promote-to-full to see the implementation walk-through.",
+      "files_touched": ["src/event-bus.ts"]
+    }
+  ]
+}
