@@ -1,0 +1,3954 @@
+{
+  "schema_version": "0.5-reading",
+  "metadata": {
+    "repo": "earendil-works/pi",
+    "commit": "fc8a1559017f1e581cfa971aa3cef11a507a4975",
+    "target": "How does the pi agent work?",
+    "title": "How the pi agent works",
+    "generated_at": "2026-05-25T00:00:00Z"
+  },
+  "summary": {
+    "one_line": "A stateful Agent wraps a low-level loop that streams assistant turns, fans out tool calls (preflight sequentially, execute concurrently), and re-enters until steering and follow-up queues are drained.",
+    "description": "This walkthrough traces the pi agent end-to-end: the Agent class that owns transcript state and lifecycle (agent.ts), the runLoop with its nested outer/inner loops that handle steering, tool calls, and follow-ups (agent-loop.ts), the tool-execution choreography that preflights sequentially but executes in parallel, the stream pump that converts AgentMessage to LLM Message at the boundary, the type vocabulary that defines the extension hooks, and the optional proxy transport that swaps the streamFn without touching the loop. After reading, you should be able to follow a single user prompt from Agent.prompt() through every event emitted back to subscribers."
+  },
+  "scope": {
+    "mode": "topic",
+    "input": "How does the pi agent work?",
+    "discovered_scope": [
+      {
+        "path": "packages/agent/src/agent.ts",
+        "reason": "entry-point",
+        "note": "Agent class — public API, lifecycle, queues, event reducer."
+      },
+      {
+        "path": "packages/agent/src/agent-loop.ts",
+        "reason": "core-flow",
+        "note": "runLoop, streamAssistantResponse, tool-call dispatcher — the inner machinery."
+      },
+      {
+        "path": "packages/agent/src/types.ts",
+        "reason": "type-def",
+        "note": "AgentEvent, AgentLoopConfig hooks, AgentTool, CustomAgentMessages — the contract surface."
+      },
+      {
+        "path": "packages/agent/src/proxy.ts",
+        "reason": "dependency",
+        "note": "Alternate streamFn that proxies through a server with bandwidth-reduced deltas."
+      }
+    ],
+    "excluded": [
+      {
+        "path": "packages/agent/src/harness/*",
+        "reason": "test/dev harness — supports the agent rather than implements it."
+      },
+      {
+        "path": "packages/agent/src/node.ts",
+        "reason": "Node-specific entry shim — re-exports, no agent logic."
+      },
+      {
+        "path": "packages/agent/src/index.ts",
+        "reason": "Barrel file — re-exports only."
+      },
+      {
+        "path": "packages/ai/*",
+        "reason": "Provider SDK below the agent loop; this walkthrough stops at the convertToLlm boundary."
+      },
+      {
+        "path": "packages/coding-agent/*",
+        "reason": "Application built on top of Agent; not part of how the agent itself works."
+      },
+      {
+        "path": "packages/tui/*",
+        "reason": "UI consumer of agent events; out of scope for a runtime walkthrough."
+      },
+      {
+        "path": "packages/agent/test/*",
+        "reason": "Tests skipped on user request — implementation is the focus."
+      }
+    ],
+    "importance_criteria": "The question is a flow question — 'how does X work?' — so storylines were weighted toward entry_point and centrality. The Agent class and runLoop are the obvious entry+spine; tool execution is the highest-novelty piece (parallel-but-preflight pattern); types and the proxy transport are referenced supporting material best surfaced as summaries rather than full diagrams. Mode B scoping confirmed with the user before reading."
+  },
+  "storylines": [
+    {
+      "id": "S1",
+      "title": "Agent class — turn lifecycle",
+      "kind": "entry_point",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 2,
+        "entry_point": 3,
+        "novelty": 2,
+        "total": 10,
+        "rationale": "Centrality=3 because every prompt/continuation flows through runWithLifecycle; entry_point=3 because Agent.prompt is the public API surface."
+      },
+      "summary": "The Agent class owns the transcript, the abort controller, the steering and follow-up queues, and a try/catch/finally around the inner loop that converts thrown errors into synthetic assistant messages and idempotently clears runtime state.",
+      "files_touched": [
+        "packages/agent/src/agent.ts"
+      ],
+      "mental_model_anchor": "Think of Agent as a try/catch/finally wrapped around a single executor. prompt() validates and hands off; runWithLifecycle owns the AbortController and isStreaming flag; handleRunFailure converts thrown errors into synthetic assistant messages so subscribers see a normal event sequence; finishRun is the idempotent finalizer that always clears runtime-owned state.",
+      "purpose": {
+        "stated": "Class JSDoc: 'Stateful wrapper around the low-level agent loop. Agent owns the current transcript, emits lifecycle events, executes tools, and exposes queueing APIs for steering and follow-up messages.'",
+        "evident": "Agent is a thin orchestration shell: it normalizes inputs into AgentMessage[], builds a snapshot of context, constructs the AgentLoopConfig (wiring through hooks and the steering/follow-up queue drains), runs the loop under a try/catch/finally, and reduces emitted events into mutable state.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "Public façade of the agent package. Apps construct an Agent, subscribe to events, and call prompt()/continue()/abort(); everything below this line is the runtime.",
+        "involved_modules": [
+          {
+            "module": "agent.ts",
+            "role_in_storyline": "Owns state, queues, lifecycle; the file under study."
+          },
+          {
+            "module": "agent-loop.ts",
+            "role_in_storyline": "Invoked by runWithLifecycle via runAgentLoop / runAgentLoopContinue."
+          },
+          {
+            "module": "types.ts",
+            "role_in_storyline": "Defines AgentEvent / AgentLoopConfig / AgentState consumed by Agent."
+          }
+        ],
+        "data_flow": "Input (string | AgentMessage | AgentMessage[]) → normalizePromptInput → runPromptMessages → runWithLifecycle(executor) → runAgentLoop emits AgentEvents → processEvents reduces state and fans out to subscribed listeners → on throw, handleRunFailure synthesizes message_start/message_end/turn_end/agent_end so subscribers always see a normal closing sequence → finally finishRun resets runtime state."
+      },
+      "change_overview": "The Agent class is the entire public surface of the package. Construction wires defaults (streamSimple, defaultConvertToLlm, parallel toolExecution) and creates two PendingMessageQueues — one for steering (drained between turns) and one for follow-ups (drained when the agent would otherwise stop). State lives in a MutableAgentState built by createMutableAgentState; the public getter returns the same object with array setters that copy on assignment so callers can't mutate Agent internals through aliasing.\n\nThe single entrypoint discipline is enforced by activeRun: if it is set when prompt() is called the method throws, and the only place activeRun is set or cleared is runWithLifecycle. That function constructs an AbortController, builds an unsettled promise/resolve pair, stashes them in activeRun, then runs the executor inside try/catch/finally. The catch path always synthesizes a complete error turn through handleRunFailure (four events: message_start, message_end, turn_end, agent_end on a faux AssistantMessage with stopReason 'error' or 'aborted'). The finally path runs finishRun, which clears isStreaming, streamingMessage, pendingToolCalls, resolves the idle promise, and clears activeRun.\n\nThe reducer at the bottom — processEvents — is small but load-bearing. It mutates streamingMessage on message_start/update, appends to messages on message_end, maintains the pendingToolCalls set, and records errorMessage at turn_end. After reducing, it awaits each listener in subscription order with the active abort signal — meaning awaited agent_end listeners are part of the run's settlement, not just observers.",
+      "diagram": {
+        "file_badge": "agent.ts",
+        "subtitle": "queue + lifecycle + event reducer",
+        "phases": [
+          {
+            "id": "guard",
+            "label": "Guard",
+            "color": "guard"
+          },
+          {
+            "id": "setup",
+            "label": "Setup",
+            "color": "setup"
+          },
+          {
+            "id": "handoff",
+            "label": "Handoff",
+            "color": "handoff"
+          },
+          {
+            "id": "error",
+            "label": "Error",
+            "color": "error"
+          },
+          {
+            "id": "cleanup",
+            "label": "Cleanup",
+            "color": "cleanup"
+          },
+          {
+            "id": "emit",
+            "label": "Emit",
+            "color": "emit"
+          }
+        ],
+        "cols": [
+          {
+            "id": "col-prompt",
+            "function": "prompt",
+            "label": "prompt",
+            "description": "Public entry: rejects re-entry, normalizes string/message/array inputs into AgentMessage[], then hands the batch to runPromptMessages which calls into the lifecycle wrapper.",
+            "blocks": [
+              {
+                "id": "B1",
+                "phase": "guard",
+                "title": "REENTRY GUARD",
+                "line_range": "L327–335",
+                "one_liner": "Only one active turn at a time — overlapping prompts would race on the streaming message buffer, the pendingToolCalls set, and the abort controller, so the method throws with a directive pointing callers at steer() or followUp() instead.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 324,
+                  "context_end_line": 336,
+                  "lines": [
+                    {
+                      "line_num": 324,
+                      "content": "\t/** Start a new prompt from text, a single message, or a batch of messages. */",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 325,
+                      "content": "\tasync prompt(message: AgentMessage | AgentMessage[]): Promise<void>;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 326,
+                      "content": "\tasync prompt(input: string, images?: ImageContent[]): Promise<void>;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 327,
+                      "content": "\tasync prompt(input: string | AgentMessage | AgentMessage[], images?: ImageContent[]): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 328,
+                      "content": "\t\tif (this.activeRun) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 329,
+                      "content": "\t\t\tthrow new Error(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 330,
+                      "content": "\t\t\t\t\"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 331,
+                      "content": "\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 332,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 333,
+                      "content": "\t\tconst messages = this.normalizePromptInput(input, images);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 334,
+                      "content": "\t\tawait this.runPromptMessages(messages);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 335,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 336,
+                      "content": "",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Three signatures (overloads) collapse into one body. It rejects when activeRun is set, then normalizes the input into AgentMessage[] via normalizePromptInput (which wraps strings into a user message with optional image attachments), then awaits runPromptMessages.",
+                  "why_its_here": "The activeRun guard is the linchpin of the single-run invariant. Without it, two concurrent prompts would each set activeRun, install two abort controllers, and clobber state.streamingMessage on every delta. The error message itself is the public contract: callers learn there are queueing alternatives.",
+                  "touches": [
+                    {
+                      "label": "activeRun",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "normalizePromptInput",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "runPromptMessages",
+                      "kind": "function",
+                      "block": "B3"
+                    }
+                  ],
+                  "failure_mode": [
+                    "Throws synchronously if a run is already active — never enters runWithLifecycle, so no events are emitted.",
+                    "Subscribers see nothing for a rejected prompt — the caller's await rejects, that's the only signal."
+                  ]
+                }
+              },
+              {
+                "id": "B2",
+                "phase": "handoff",
+                "title": "BUILD CONFIG",
+                "line_range": "L422–449",
+                "one_liner": "createLoopConfig captures every Agent option as a fresh AgentLoopConfig each run, including closures over the steering/follow-up queue drains so the loop can poll for queued messages without knowing about the Agent.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 420,
+                  "context_end_line": 449,
+                  "lines": [
+                    {
+                      "line_num": 420,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 421,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 422,
+                      "content": "\tprivate createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 423,
+                      "content": "\t\tlet skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 424,
+                      "content": "\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 425,
+                      "content": "\t\t\tmodel: this._state.model,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 426,
+                      "content": "\t\t\treasoning: this._state.thinkingLevel === \"off\" ? undefined : this._state.thinkingLevel,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 427,
+                      "content": "\t\t\tsessionId: this.sessionId,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 428,
+                      "content": "\t\t\tonPayload: this.onPayload,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 429,
+                      "content": "\t\t\tonResponse: this.onResponse,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 430,
+                      "content": "\t\t\ttransport: this.transport,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 431,
+                      "content": "\t\t\tthinkingBudgets: this.thinkingBudgets,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 432,
+                      "content": "\t\t\tmaxRetryDelayMs: this.maxRetryDelayMs,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 433,
+                      "content": "\t\t\ttoolExecution: this.toolExecution,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 434,
+                      "content": "\t\t\tbeforeToolCall: this.beforeToolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 435,
+                      "content": "\t\t\tafterToolCall: this.afterToolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 436,
+                      "content": "\t\t\tprepareNextTurn: this.prepareNextTurn ? async () => await this.prepareNextTurn?.(this.signal) : undefined,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 437,
+                      "content": "\t\t\tconvertToLlm: this.convertToLlm,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 438,
+                      "content": "\t\t\ttransformContext: this.transformContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 439,
+                      "content": "\t\t\tgetApiKey: this.getApiKey,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 440,
+                      "content": "\t\t\tgetSteeringMessages: async () => {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 441,
+                      "content": "\t\t\t\tif (skipInitialSteeringPoll) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 442,
+                      "content": "\t\t\t\t\tskipInitialSteeringPoll = false;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 443,
+                      "content": "\t\t\t\t\treturn [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 444,
+                      "content": "\t\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 445,
+                      "content": "\t\t\t\treturn this.steeringQueue.drain();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 446,
+                      "content": "\t\t\t},",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 447,
+                      "content": "\t\t\tgetFollowUpMessages: async () => this.followUpQueue.drain(),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 448,
+                      "content": "\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 449,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Returns a fresh AgentLoopConfig that snapshots all Agent-level options and wires getSteeringMessages and getFollowUpMessages to closures over the two PendingMessageQueues. The skipInitialSteeringPoll latch consumes itself the first time it is checked so steering messages already drained by continue() are not re-drained at loop entry.",
+                  "why_its_here": "The loop is intentionally pure with respect to the Agent — it never holds a reference back. All Agent-side concerns (queues, hooks, transport) cross into the loop as closures captured here. Building a fresh config per run also means option changes mid-run only take effect at the next prompt() call, which matches the documented contract.",
+                  "touches": [
+                    {
+                      "label": "steeringQueue.drain",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "followUpQueue.drain",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "AgentLoopConfig",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If skipInitialSteeringPoll is true and a steering message arrives before the first poll, it sits in the queue until the next turn-end drain.",
+                    "Closures pin the current Agent instance into the loop — abort() still works because activeRun.abortController is the source of the signal."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-runWithLifecycle",
+            "function": "runWithLifecycle",
+            "label": "runWithLifecycle",
+            "description": "The single-source-of-truth lifecycle wrapper: installs activeRun, runs the executor inside try/catch/finally, dispatches to handleRunFailure on error/abort, and always runs finishRun.",
+            "blocks": [
+              {
+                "id": "B3",
+                "phase": "setup",
+                "title": "INSTALL RUN",
+                "line_range": "L451–465",
+                "one_liner": "Allocates a fresh AbortController per run and an unsettled promise/resolve pair so external callers can await waitForIdle() — the resolve handle gets stashed in activeRun and called by finishRun.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 450,
+                  "context_end_line": 467,
+                  "lines": [
+                    {
+                      "line_num": 450,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 451,
+                      "content": "\tprivate async runWithLifecycle(executor: (signal: AbortSignal) => Promise<void>): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 452,
+                      "content": "\t\tif (this.activeRun) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 453,
+                      "content": "\t\t\tthrow new Error(\"Agent is already processing.\");",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 454,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 455,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 456,
+                      "content": "\t\tconst abortController = new AbortController();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 457,
+                      "content": "\t\tlet resolvePromise = () => {};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 458,
+                      "content": "\t\tconst promise = new Promise<void>((resolve) => {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 459,
+                      "content": "\t\t\tresolvePromise = resolve;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 460,
+                      "content": "\t\t\t});",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 461,
+                      "content": "\t\tthis.activeRun = { promise, resolve: resolvePromise, abortController };",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 462,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 463,
+                      "content": "\t\tthis._state.isStreaming = true;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 464,
+                      "content": "\t\tthis._state.streamingMessage = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 465,
+                      "content": "\t\tthis._state.errorMessage = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 466,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 467,
+                      "content": "\t\ttry {",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Re-checks the activeRun guard (defense in depth against an internal caller), then constructs a fresh AbortController and an unsettled Promise whose resolve handle is stashed in activeRun. Sets isStreaming=true and clears streamingMessage/errorMessage so subscribers see a clean initial state.",
+                  "why_its_here": "Lifecycle ownership is centralized here so prompt(), continue(), and any future entry point all converge on one place that knows how to install and tear down a run. The promise+resolve pair gives waitForIdle() a stable awaitable that resolves exactly when finishRun is called, which is exactly when listeners for agent_end have settled.",
+                  "touches": [
+                    {
+                      "label": "AbortController",
+                      "kind": "external",
+                      "block": null
+                    },
+                    {
+                      "label": "activeRun",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "waitForIdle",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "The duplicate guard at L452 cannot fire from prompt() (which already guards) but protects against direct private-method abuse.",
+                    "No throw path here — every line either assigns state or installs the abortController."
+                  ]
+                }
+              },
+              {
+                "id": "B4",
+                "phase": "handoff",
+                "title": "TRY/CATCH/FINALLY",
+                "line_range": "L467–474",
+                "one_liner": "The whole loop runs inside one try block; any thrown error funnels into handleRunFailure which synthesizes a normal-looking error turn, and finishRun always clears runtime state so the next prompt() can run.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 465,
+                  "context_end_line": 475,
+                  "lines": [
+                    {
+                      "line_num": 465,
+                      "content": "\t\tthis._state.errorMessage = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 466,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 467,
+                      "content": "\t\ttry {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 468,
+                      "content": "\t\t\tawait executor(abortController.signal);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 469,
+                      "content": "\t\t} catch (error) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 470,
+                      "content": "\t\t\tawait this.handleRunFailure(error, abortController.signal.aborted);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 471,
+                      "content": "\t\t} finally {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 472,
+                      "content": "\t\t\tthis.finishRun();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 473,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 474,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 475,
+                      "content": "",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Awaits the executor (the runAgentLoop call assembled by runPromptMessages/runContinuation). On throw, calls handleRunFailure with the captured error and an aborted flag derived from the signal. Always calls finishRun in finally.",
+                  "why_its_here": "This is the entire purpose of the class — guarantee that subscribers always see a closing event sequence and that activeRun is always cleared. Without the catch, a thrown error during streaming would leave subscribers expecting more events forever; without the finally, an unhandled exception in handleRunFailure would wedge the agent because activeRun would still be set.",
+                  "touches": [
+                    {
+                      "label": "handleRunFailure",
+                      "kind": "function",
+                      "block": "B5"
+                    },
+                    {
+                      "label": "finishRun",
+                      "kind": "function",
+                      "block": "B6"
+                    },
+                    {
+                      "label": "AbortSignal.aborted",
+                      "kind": "external",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If handleRunFailure itself throws, finishRun still runs — but the outer promise rejects, surprising waitForIdle callers.",
+                    "If finishRun throws (it shouldn't — every line is a simple assignment), activeRun may stay set; reset() is the escape hatch."
+                  ],
+                  "invariants": [
+                    "After this function returns or rejects, activeRun is undefined.",
+                    "Subscribers always see either a complete success sequence or a synthetic error sequence ending in agent_end."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-handleRunFailure",
+            "function": "handleRunFailure",
+            "label": "handleRunFailure",
+            "description": "Synthesizes an AssistantMessage with stopReason 'error' or 'aborted' and emits the four events subscribers expect to see for a normal turn closure.",
+            "blocks": [
+              {
+                "id": "B5",
+                "phase": "error",
+                "title": "SYNTH ERROR TURN",
+                "line_range": "L476–492",
+                "one_liner": "Build a fake assistant message and walk it through the same four lifecycle events as a real turn — subscribers can treat error/abort uniformly with success because the event shape is identical.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 475,
+                  "context_end_line": 492,
+                  "lines": [
+                    {
+                      "line_num": 475,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 476,
+                      "content": "\tprivate async handleRunFailure(error: unknown, aborted: boolean): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 477,
+                      "content": "\t\tconst failureMessage = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 478,
+                      "content": "\t\t\trole: \"assistant\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 479,
+                      "content": "\t\t\tcontent: [{ type: \"text\", text: \"\" }],",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 480,
+                      "content": "\t\t\tapi: this._state.model.api,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 481,
+                      "content": "\t\t\tprovider: this._state.model.provider,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 482,
+                      "content": "\t\t\tmodel: this._state.model.id,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 483,
+                      "content": "\t\t\tusage: EMPTY_USAGE,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 484,
+                      "content": "\t\t\tstopReason: aborted ? \"aborted\" : \"error\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 485,
+                      "content": "\t\t\terrorMessage: error instanceof Error ? error.message : String(error),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 486,
+                      "content": "\t\t\ttimestamp: Date.now(),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 487,
+                      "content": "\t\t} satisfies AgentMessage;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 488,
+                      "content": "\t\tawait this.processEvents({ type: \"message_start\", message: failureMessage });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 489,
+                      "content": "\t\tawait this.processEvents({ type: \"message_end\", message: failureMessage });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 490,
+                      "content": "\t\tawait this.processEvents({ type: \"turn_end\", message: failureMessage, toolResults: [] });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 491,
+                      "content": "\t\tawait this.processEvents({ type: \"agent_end\", messages: [failureMessage] });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 492,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Constructs a synthetic AssistantMessage with empty content, EMPTY_USAGE, and stopReason set to 'aborted' if the signal aborted else 'error', plus the captured errorMessage. Routes that message through processEvents as message_start, message_end, turn_end, and agent_end in order.",
+                  "why_its_here": "Subscribers — and the Agent's own reducer — expect every turn to close with the same four events. Without this synthesis a thrown error during streaming would never produce message_end or turn_end, leaving partial state in streamingMessage and a dangling pendingToolCalls entry. By going through processEvents (not directly to listeners), the reducer still runs, so state.errorMessage gets set via the turn_end branch.",
+                  "touches": [
+                    {
+                      "label": "processEvents",
+                      "kind": "function",
+                      "block": "B7"
+                    },
+                    {
+                      "label": "EMPTY_USAGE",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "AgentMessage",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If a listener throws on any of these four events, the promise rejects up to runWithLifecycle's catch — but we're already in the catch, so the error becomes the rejection of runWithLifecycle itself.",
+                    "EMPTY_USAGE is shared by reference — subscribers must not mutate it (the constant is never observed to be mutated in this codebase)."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-finishRun",
+            "function": "finishRun",
+            "label": "finishRun",
+            "description": "Idempotent finalizer that clears runtime-only state, resolves the idle promise, and unsets activeRun so the next prompt can install a fresh lifecycle.",
+            "blocks": [
+              {
+                "id": "B6",
+                "phase": "cleanup",
+                "title": "RESET RUNTIME",
+                "line_range": "L494–500",
+                "one_liner": "Clears the four runtime-owned state fields, resolves the run's idle promise to unblock waitForIdle callers, and unsets activeRun — this is the gate that allows the next prompt() to proceed.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 493,
+                  "context_end_line": 500,
+                  "lines": [
+                    {
+                      "line_num": 493,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 494,
+                      "content": "\tprivate finishRun(): void {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 495,
+                      "content": "\t\tthis._state.isStreaming = false;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 496,
+                      "content": "\t\tthis._state.streamingMessage = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 497,
+                      "content": "\t\tthis._state.pendingToolCalls = new Set<string>();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 498,
+                      "content": "\t\tthis.activeRun?.resolve();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 499,
+                      "content": "\t\tthis.activeRun = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 500,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Sets isStreaming=false, drops the streamingMessage, replaces pendingToolCalls with a fresh empty Set (so observers holding a reference to the old one don't get retroactively cleared), resolves activeRun's promise, and unsets activeRun.",
+                  "why_its_here": "This is the only place activeRun is cleared. Calling it from finally guarantees that no path — success, throw, or abort — leaves the Agent stuck. Replacing pendingToolCalls with a new Set (rather than calling .clear()) matches the reducer's copy-on-write pattern from processEvents and avoids leaking mutations to prior snapshots.",
+                  "touches": [
+                    {
+                      "label": "activeRun",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "isStreaming",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "pendingToolCalls",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "Every statement is a synchronous assignment or a no-op optional call — no failure mode."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-processEvents",
+            "function": "processEvents",
+            "label": "processEvents",
+            "description": "The reducer: mutates internal state for each lifecycle event, then awaits every subscribed listener in registration order with the active abort signal so listeners are part of run settlement.",
+            "blocks": [
+              {
+                "id": "B7",
+                "phase": "emit",
+                "title": "REDUCE STATE",
+                "line_range": "L510–547",
+                "one_liner": "A single switch over AgentEvent.type mutates streamingMessage, pendingToolCalls, the transcript, and errorMessage — copy-on-write the Set so external snapshots stay consistent.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 509,
+                  "context_end_line": 548,
+                  "lines": [
+                    {
+                      "line_num": 509,
+                      "content": "\tprivate async processEvents(event: AgentEvent): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 510,
+                      "content": "\t\tswitch (event.type) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 511,
+                      "content": "\t\t\tcase \"message_start\":",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 512,
+                      "content": "\t\t\t\tthis._state.streamingMessage = event.message;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 513,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 514,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 515,
+                      "content": "\t\t\tcase \"message_update\":",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 516,
+                      "content": "\t\t\t\tthis._state.streamingMessage = event.message;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 517,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 518,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 519,
+                      "content": "\t\t\tcase \"message_end\":",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 520,
+                      "content": "\t\t\t\tthis._state.streamingMessage = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 521,
+                      "content": "\t\t\t\tthis._state.messages.push(event.message);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 522,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 523,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 524,
+                      "content": "\t\t\tcase \"tool_execution_start\": {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 525,
+                      "content": "\t\t\t\tconst pendingToolCalls = new Set(this._state.pendingToolCalls);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 526,
+                      "content": "\t\t\t\tpendingToolCalls.add(event.toolCallId);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 527,
+                      "content": "\t\t\t\tthis._state.pendingToolCalls = pendingToolCalls;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 528,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 529,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 530,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 531,
+                      "content": "\t\t\tcase \"tool_execution_end\": {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 532,
+                      "content": "\t\t\t\tconst pendingToolCalls = new Set(this._state.pendingToolCalls);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 533,
+                      "content": "\t\t\t\tpendingToolCalls.delete(event.toolCallId);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 534,
+                      "content": "\t\t\t\tthis._state.pendingToolCalls = pendingToolCalls;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 535,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 536,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 537,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 538,
+                      "content": "\t\t\tcase \"turn_end\":",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 539,
+                      "content": "\t\t\t\tif (event.message.role === \"assistant\" && event.message.errorMessage) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 540,
+                      "content": "\t\t\t\t\tthis._state.errorMessage = event.message.errorMessage;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 541,
+                      "content": "\t\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 542,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 543,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 544,
+                      "content": "\t\t\tcase \"agent_end\":",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 545,
+                      "content": "\t\t\t\tthis._state.streamingMessage = undefined;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 546,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 547,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 548,
+                      "content": "",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Reduces each AgentEvent into state mutations. message_start/update keep streamingMessage live; message_end appends to the transcript and clears streamingMessage; tool_execution_start/end copy-on-write the pendingToolCalls Set; turn_end captures errorMessage if present; agent_end clears the streaming buffer.",
+                  "why_its_here": "By making the reducer event-shaped (not method-shaped), every code path that wants to mutate Agent state has to go through emit, which makes the state machine inspectable. The copy-on-write Set protects observers that snapshot pendingToolCalls — a common pattern for UI rendering — from seeing mutations they didn't subscribe to.",
+                  "touches": [
+                    {
+                      "label": "AgentEvent",
+                      "kind": "type",
+                      "block": null
+                    },
+                    {
+                      "label": "_state.messages",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "_state.pendingToolCalls",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If a listener throws on agent_end the promise rejects in handleRunFailure's catch (S1.B5) or runWithLifecycle's catch (S1.B4) — never silently swallowed.",
+                    "Missing case branches would silently no-op — the AgentEvent union is exhaustive but not enforced by 'never' here."
+                  ],
+                  "invariants": [
+                    "After message_end, streamingMessage is undefined and the message appears in _state.messages exactly once.",
+                    "pendingToolCalls is always a fresh Set reference after a tool lifecycle event."
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "B1",
+            "to": "B3",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#777"
+          },
+          {
+            "from": "B4",
+            "to": "B5",
+            "label": "CATCH",
+            "style": "solid",
+            "color": "#c54343"
+          },
+          {
+            "from": "B4",
+            "to": "B6",
+            "label": "FINALLY",
+            "style": "dashed",
+            "color": "#7a5cc4"
+          },
+          {
+            "from": "B5",
+            "to": "B7",
+            "label": "EMIT",
+            "style": "dashed",
+            "color": "#777"
+          }
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "title": "Inner loop — runLoop with outer/inner control flow",
+      "kind": "core_flow",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 3,
+        "entry_point": 2,
+        "novelty": 3,
+        "total": 11,
+        "rationale": "Centrality=3 (every turn flows through runLoop); conceptual_weight=3 (two nested loops with steering/follow-up drain semantics is the non-trivial idea); novelty=3 (the steering vs follow-up distinction is project-specific)."
+      },
+      "summary": "runAgentLoop emits the agent_start/turn_start prelude then enters runLoop, whose outer loop covers follow-up re-entry and whose inner loop drains steering messages, streams an assistant turn, executes tool calls, and decides whether to continue — making the loop a function of two queues and one stop hook.",
+      "files_touched": [
+        "packages/agent/src/agent-loop.ts"
+      ],
+      "mental_model_anchor": "Two nested loops with the same shape as a video game's frame loop. Inner loop = 'one assistant turn including its tools'; outer loop = 'the agent thinks it's done — anyone want to keep going?'. Steering messages slip into the inner loop between turns; follow-up messages restart the outer loop after the inner loop says 'no more tool calls'.",
+      "purpose": {
+        "stated": "File header comment: 'Agent loop that works with AgentMessage throughout. Transforms to Message[] only at the LLM call boundary.'",
+        "evident": "runLoop is a turn-batching state machine: it streams a turn, executes tools, optionally rewires context via prepareNextTurn, checks shouldStopAfterTurn, then drains steering. When the inner condition fails it consults the follow-up queue; if it has items, restart, otherwise emit agent_end.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "The pure runtime — knows nothing about the Agent class, only AgentContext, AgentLoopConfig, and the AgentEventSink emit function.",
+        "involved_modules": [
+          {
+            "module": "agent-loop.ts",
+            "role_in_storyline": "Defines runAgentLoop, runAgentLoopContinue, and the shared runLoop helper."
+          },
+          {
+            "module": "types.ts",
+            "role_in_storyline": "Source of AgentLoopConfig with all the hooks runLoop calls (getSteeringMessages, getFollowUpMessages, prepareNextTurn, shouldStopAfterTurn)."
+          }
+        ],
+        "data_flow": "AgentContext + prompts (or no prompts for continue) → emit agent_start/turn_start → optional initial steering drain → inner loop body: emit pending messages, streamAssistantResponse, executeToolCalls, prepareNextTurn rewires context/model, shouldStopAfterTurn gate, steering re-drain → on inner exit, check follow-up queue → either re-enter inner or emit agent_end."
+      },
+      "change_overview": "The two functions runAgentLoop and runAgentLoopContinue share an underlying runLoop helper; the wrappers differ only in the prelude. Prompted runs append prompt messages to the context and emit a message_start/message_end pair for each one before turn_start; continuations skip the prompt emission because the last context message is already the trigger.\n\nrunLoop itself is structured around two while-loops. The inner loop runs while hasMoreToolCalls is true or pendingMessages is non-empty; the outer loop wraps the inner so that if the agent would exit but the follow-up queue has items, the inner loop restarts. Inside the inner loop each iteration is: emit turn_start (skipped on the first iteration since runAgentLoop already emitted one), inject any pending steering messages into the transcript and emit message_start/message_end for each, stream the assistant response (which may set stopReason to 'error' or 'aborted', in which case we exit early), execute tool calls if any, then run the post-turn hooks.\n\nThe post-turn hook sequence is the most subtle piece. After turn_end is emitted, prepareNextTurn can replace the entire AgentContext, model, and reasoning level — useful for compaction or model-swap mid-run. Then shouldStopAfterTurn is consulted: returning true exits with agent_end. Finally, getSteeringMessages is polled to refill pendingMessages for the next inner iteration. When the inner loop's condition fails (no tool calls and no pending messages), control returns to the outer loop which polls getFollowUpMessages; non-empty means continue, empty means break and emit agent_end.",
+      "diagram": {
+        "file_badge": "agent-loop.ts",
+        "subtitle": "two nested loops: tool calls inside, follow-ups outside",
+        "phases": [
+          {
+            "id": "setup",
+            "label": "Setup",
+            "color": "setup"
+          },
+          {
+            "id": "emit",
+            "label": "Emit",
+            "color": "emit"
+          },
+          {
+            "id": "main",
+            "label": "Main",
+            "color": "main"
+          },
+          {
+            "id": "handoff",
+            "label": "Handoff",
+            "color": "handoff"
+          },
+          {
+            "id": "guard",
+            "label": "Guard",
+            "color": "guard"
+          }
+        ],
+        "cols": [
+          {
+            "id": "col-runAgentLoop",
+            "function": "runAgentLoop",
+            "label": "runAgentLoop",
+            "description": "Wraps the prompt-mode entry: appends prompts to the context, emits agent_start + turn_start + one message_start/end per prompt, then hands off to the shared runLoop.",
+            "blocks": [
+              {
+                "id": "B8",
+                "phase": "setup",
+                "title": "BUILD CONTEXT",
+                "line_range": "L103–107",
+                "one_liner": "Snapshot the inbound context and append the prompt batch — newMessages is the return value accumulator, currentContext is what gets shown to the model.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 101,
+                  "context_end_line": 109,
+                  "lines": [
+                    {
+                      "line_num": 101,
+                      "content": "\tstreamFn?: StreamFn,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 102,
+                      "content": "): Promise<AgentMessage[]> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 103,
+                      "content": "\tconst newMessages: AgentMessage[] = [...prompts];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 104,
+                      "content": "\tconst currentContext: AgentContext = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 105,
+                      "content": "\t\t...context,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 106,
+                      "content": "\t\tmessages: [...context.messages, ...prompts],",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 107,
+                      "content": "\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 108,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 109,
+                      "content": "\tawait emit({ type: \"agent_start\" });",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Initializes newMessages with a copy of the prompt batch — this array is what the function eventually returns. Builds currentContext by spreading the caller's context and appending the prompts to its messages array, so the first LLM call sees the prompt at the tail.",
+                  "why_its_here": "Two arrays exist for a reason: currentContext.messages includes the full history the LLM sees, while newMessages is just what this loop invocation added. Apps reduce events to derive state, but the loop also returns the delta directly for callers who skip events.",
+                  "touches": [
+                    {
+                      "label": "AgentContext",
+                      "kind": "type",
+                      "block": null
+                    },
+                    {
+                      "label": "newMessages",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "B9",
+                "phase": "emit",
+                "title": "PRELUDE EMIT",
+                "line_range": "L109–114",
+                "one_liner": "Emit the agent_start and the first turn_start, then walk every prompt message through message_start/message_end so subscribers see them as a normal user-message turn before any LLM call.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 108,
+                  "context_end_line": 116,
+                  "lines": [
+                    {
+                      "line_num": 108,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 109,
+                      "content": "\tawait emit({ type: \"agent_start\" });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 110,
+                      "content": "\tawait emit({ type: \"turn_start\" });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 111,
+                      "content": "\tfor (const prompt of prompts) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 112,
+                      "content": "\t\tawait emit({ type: \"message_start\", message: prompt });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 113,
+                      "content": "\t\tawait emit({ type: \"message_end\", message: prompt });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 114,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 115,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 116,
+                      "content": "\tawait runLoop(currentContext, newMessages, config, signal, emit, streamFn);",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Emits agent_start, then the first turn_start (the firstTurn latch inside runLoop will skip emitting another one for this same turn), then walks each prompt as a synthetic message_start/message_end pair so reducers see them in the transcript.",
+                  "why_its_here": "Prompts arrive in batch but subscribers want them as individual lifecycle events — the loop is the canonical event source for the transcript. Emitting before runLoop also means even an immediately-aborting stream still leaves the prompt in the state.",
+                  "touches": [
+                    {
+                      "label": "emit",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "AgentEventSink",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If emit throws on any of these, runLoop never runs — bubbles to the Agent's catch which then emits an error turn."
+                  ]
+                }
+              },
+              {
+                "id": "B10",
+                "phase": "handoff",
+                "title": "HANDOFF",
+                "line_range": "L116–117",
+                "one_liner": "Single line of handoff: runLoop is shared between prompt and continuation modes, so the wrappers stay thin while the meat lives in one place.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 114,
+                  "context_end_line": 119,
+                  "lines": [
+                    {
+                      "line_num": 114,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 115,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 116,
+                      "content": "\tawait runLoop(currentContext, newMessages, config, signal, emit, streamFn);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 117,
+                      "content": "\treturn newMessages;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 118,
+                      "content": "}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 119,
+                      "content": "",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls runLoop with the prepared context and the newMessages accumulator. runLoop mutates newMessages in place via push, so when it returns, newMessages contains the prompts plus every assistant + tool-result message produced during the run.",
+                  "why_its_here": "Centralizing the loop body in runLoop means the prompt vs continuation distinction is only about the prelude — the steady-state machinery is shared and tested through both entry points.",
+                  "touches": [
+                    {
+                      "label": "runLoop",
+                      "kind": "function",
+                      "block": "B11"
+                    },
+                    {
+                      "label": "runAgentLoopContinue",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-runLoop",
+            "function": "runLoop",
+            "label": "runLoop",
+            "description": "The shared body: outer loop for follow-up re-entry, inner loop for turns and steering, with hooks for prepareNextTurn and shouldStopAfterTurn between turns.",
+            "blocks": [
+              {
+                "id": "B11",
+                "phase": "setup",
+                "title": "INITIAL DRAIN",
+                "line_range": "L163–170",
+                "one_liner": "Before the loop starts, poll the steering queue once — this captures any messages the user typed while the previous turn was still settling, so they don't wait an extra turn to take effect.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 162,
+                  "context_end_line": 172,
+                  "lines": [
+                    {
+                      "line_num": 162,
+                      "content": "): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 163,
+                      "content": "\tlet currentContext = initialContext;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 164,
+                      "content": "\tlet config = initialConfig;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 165,
+                      "content": "\tlet firstTurn = true;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 166,
+                      "content": "\t// Check for steering messages at start (user may have typed while waiting)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 167,
+                      "content": "\tlet pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 168,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 169,
+                      "content": "\t// Outer loop: continues when queued follow-up messages arrive after agent would stop",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 170,
+                      "content": "\t// Inner loop: process tool calls and steering messages",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 171,
+                      "content": "\twhile (true) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 172,
+                      "content": "\t\tlet hasMoreToolCalls = true;",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Initializes currentContext, config, and a firstTurn latch (used to suppress a duplicate turn_start since runAgentLoop already emitted one). Then performs the initial steering poll so any messages queued before runLoop was reached are injected at the first turn.",
+                  "why_its_here": "The Agent's createLoopConfig wires a skipInitialSteeringPoll latch into getSteeringMessages — so for the continue() path that already drained steering before entering the loop, the first poll here returns []. For the prompt() path the initial poll is real and lets pre-arrival steering land in turn one.",
+                  "touches": [
+                    {
+                      "label": "config.getSteeringMessages",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "pendingMessages",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "B12",
+                "phase": "main",
+                "title": "INJECT PENDING",
+                "line_range": "L174–190",
+                "one_liner": "If steering messages are pending, emit them as fresh user-message lifecycle events and append them to both the context and the newMessages accumulator before kicking off the next assistant turn.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 173,
+                  "context_end_line": 191,
+                  "lines": [
+                    {
+                      "line_num": 173,
+                      "content": "\t\t// Inner loop: process tool calls and steering messages",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 174,
+                      "content": "\t\twhile (hasMoreToolCalls || pendingMessages.length > 0) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 175,
+                      "content": "\t\t\tif (!firstTurn) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 176,
+                      "content": "\t\t\t\tawait emit({ type: \"turn_start\" });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 177,
+                      "content": "\t\t\t} else {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 178,
+                      "content": "\t\t\t\tfirstTurn = false;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 179,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 180,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 181,
+                      "content": "\t\t\t// Process pending messages (inject before next assistant response)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 182,
+                      "content": "\t\t\tif (pendingMessages.length > 0) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 183,
+                      "content": "\t\t\t\tfor (const message of pendingMessages) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 184,
+                      "content": "\t\t\t\t\tawait emit({ type: \"message_start\", message });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 185,
+                      "content": "\t\t\t\t\tawait emit({ type: \"message_end\", message });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 186,
+                      "content": "\t\t\t\t\tcurrentContext.messages.push(message);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 187,
+                      "content": "\t\t\t\t\tnewMessages.push(message);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 188,
+                      "content": "\t\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 189,
+                      "content": "\t\t\t\tpendingMessages = [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 190,
+                      "content": "\t\t\t\tpendingMessages = [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 191,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Inner-loop top-of-iteration. Emits turn_start unless firstTurn is still set (in which case it's consumed and we skip — runAgentLoop already emitted that turn_start). If pendingMessages has items it walks each through message_start/message_end and pushes to both arrays, then resets pendingMessages.",
+                  "why_its_here": "Steering messages need to look identical to fresh user messages in the transcript so the LLM treats them the same way. They arrive between turns and must be pushed before streamAssistantResponse runs, otherwise the LLM never sees them on this turn.",
+                  "touches": [
+                    {
+                      "label": "pendingMessages",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "currentContext.messages",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "newMessages",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "invariants": [
+                    "After this block exits, pendingMessages is empty.",
+                    "Every pending message appears in both currentContext.messages and newMessages exactly once."
+                  ]
+                }
+              },
+              {
+                "id": "B13",
+                "phase": "main",
+                "title": "STREAM TURN",
+                "line_range": "L192–216",
+                "one_liner": "Stream the assistant response, bail out early on error/abort, then execute tool calls if the message contains any — the result feeds back into hasMoreToolCalls to decide if the inner loop continues.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 191,
+                  "context_end_line": 216,
+                  "lines": [
+                    {
+                      "line_num": 191,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 192,
+                      "content": "\t\t\t// Stream assistant response",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 193,
+                      "content": "\t\t\tconst message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 194,
+                      "content": "\t\t\tnewMessages.push(message);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 195,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 196,
+                      "content": "\t\t\tif (message.stopReason === \"error\" || message.stopReason === \"aborted\") {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 197,
+                      "content": "\t\t\t\tawait emit({ type: \"turn_end\", message, toolResults: [] });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 198,
+                      "content": "\t\t\t\tawait emit({ type: \"agent_end\", messages: newMessages });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 199,
+                      "content": "\t\t\t\treturn;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 200,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 201,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 202,
+                      "content": "\t\t\t// Check for tool calls",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 203,
+                      "content": "\t\t\tconst toolCalls = message.content.filter((c) => c.type === \"toolCall\");",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 204,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 205,
+                      "content": "\t\t\tconst toolResults: ToolResultMessage[] = [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 206,
+                      "content": "\t\t\thasMoreToolCalls = false;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 207,
+                      "content": "\t\t\tif (toolCalls.length > 0) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 208,
+                      "content": "\t\t\t\tconst executedToolBatch = await executeToolCalls(currentContext, message, config, signal, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 209,
+                      "content": "\t\t\t\ttoolResults.push(...executedToolBatch.messages);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 210,
+                      "content": "\t\t\t\thasMoreToolCalls = !executedToolBatch.terminate;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 211,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 212,
+                      "content": "\t\t\t\tfor (const result of toolResults) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 213,
+                      "content": "\t\t\t\t\tcurrentContext.messages.push(result);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 214,
+                      "content": "\t\t\t\t\tnewMessages.push(result);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 215,
+                      "content": "\t\t\t\t\tnewMessages.push(result);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 216,
+                      "content": "\t\t\t\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls streamAssistantResponse to drain one provider stream into a final AssistantMessage. If the message ended in error/abort, emits turn_end + agent_end and returns immediately. Otherwise filters tool calls; if any, awaits executeToolCalls and records the resulting messages plus a terminate flag that decides whether the loop will continue.",
+                  "why_its_here": "This is the substantive work each iteration does. The early-return on error/abort matters because the stream function is contractually allowed to encode errors as a final message with stopReason 'error' — without this branch, the loop would happily ask the LLM to keep going. The terminate flag plumbed through from afterToolCall is how a tool can tell the loop 'we're done, please stop'.",
+                  "touches": [
+                    {
+                      "label": "streamAssistantResponse",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "executeToolCalls",
+                      "kind": "function",
+                      "block": "B15"
+                    },
+                    {
+                      "label": "hasMoreToolCalls",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If streamAssistantResponse throws (it shouldn't per the StreamFn contract), the error bubbles up to runWithLifecycle.",
+                    "If a tool result has terminate=true but other tools in the same batch don't, hasMoreToolCalls stays true — terminate requires unanimity (see shouldTerminateToolBatch)."
+                  ]
+                }
+              },
+              {
+                "id": "B14",
+                "phase": "guard",
+                "title": "STOP & DRAIN",
+                "line_range": "L218–254",
+                "one_liner": "After turn_end, give prepareNextTurn a chance to rewire context/model, consult shouldStopAfterTurn, then re-poll steering — this is the post-turn hook bracket between iterations.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 217,
+                  "context_end_line": 256,
+                  "lines": [
+                    {
+                      "line_num": 217,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 218,
+                      "content": "\t\t\tawait emit({ type: \"turn_end\", message, toolResults });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 219,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 220,
+                      "content": "\t\t\tconst nextTurnContext = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 221,
+                      "content": "\t\t\t\tmessage,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 222,
+                      "content": "\t\t\t\ttoolResults,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 223,
+                      "content": "\t\t\t\tcontext: currentContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 224,
+                      "content": "\t\t\t\tnewMessages,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 225,
+                      "content": "\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 226,
+                      "content": "\t\t\tconst nextTurnSnapshot = await config.prepareNextTurn?.(nextTurnContext);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 227,
+                      "content": "\t\t\tif (nextTurnSnapshot) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 228,
+                      "content": "\t\t\t\tcurrentContext = nextTurnSnapshot.context ?? currentContext;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 229,
+                      "content": "\t\t\t\tconfig = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 230,
+                      "content": "\t\t\t\t\t...config,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 231,
+                      "content": "\t\t\t\t\tmodel: nextTurnSnapshot.model ?? config.model,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 232,
+                      "content": "\t\t\t\t\treasoning:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 233,
+                      "content": "\t\t\t\t\t\tnextTurnSnapshot.thinkingLevel === undefined",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 234,
+                      "content": "\t\t\t\t\t\t\t? config.reasoning",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 235,
+                      "content": "\t\t\t\t\t\t\t: nextTurnSnapshot.thinkingLevel === \"off\"",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 236,
+                      "content": "\t\t\t\t\t\t\t\t? undefined",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 237,
+                      "content": "\t\t\t\t\t\t\t\t: nextTurnSnapshot.thinkingLevel,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 238,
+                      "content": "\t\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 239,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 240,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 241,
+                      "content": "\t\t\tif (",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 242,
+                      "content": "\t\t\t\tawait config.shouldStopAfterTurn?.({",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 243,
+                      "content": "\t\t\t\t\tmessage,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 244,
+                      "content": "\t\t\t\t\ttoolResults,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 245,
+                      "content": "\t\t\t\t\tcontext: currentContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 246,
+                      "content": "\t\t\t\t\tnewMessages,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 247,
+                      "content": "\t\t\t\t})",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 248,
+                      "content": "\t\t\t) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 249,
+                      "content": "\t\t\t\tawait emit({ type: \"agent_end\", messages: newMessages });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 250,
+                      "content": "\t\t\t\treturn;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 251,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 252,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 253,
+                      "content": "\t\t\tpendingMessages = (await config.getSteeringMessages?.()) || [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 254,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 255,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 256,
+                      "content": "",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Emits turn_end, then calls prepareNextTurn — if it returns a snapshot, replace currentContext, model, and reasoning (with the special-case mapping of 'off' → undefined). Then awaits shouldStopAfterTurn; truthy means emit agent_end and return. Finally re-polls steering to refill pendingMessages for the next inner iteration.",
+                  "why_its_here": "This is the loop's extension point cluster. prepareNextTurn lets callers compact the transcript or switch models between turns without halting the run. shouldStopAfterTurn is the explicit early-exit — without it, a caller would have to abort to stop the agent before it 'naturally' finished. The steering re-poll right after means messages queued during this turn become visible at the very next iteration.",
+                  "touches": [
+                    {
+                      "label": "prepareNextTurn",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "shouldStopAfterTurn",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "getSteeringMessages",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If prepareNextTurn throws, it bubbles up — the contract says it must not throw.",
+                    "shouldStopAfterTurn returning true exits with agent_end, skipping any further steering or follow-up polling — by design."
+                  ],
+                  "invariants": [
+                    "After this block, either we exit with agent_end, or pendingMessages reflects the latest steering queue snapshot."
+                  ]
+                }
+              },
+              {
+                "id": "B15",
+                "phase": "guard",
+                "title": "FOLLOW-UP",
+                "line_range": "L257–269",
+                "one_liner": "When the inner loop exits because hasMoreToolCalls and pendingMessages are both empty, poll the follow-up queue — non-empty restarts the inner loop with those messages pending, empty breaks the outer loop and emits agent_end.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 255,
+                  "context_end_line": 269,
+                  "lines": [
+                    {
+                      "line_num": 255,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 256,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 257,
+                      "content": "\t\t// Agent would stop here. Check for follow-up messages.",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 258,
+                      "content": "\t\tconst followUpMessages = (await config.getFollowUpMessages?.()) || [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 259,
+                      "content": "\t\tif (followUpMessages.length > 0) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 260,
+                      "content": "\t\t\t// Set as pending so inner loop processes them",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 261,
+                      "content": "\t\t\tpendingMessages = followUpMessages;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 262,
+                      "content": "\t\t\tcontinue;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 263,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 264,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 265,
+                      "content": "\t\t// No more messages, exit",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 266,
+                      "content": "\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 267,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 268,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 269,
+                      "content": "\t\tawait emit({ type: \"agent_end\", messages: newMessages });",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Outer-loop tail. Drains the follow-up queue; if non-empty, stores them as pendingMessages and continues the outer while(true), which re-enters the inner loop. If empty, breaks the outer loop. agent_end is emitted exactly once at L268.",
+                  "why_its_here": "This is the difference between 'agent finished its tool chain' and 'agent finished altogether'. Follow-up messages are explicitly queued for after the agent would otherwise stop, so they wait until the inner loop's terminating condition fires before being injected. The continue/break shape makes the two outcomes obvious at a glance.",
+                  "touches": [
+                    {
+                      "label": "getFollowUpMessages",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "pendingMessages",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "invariants": [
+                    "agent_end is emitted exactly once per run — either here (normal exit), at L198 (error/abort mid-stream), or at L249 (shouldStopAfterTurn)."
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "B10",
+            "to": "B11",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#777"
+          },
+          {
+            "from": "B13",
+            "to": "B14",
+            "label": "TURN END",
+            "style": "solid",
+            "color": "#777"
+          },
+          {
+            "from": "B14",
+            "to": "B12",
+            "label": "NEXT TURN",
+            "style": "dashed",
+            "color": "#777"
+          },
+          {
+            "from": "B15",
+            "to": "B12",
+            "label": "FOLLOW-UP",
+            "style": "dashed",
+            "color": "#7a5cc4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "title": "Tool execution choreography",
+      "kind": "algorithm",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 2,
+        "conceptual_weight": 3,
+        "entry_point": 2,
+        "novelty": 3,
+        "total": 10,
+        "rationale": "Conceptual_weight=3 and novelty=3 because the 'preflight sequentially, then execute concurrently' pattern with closures-as-deferred-tasks is the project's most distinctive mechanism."
+      },
+      "summary": "executeToolCalls dispatches to a sequential or parallel strategy; the parallel strategy is the clever one — it preflights every call serially (so beforeToolCall sees a consistent context order) but stores closures for the actual executes, then awaits them all with Promise.all so the slow ones overlap.",
+      "files_touched": [
+        "packages/agent/src/agent-loop.ts"
+      ],
+      "mental_model_anchor": "Imagine a kitchen: a single expediter calls out orders one by one (preflight), but the line cooks (execute) work in parallel. The expediter still keeps the tickets in order so plates leave the pass in the order the customer ordered, but the actual cooking overlaps. That's the parallel path; the sequential path is one cook doing every step in order.",
+      "purpose": {
+        "stated": "AgentLoopConfig JSDoc: 'parallel: tool calls are prepared sequentially, then allowed tools execute concurrently. tool_execution_end is emitted in tool completion order after each tool is finalized, while tool-result message artifacts are emitted later in assistant source order.'",
+        "evident": "executeToolCallsParallel walks the toolCalls list synchronously, calling prepareToolCall for each one and either resolving immediately (when blocked or not found) or pushing an async closure. After the loop, Promise.all runs all closures concurrently. Tool-result messages are then emitted in original order.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "The bridge between assistant decisions (LLM emitted toolCall content blocks) and runtime actions (AgentTool.execute), with two extension points (beforeToolCall, afterToolCall) and a sequential override per-tool.",
+        "involved_modules": [
+          {
+            "module": "agent-loop.ts",
+            "role_in_storyline": "All five execution functions live here."
+          },
+          {
+            "module": "types.ts",
+            "role_in_storyline": "AgentTool.executionMode is the per-tool override that forces sequential mode."
+          }
+        ],
+        "data_flow": "AssistantMessage with toolCall content blocks → executeToolCalls dispatcher → sequential or parallel strategy → each toolCall: prepareToolCall (tool lookup + arg validation + beforeToolCall hook) → executePreparedToolCall (tool.execute under signal with onUpdate callback) → finalizeExecutedToolCall (afterToolCall hook merges overrides) → emit tool_execution_end → emit tool-result message_start/message_end."
+      },
+      "change_overview": "executeToolCalls is the strategy router: it scans the tools for any with executionMode 'sequential' or honors a global 'sequential' toolExecution config, and falls through to executeToolCallsParallel otherwise. The two strategies share the same building blocks — prepareToolCall, executePreparedToolCall, finalizeExecutedToolCall — but compose them differently.\n\nThe sequential path is the simpler one: for each tool call, await every step in order, emit tool_execution_end, build the tool-result message, push it. If the signal aborts mid-batch, stop. The parallel path is more involved because of the order guarantees the JSDoc promises. The preflight phase walks the calls in source order so prepareToolCall runs sequentially — any beforeToolCall hook sees the calls in the order the LLM emitted them, and any immediate failures (tool-not-found, validation error, hook block) are decided before slow tools start. For prepared calls that survive preflight, the parallel path doesn't execute right away; it pushes a closure into finalizedCalls and continues the preflight. After the loop, Promise.all over the closures lets the executes overlap.\n\nResults come out in source order because Promise.all preserves array order. The tool-result message_start/message_end events are emitted in that source order; tool_execution_end events, in contrast, fire from inside each closure as the tool completes — so a fast tool's end event arrives before a slow tool's, even though their message events go out in source order. This split is intentional: live tool-end events let UIs flip statuses immediately, while message-order preservation keeps the transcript canonical for the LLM.",
+      "diagram": {
+        "file_badge": "agent-loop.ts",
+        "subtitle": "preflight sequentially, execute concurrently",
+        "phases": [
+          {
+            "id": "guard",
+            "label": "Guard",
+            "color": "guard"
+          },
+          {
+            "id": "main",
+            "label": "Main",
+            "color": "main"
+          },
+          {
+            "id": "handoff",
+            "label": "Handoff",
+            "color": "handoff"
+          },
+          {
+            "id": "emit",
+            "label": "Emit",
+            "color": "emit"
+          }
+        ],
+        "cols": [
+          {
+            "id": "col-dispatcher",
+            "function": "executeToolCalls",
+            "label": "executeToolCalls + sequential",
+            "description": "The dispatcher picks the strategy: any sequential-execution-mode tool or a 'sequential' config forces sequential; otherwise parallel. The sequential implementation runs each tool through preflight + execute + finalize before moving on.",
+            "blocks": [
+              {
+                "id": "B16",
+                "phase": "guard",
+                "title": "DISPATCH",
+                "line_range": "L380–388",
+                "one_liner": "Even one tool with executionMode 'sequential' forces the whole batch sequential — this means tools that mutate shared state can declare themselves serial without callers having to know.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 378,
+                  "context_end_line": 389,
+                  "lines": [
+                    {
+                      "line_num": 378,
+                      "content": "): Promise<ExecutedToolCallBatch> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 379,
+                      "content": "\tconst toolCalls = assistantMessage.content.filter((c) => c.type === \"toolCall\");",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 380,
+                      "content": "\tconst hasSequentialToolCall = toolCalls.some(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 381,
+                      "content": "\t\t(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === \"sequential\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 382,
+                      "content": "\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 383,
+                      "content": "\tif (config.toolExecution === \"sequential\" || hasSequentialToolCall) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 384,
+                      "content": "\t\treturn executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 385,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 386,
+                      "content": "\treturn executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 387,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 388,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 389,
+                      "content": "type ExecutedToolCallBatch = {",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Filters tool calls from the assistant message, then checks two conditions in OR: either the global config opts in to sequential, or any individual tool's executionMode is sequential. Either dispatches to sequential; otherwise parallel.",
+                  "why_its_here": "Per-tool sequential opt-in is the safety hatch for tools that touch shared filesystem state, run editor commands, or otherwise can't safely overlap. By making 'sequential' contagious within a batch (any one forces the whole batch sequential), the loop avoids partial-overlap races where a sequential tool runs concurrently with a parallel one.",
+                  "touches": [
+                    {
+                      "label": "executeToolCallsSequential",
+                      "kind": "function",
+                      "block": "B17"
+                    },
+                    {
+                      "label": "executeToolCallsParallel",
+                      "kind": "function",
+                      "block": "B18"
+                    },
+                    {
+                      "label": "AgentTool.executionMode",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "B17",
+                "phase": "main",
+                "title": "SEQUENTIAL LOOP",
+                "line_range": "L406–443",
+                "one_liner": "Walk every tool call in order: emit start, preflight, execute, finalize, emit end and the result message, then loop — abort honored between iterations so a Ctrl-C lands cleanly.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 405,
+                  "context_end_line": 443,
+                  "lines": [
+                    {
+                      "line_num": 405,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 406,
+                      "content": "\tfor (const toolCall of toolCalls) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 407,
+                      "content": "\t\tawait emit({",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 408,
+                      "content": "\t\t\ttype: \"tool_execution_start\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 409,
+                      "content": "\t\t\ttoolCallId: toolCall.id,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 410,
+                      "content": "\t\t\ttoolName: toolCall.name,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 411,
+                      "content": "\t\t\targs: toolCall.arguments,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 412,
+                      "content": "\t\t});",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 413,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 414,
+                      "content": "\t\tconst preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 415,
+                      "content": "\t\tlet finalized: FinalizedToolCallOutcome;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 416,
+                      "content": "\t\tif (preparation.kind === \"immediate\") {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 417,
+                      "content": "\t\t\tfinalized = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 418,
+                      "content": "\t\t\t\ttoolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 419,
+                      "content": "\t\t\t\tresult: preparation.result,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 420,
+                      "content": "\t\t\t\tisError: preparation.isError,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 421,
+                      "content": "\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 422,
+                      "content": "\t\t} else {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 423,
+                      "content": "\t\t\tconst executed = await executePreparedToolCall(preparation, signal, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 424,
+                      "content": "\t\t\tfinalized = await finalizeExecutedToolCall(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 425,
+                      "content": "\t\t\t\tcurrentContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 426,
+                      "content": "\t\t\t\tassistantMessage,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 427,
+                      "content": "\t\t\t\tpreparation,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 428,
+                      "content": "\t\t\t\texecuted,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 429,
+                      "content": "\t\t\t\tconfig,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 430,
+                      "content": "\t\t\t\tsignal,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 431,
+                      "content": "\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 432,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 433,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 434,
+                      "content": "\t\tawait emitToolExecutionEnd(finalized, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 435,
+                      "content": "\t\tconst toolResultMessage = createToolResultMessage(finalized);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 436,
+                      "content": "\t\tawait emitToolResultMessage(toolResultMessage, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 437,
+                      "content": "\t\tfinalizedCalls.push(finalized);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 438,
+                      "content": "\t\tmessages.push(toolResultMessage);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 439,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 440,
+                      "content": "\t\tif (signal?.aborted) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 441,
+                      "content": "\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 442,
+                      "content": "\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 443,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "For each toolCall, emits tool_execution_start, runs prepareToolCall and then (if it returned a prepared call) execute + finalize, emits tool_execution_end, builds and emits the tool result message. Pushes both into local accumulators and breaks the loop if the signal aborted.",
+                  "why_its_here": "The sequential path is what callers fall into when they need strict serialization — write-style tools, terminal commands, or otherwise mutually-exclusive work. The post-iteration abort check means abort lands cleanly between tools rather than mid-execution (mid-execution abort is the responsibility of each tool's own AbortSignal handler).",
+                  "touches": [
+                    {
+                      "label": "prepareToolCall",
+                      "kind": "function",
+                      "block": "B19"
+                    },
+                    {
+                      "label": "executePreparedToolCall",
+                      "kind": "function",
+                      "block": "B20"
+                    },
+                    {
+                      "label": "finalizeExecutedToolCall",
+                      "kind": "function",
+                      "block": "B21"
+                    }
+                  ],
+                  "failure_mode": [
+                    "If a tool's execute() throws, executePreparedToolCall catches and converts to an error result — no throw propagates here.",
+                    "An aborted signal mid-tool relies on the tool itself to abort; otherwise it runs to completion and we break before the next tool."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-parallel",
+            "function": "executeToolCallsParallel",
+            "label": "executeToolCallsParallel",
+            "description": "The clever one: preflight every tool call serially, but defer the actual execute via a closure so they can overlap when awaited together. Tool-result messages emit in source order; tool_execution_end events emit in completion order.",
+            "blocks": [
+              {
+                "id": "B18",
+                "phase": "main",
+                "title": "PREFLIGHT + DEFER",
+                "line_range": "L461–500",
+                "one_liner": "Each call is preflighted serially; immediate outcomes are recorded inline, while prepared calls become async closures pushed into finalizedCalls — Promise.all later kicks them off concurrently.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 459,
+                  "context_end_line": 500,
+                  "lines": [
+                    {
+                      "line_num": 459,
+                      "content": "\tconst finalizedCalls: FinalizedToolCallEntry[] = [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 460,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 461,
+                      "content": "\tfor (const toolCall of toolCalls) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 462,
+                      "content": "\t\tawait emit({",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 463,
+                      "content": "\t\t\ttype: \"tool_execution_start\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 464,
+                      "content": "\t\t\ttoolCallId: toolCall.id,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 465,
+                      "content": "\t\t\ttoolName: toolCall.name,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 466,
+                      "content": "\t\t\targs: toolCall.arguments,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 467,
+                      "content": "\t\t});",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 468,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 469,
+                      "content": "\t\tconst preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 470,
+                      "content": "\t\tif (preparation.kind === \"immediate\") {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 471,
+                      "content": "\t\t\tconst finalized = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 472,
+                      "content": "\t\t\t\ttoolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 473,
+                      "content": "\t\t\t\tresult: preparation.result,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 474,
+                      "content": "\t\t\t\tisError: preparation.isError,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 475,
+                      "content": "\t\t\t} satisfies FinalizedToolCallOutcome;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 476,
+                      "content": "\t\t\tawait emitToolExecutionEnd(finalized, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 477,
+                      "content": "\t\t\tfinalizedCalls.push(finalized);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 478,
+                      "content": "\t\t\tif (signal?.aborted) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 479,
+                      "content": "\t\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 480,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 481,
+                      "content": "\t\t\tcontinue;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 482,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 483,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 484,
+                      "content": "\t\tfinalizedCalls.push(async () => {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 485,
+                      "content": "\t\t\tconst executed = await executePreparedToolCall(preparation, signal, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 486,
+                      "content": "\t\t\tconst finalized = await finalizeExecutedToolCall(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 487,
+                      "content": "\t\t\t\tcurrentContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 488,
+                      "content": "\t\t\t\tassistantMessage,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 489,
+                      "content": "\t\t\t\tpreparation,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 490,
+                      "content": "\t\t\t\texecuted,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 491,
+                      "content": "\t\t\t\tconfig,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 492,
+                      "content": "\t\t\t\tsignal,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 493,
+                      "content": "\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 494,
+                      "content": "\t\t\tawait emitToolExecutionEnd(finalized, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 495,
+                      "content": "\t\t\treturn finalized;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 496,
+                      "content": "\t\t});",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 497,
+                      "content": "\t\tif (signal?.aborted) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 498,
+                      "content": "\t\t\tbreak;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 499,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 500,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Loops through toolCalls in source order. Emits tool_execution_start, awaits prepareToolCall (so preflight is serial). If preparation is 'immediate' (not found, validation error, or blocked), inlines the finalized outcome and emits tool_execution_end right away. Otherwise pushes an async closure that will perform execute + finalize + emit-end when invoked later.",
+                  "why_its_here": "Preflight is serial because beforeToolCall is a hook that may need to see calls in deterministic order — for confirmation prompts, audit logging, etc. Execute is deferred because it is the slow phase: file IO, network calls, subprocesses. Inlining immediate outcomes (instead of wrapping them in trivial Promise.resolve closures) means simple failures don't pay the microtask cost and emit_end fires synchronously in source order.",
+                  "touches": [
+                    {
+                      "label": "prepareToolCall",
+                      "kind": "function",
+                      "block": "B19"
+                    },
+                    {
+                      "label": "executePreparedToolCall",
+                      "kind": "function",
+                      "block": "B20"
+                    },
+                    {
+                      "label": "FinalizedToolCallEntry",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "key_data_structures": [
+                    {
+                      "name": "finalizedCalls",
+                      "shape": "Array<FinalizedToolCallOutcome | () => Promise<FinalizedToolCallOutcome>>",
+                      "role": "Heterogeneous array: immediate outcomes inline, deferred executes as closures. Resolved uniformly by the Promise.all step below."
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "B19",
+                "phase": "emit",
+                "title": "PARALLEL JOIN",
+                "line_range": "L502–516",
+                "one_liner": "Promise.all walks the heterogeneous finalizedCalls array, kicking off every deferred closure concurrently — Promise.all preserves array order so the resulting tool-result messages emit in source order even though completions interleave.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 501,
+                  "context_end_line": 516,
+                  "lines": [
+                    {
+                      "line_num": 501,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 502,
+                      "content": "\tconst orderedFinalizedCalls = await Promise.all(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 503,
+                      "content": "\t\tfinalizedCalls.map((entry) => (typeof entry === \"function\" ? entry() : Promise.resolve(entry))),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 504,
+                      "content": "\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 505,
+                      "content": "\tconst messages: ToolResultMessage[] = [];",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 506,
+                      "content": "\tfor (const finalized of orderedFinalizedCalls) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 507,
+                      "content": "\t\tconst toolResultMessage = createToolResultMessage(finalized);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 508,
+                      "content": "\t\tawait emitToolResultMessage(toolResultMessage, emit);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 509,
+                      "content": "\t\tmessages.push(toolResultMessage);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 510,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 511,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 512,
+                      "content": "\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 513,
+                      "content": "\t\tmessages,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 514,
+                      "content": "\t\tterminate: shouldTerminateToolBatch(orderedFinalizedCalls),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 515,
+                      "content": "\t\tterminate: shouldTerminateToolBatch(orderedFinalizedCalls),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 516,
+                      "content": "\t};",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Maps each finalizedCalls entry: closures get invoked (kicking off execution), already-finalized outcomes get wrapped in Promise.resolve. Promise.all awaits all of them, preserving source order. Then for each result, emit message_start/message_end for the tool result message in that source order.",
+                  "why_its_here": "Promise.all is the canonical 'fan-out then join' primitive. Mapping function entries to invocations starts all execute() calls in the same microtask, so any concurrency available in the runtime is exploited. Emitting result messages in source order — separately from tool_execution_end which fires per-closure as each tool completes — is the explicit split the JSDoc promises: UIs get live progress, the transcript stays canonical.",
+                  "touches": [
+                    {
+                      "label": "Promise.all",
+                      "kind": "external",
+                      "block": null
+                    },
+                    {
+                      "label": "shouldTerminateToolBatch",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ],
+                  "invariants": [
+                    "messages[] is in assistant source order.",
+                    "terminate is true only when every finalized tool result in the batch has terminate=true (unanimous opt-in)."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-prepare",
+            "function": "prepareToolCall",
+            "label": "prepareToolCall",
+            "description": "Per-call preflight: look up the tool by name, prepare and validate arguments, run beforeToolCall — returns either a 'prepared' bundle (ready to execute) or an 'immediate' outcome (error or block).",
+            "blocks": [
+              {
+                "id": "B20",
+                "phase": "guard",
+                "title": "LOOKUP",
+                "line_range": "L568–576",
+                "one_liner": "Tool not found becomes an immediate error result rather than a thrown exception — the assistant gets a structured error message it can react to, so the LLM can recover by trying a different tool name.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 567,
+                  "context_end_line": 578,
+                  "lines": [
+                    {
+                      "line_num": 567,
+                      "content": "): Promise<PreparedToolCall | ImmediateToolCallOutcome> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 568,
+                      "content": "\tconst tool = currentContext.tools?.find((t) => t.name === toolCall.name);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 569,
+                      "content": "\tif (!tool) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 570,
+                      "content": "\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 571,
+                      "content": "\t\t\tkind: \"immediate\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 572,
+                      "content": "\t\t\tresult: createErrorToolResult(`Tool ${toolCall.name} not found`),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 573,
+                      "content": "\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 574,
+                      "content": "\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 575,
+                      "content": "\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 576,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 577,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 578,
+                      "content": "\ttry {",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Linear-scans currentContext.tools for a tool whose name matches the call. On miss, returns an immediate error outcome — never throws.",
+                  "why_its_here": "LLMs hallucinate tool names. Throwing would surface as an exception to the loop, which would have to translate it back to a tool result anyway. Returning the immediate outcome here keeps that translation local and means the assistant sees a normal tool-result message describing the mistake.",
+                  "touches": [
+                    {
+                      "label": "currentContext.tools",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "createErrorToolResult",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "B21",
+                "phase": "main",
+                "title": "VALIDATE + HOOK",
+                "line_range": "L578–626",
+                "one_liner": "Apply any per-tool prepareArguments shim, validate against the typebox schema, then call beforeToolCall — block decisions and signal aborts both short-circuit to immediate-error outcomes that flow back as normal tool results.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 577,
+                  "context_end_line": 626,
+                  "lines": [
+                    {
+                      "line_num": 577,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 578,
+                      "content": "\ttry {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 579,
+                      "content": "\t\tconst preparedToolCall = prepareToolCallArguments(tool, toolCall);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 580,
+                      "content": "\t\tconst validatedArgs = validateToolArguments(tool, preparedToolCall);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 581,
+                      "content": "\t\tif (config.beforeToolCall) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 582,
+                      "content": "\t\t\tconst beforeResult = await config.beforeToolCall(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 583,
+                      "content": "\t\t\t\t{",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 584,
+                      "content": "\t\t\t\t\tassistantMessage,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 585,
+                      "content": "\t\t\t\t\ttoolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 586,
+                      "content": "\t\t\t\t\targs: validatedArgs,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 587,
+                      "content": "\t\t\t\t\tcontext: currentContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 588,
+                      "content": "\t\t\t\t},",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 589,
+                      "content": "\t\t\t\tsignal,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 590,
+                      "content": "\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 591,
+                      "content": "\t\t\tif (signal?.aborted) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 592,
+                      "content": "\t\t\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 593,
+                      "content": "\t\t\t\t\tkind: \"immediate\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 594,
+                      "content": "\t\t\t\t\tresult: createErrorToolResult(\"Operation aborted\"),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 595,
+                      "content": "\t\t\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 596,
+                      "content": "\t\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 597,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 598,
+                      "content": "\t\t\tif (beforeResult?.block) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 599,
+                      "content": "\t\t\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 600,
+                      "content": "\t\t\t\t\tkind: \"immediate\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 601,
+                      "content": "\t\t\t\t\tresult: createErrorToolResult(beforeResult.reason || \"Tool execution was blocked\"),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 602,
+                      "content": "\t\t\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 603,
+                      "content": "\t\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 604,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 605,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 606,
+                      "content": "\t\tif (signal?.aborted) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 607,
+                      "content": "\t\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 608,
+                      "content": "\t\t\t\tkind: \"immediate\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 609,
+                      "content": "\t\t\t\tresult: createErrorToolResult(\"Operation aborted\"),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 610,
+                      "content": "\t\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 611,
+                      "content": "\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 612,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 613,
+                      "content": "\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 614,
+                      "content": "\t\t\tkind: \"prepared\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 615,
+                      "content": "\t\t\ttoolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 616,
+                      "content": "\t\t\ttool,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 617,
+                      "content": "\t\t\targs: validatedArgs,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 618,
+                      "content": "\t\t} catch (error) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 619,
+                      "content": "\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 620,
+                      "content": "\t} catch (error) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 621,
+                      "content": "\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 622,
+                      "content": "\t\t\tkind: \"immediate\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 623,
+                      "content": "\t\t\tresult: createErrorToolResult(error instanceof Error ? error.message : String(error)),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 624,
+                      "content": "\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 625,
+                      "content": "\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 626,
+                      "content": "\t\t};",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Runs the optional prepareArguments shim, validates against the tool's typebox schema (throws on invalid), runs beforeToolCall and respects its block decision. Two abort checks bracket the hook because beforeToolCall can be async and the user may abort during it. Wraps the whole body in try/catch so any thrown validation error becomes an immediate error outcome with the message preserved.",
+                  "why_its_here": "Validation and the beforeToolCall hook are the gate where the loop refuses to run a tool. By converting every refusal path (not-found, invalid args, blocked, aborted) into ImmediateToolCallOutcome, the rest of the pipeline (execute, finalize, emit) doesn't need to handle the failed cases — it only ever sees prepared calls.",
+                  "touches": [
+                    {
+                      "label": "validateToolArguments",
+                      "kind": "external",
+                      "block": null
+                    },
+                    {
+                      "label": "beforeToolCall",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "prepareToolCallArguments",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "Throw in beforeToolCall is caught by the outer try and surfaces as an immediate error result — the contract says the hook should not throw but the loop tolerates it.",
+                    "An aborted signal between beforeToolCall and the return is caught by the second abort check at L606."
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "col-executeFinalize",
+            "function": "executePreparedToolCall + finalizeExecutedToolCall",
+            "label": "execute + finalize",
+            "description": "execute runs the tool under the abort signal with an onUpdate callback that buffers update events; finalize applies the afterToolCall hook's optional overrides (content / details / isError / terminate).",
+            "blocks": [
+              {
+                "id": "B22",
+                "phase": "main",
+                "title": "EXECUTE",
+                "line_range": "L635–662",
+                "one_liner": "Run the tool's execute() under try/catch and buffer onUpdate events as promises — awaiting them after execution guarantees every tool_execution_update is delivered before the corresponding tool_execution_end.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 634,
+                  "context_end_line": 662,
+                  "lines": [
+                    {
+                      "line_num": 634,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 635,
+                      "content": "\ttry {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 636,
+                      "content": "\t\tconst result = await prepared.tool.execute(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 637,
+                      "content": "\t\t\tprepared.toolCall.id,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 638,
+                      "content": "\t\t\tprepared.args as never,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 639,
+                      "content": "\t\t\tsignal,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 640,
+                      "content": "\t\t\t(partialResult) => {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 641,
+                      "content": "\t\t\t\tupdateEvents.push(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 642,
+                      "content": "\t\t\t\t\tPromise.resolve(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 643,
+                      "content": "\t\t\t\t\t\temit({",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 644,
+                      "content": "\t\t\t\t\t\t\ttype: \"tool_execution_update\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 645,
+                      "content": "\t\t\t\t\t\t\ttoolCallId: prepared.toolCall.id,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 646,
+                      "content": "\t\t\t\t\t\t\ttoolName: prepared.toolCall.name,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 647,
+                      "content": "\t\t\t\t\t\t\targs: prepared.toolCall.arguments,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 648,
+                      "content": "\t\t\t\t\t\t\tpartialResult,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 649,
+                      "content": "\t\t\t\t\t\t}),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 650,
+                      "content": "\t\t\t\t\t),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 651,
+                      "content": "\t\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 652,
+                      "content": "\t\t\t},",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 653,
+                      "content": "\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 654,
+                      "content": "\t\tawait Promise.all(updateEvents);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 655,
+                      "content": "\t\treturn { result, isError: false };",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 656,
+                      "content": "\t} catch (error) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 657,
+                      "content": "\t\tawait Promise.all(updateEvents);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 658,
+                      "content": "\t\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 659,
+                      "content": "\t\t\tresult: createErrorToolResult(error instanceof Error ? error.message : String(error)),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 660,
+                      "content": "\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 661,
+                      "content": "\t\t\tisError: true,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 662,
+                      "content": "\t\t};",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls tool.execute with id, args, abort signal, and an onUpdate callback that pushes each tool_execution_update emit into updateEvents. After execute resolves, awaits Promise.all(updateEvents) so all pending update emissions complete before this function returns. On throw, converts the error to an error result, still drains the update queue.",
+                  "why_its_here": "Emit is async (listeners may be async), but onUpdate is called synchronously from inside the tool's execute. Buffering the emit promises and awaiting them at the end guarantees every update event lands before the tool_execution_end the caller will emit next — preserving the documented event order.",
+                  "touches": [
+                    {
+                      "label": "tool.execute",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "AgentToolUpdateCallback",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If a tool throws but has already emitted updates, the updates land before the final error — UIs see partial progress then an error.",
+                    "If a tool ignores the signal it will run to completion despite an abort."
+                  ]
+                }
+              },
+              {
+                "id": "B23",
+                "phase": "handoff",
+                "title": "FINALIZE",
+                "line_range": "L672–707",
+                "one_liner": "afterToolCall can rewrite content, details, isError, or terminate field-by-field — omitted fields keep the executed values, throws degrade gracefully into an error result rather than crashing the batch.",
+                "code_view": {
+                  "file": "packages/agent/src/agent-loop.ts",
+                  "language": "typescript",
+                  "context_start_line": 671,
+                  "context_end_line": 707,
+                  "lines": [
+                    {
+                      "line_num": 671,
+                      "content": "): Promise<FinalizedToolCallOutcome> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 672,
+                      "content": "\tlet result = executed.result;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 673,
+                      "content": "\tlet isError = executed.isError;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 674,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 675,
+                      "content": "\tif (config.afterToolCall) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 676,
+                      "content": "\t\ttry {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 677,
+                      "content": "\t\t\tconst afterResult = await config.afterToolCall(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 678,
+                      "content": "\t\t\t\t{",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 679,
+                      "content": "\t\t\t\t\tassistantMessage,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 680,
+                      "content": "\t\t\t\t\ttoolCall: prepared.toolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 681,
+                      "content": "\t\t\t\t\targs: prepared.args,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 682,
+                      "content": "\t\t\t\t\tresult,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 683,
+                      "content": "\t\t\t\t\tisError,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 684,
+                      "content": "\t\t\t\t\tcontext: currentContext,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 685,
+                      "content": "\t\t\t\t},",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 686,
+                      "content": "\t\t\t\tsignal,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 687,
+                      "content": "\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 688,
+                      "content": "\t\t\tif (afterResult) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 689,
+                      "content": "\t\t\t\tresult = {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 690,
+                      "content": "\t\t\t\t\tcontent: afterResult.content ?? result.content,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 691,
+                      "content": "\t\t\t\t\tdetails: afterResult.details ?? result.details,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 692,
+                      "content": "\t\t\t\t\tterminate: afterResult.terminate ?? result.terminate,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 693,
+                      "content": "\t\t\t\t};",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 694,
+                      "content": "\t\t\t\tisError = afterResult.isError ?? isError;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 695,
+                      "content": "\t\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 696,
+                      "content": "\t\t} catch (error) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 697,
+                      "content": "\t\t\tresult = createErrorToolResult(error instanceof Error ? error.message : String(error));",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 698,
+                      "content": "\t\t\tisError = true;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 699,
+                      "content": "\t\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 700,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 701,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 702,
+                      "content": "\treturn {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 703,
+                      "content": "\t\ttoolCall: prepared.toolCall,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 704,
+                      "content": "\t\tresult,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 705,
+                      "content": "\t\tisError,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 706,
+                      "content": "\t\tisError,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 707,
+                      "content": "\t};",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "If afterToolCall is configured, awaits it inside try/catch. Its returned AfterToolCallResult fields override individually via nullish coalescing — content / details / terminate replace whole values (no deep merge); isError replaces the flag. A throw degrades into a fresh error result.",
+                  "why_its_here": "afterToolCall is where apps decorate, redact, or annotate tool results before they hit the transcript. The nullish-coalescing merge is the explicit contract: omitted fields preserved, present fields replaced wholesale. Catching throws here keeps a misbehaving hook from breaking the batch — one tool's flaky afterToolCall doesn't take down the others' results.",
+                  "touches": [
+                    {
+                      "label": "afterToolCall",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "AfterToolCallResult",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "Throwing in afterToolCall replaces the (possibly successful) tool result with an error result — the contract recommends returning safe fallbacks instead."
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "B16",
+            "to": "B17",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#777"
+          },
+          {
+            "from": "B16",
+            "to": "B18",
+            "label": "CALL",
+            "style": "dashed",
+            "color": "#777"
+          },
+          {
+            "from": "B17",
+            "to": "B20",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#777"
+          },
+          {
+            "from": "B18",
+            "to": "B20",
+            "label": "CALL",
+            "style": "dashed",
+            "color": "#777"
+          },
+          {
+            "from": "B20",
+            "to": "B22",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#777"
+          },
+          {
+            "from": "B22",
+            "to": "B23",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#777"
+          }
+        ]
+      }
+    },
+    {
+      "id": "S4",
+      "title": "Stream pump",
+      "kind": "core_flow",
+      "depth": "summary",
+      "importance_scores": {
+        "centrality": 2,
+        "conceptual_weight": 2,
+        "entry_point": 2,
+        "novelty": 2,
+        "total": 8,
+        "rationale": null
+      },
+      "summary": "streamAssistantResponse is the boundary where AgentMessage[] gets converted to LLM Message[]. It applies the optional transformContext (AgentMessage-level pruning/injection), then convertToLlm (the schema conversion), resolves a possibly-expiring API key, builds the LLM Context and calls streamFn (defaulting to streamSimple). It pumps the resulting stream: 'start' pushes a partial AssistantMessage onto the context and emits message_start; every delta event (text/thinking/toolcall start/delta/end) replaces the in-context partial message in-place and emits a message_update — so the transcript always holds the current state. 'done' and 'error' both fetch the final message via response.result(), swap it into the context, and emit message_end before returning. A fallback path after the for-await loop handles streams that end without a terminal event by also calling response.result(). Errors and aborts are encoded by the stream — a final AssistantMessage with stopReason 'error' or 'aborted' — never thrown, per the StreamFn contract.",
+      "files_touched": [
+        "packages/agent/src/agent-loop.ts"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Type vocabulary",
+      "kind": "data_model",
+      "depth": "summary",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 3,
+        "entry_point": 1,
+        "novelty": 2,
+        "total": 9,
+        "rationale": "Centrality=3 (every other module imports from here) and conceptual_weight=3 (the hook surface is the agent's whole extension model); declarative, no control flow, so summary-only is the right depth."
+      },
+      "summary": "types.ts is the shared vocabulary. AgentEvent is a discriminated union covering agent_start/end, turn_start/end, message_start/update/end, and the three tool_execution_* events; subscribers and the in-Agent reducer both pattern-match on it. AgentLoopConfig extends SimpleStreamOptions with the seven hooks the loop calls: transformContext (AgentMessage[] → AgentMessage[]), convertToLlm (AgentMessage[] → Message[], the LLM boundary), beforeToolCall (block decisions before execute), afterToolCall (field-wise overrides after execute), shouldStopAfterTurn (graceful stop request), prepareNextTurn (rewires context/model between turns), getSteeringMessages (drain between turns), and getFollowUpMessages (drain after the agent would otherwise stop). AgentTool extends pi-ai's Tool with an execute(toolCallId, params, signal, onUpdate) signature, an optional prepareArguments shim for legacy arg shapes, and an optional executionMode per tool. CustomAgentMessages is the declaration-merging extension point — apps add their own UI-only message shapes (notifications, artifacts) that flow through the transcript and get filtered or transformed by convertToLlm before reaching the LLM.",
+      "files_touched": [
+        "packages/agent/src/types.ts"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Proxy transport",
+      "kind": "extension_point",
+      "depth": "summary",
+      "importance_scores": {
+        "centrality": 1,
+        "conceptual_weight": 2,
+        "entry_point": 1,
+        "novelty": 2,
+        "total": 6,
+        "rationale": "Centrality=1 because proxy.ts is only loaded when apps opt in; entry_point=1 because it sits below the public Agent surface as a swappable streamFn."
+      },
+      "summary": "proxy.ts is an alternate StreamFn that lets apps route LLM calls through their own server. streamProxy POSTs the {model, context, options} payload to {proxyUrl}/api/stream with a Bearer auth token and reads the response as a Server-Sent-Events-style line stream. The server emits ProxyAssistantMessageEvent objects — same shape as AssistantMessageEvent but with the bulky `partial` field stripped to reduce bandwidth. The client reconstructs the partial AssistantMessage incrementally via processProxyEvent: text_start/delta/end mutate partial.content[i].text; thinking_start/delta/end mutate partial.content[i].thinking; toolcall_start/delta/end accumulate a partialJson string and reparse arguments via parseStreamingJson on every delta; done/error finalize stopReason and usage. A ProxyMessageEventStream subclass of EventStream surfaces the reconstructed events to the rest of the agent loop, which is entirely unaware that the bytes came from a proxy rather than a direct provider call. Aborts cancel the reader; errors get encoded as a final AssistantMessage with stopReason 'error' per the StreamFn contract.",
+      "files_touched": [
+        "packages/agent/src/proxy.ts"
+      ]
+    }
+  ]
+}
