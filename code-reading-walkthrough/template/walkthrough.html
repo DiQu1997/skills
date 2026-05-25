@@ -256,6 +256,18 @@
   .code-line .src { white-space: pre; }
   .code-line.context .ln, .code-line.context .src { opacity: 0.45; }
 
+  /* Syntax highlighting tokens (TS/JS/Python). Muted palette to keep
+     legibility with the reading-mode beige page background. */
+  .tok-kw     { color: #5b3e9c; font-weight: 600; }
+  .tok-type   { color: #205493; }
+  .tok-str    { color: #8a5a14; }
+  .tok-num    { color: #2b6b5e; }
+  .tok-com    { color: #8b949e; font-style: italic; }
+  .tok-fn     { color: #2f7a2f; }
+  .tok-builtin{ color: #a4332a; }
+  .tok-op     { color: #57606a; }
+  .tok-punct  { color: #57606a; }
+
   /* ------- Reading overview ------- */
   .overview {
     max-width: 920px;
@@ -391,10 +403,11 @@
 
   /* ------- Right dock ------- */
   .dock {
-    position: absolute;
-    top: 0; right: 0;
+    position: fixed;
+    top: var(--topbar-h, 56px);
+    right: 0;
+    bottom: 0;
     width: 400px;
-    height: 100%;
     background: var(--bg-card);
     border-left: 1px solid var(--border);
     padding: 24px 24px 80px;
@@ -405,6 +418,9 @@
     z-index: 10;
   }
   .dock.open { transform: translateX(0); }
+  /* When dock is open, extend canvas's scrollable area by the dock's width so the
+     rightmost columns can be scrolled into view from behind the fixed dock. */
+  .main.dock-open .canvas { padding-right: 432px; }
   .dock-breadcrumb {
     font-size: 10px;
     letter-spacing: 0.08em;
@@ -850,11 +866,171 @@
     const cv = block.code_view;
     if (!cv || !cv.lines?.length) return '';
     const rangeLines = parseLineRange(block.line_range);
-    const html = cv.lines.map(l => {
+    const lang = (cv.language || '').toLowerCase();
+    // Highlight per-language across the full block as one string so multi-line
+    // tokens like /* ... */ and triple-quoted strings work. Then split back
+    // into <div class="code-line"> rows.
+    const joined = cv.lines.map(l => l.content ?? '').join('\n');
+    const highlighted = highlightCode(joined, lang); // array of arrays-of-html (one per line)
+    const html = cv.lines.map((l, i) => {
       const inRange = rangeLines && l.line_num >= rangeLines[0] && l.line_num <= rangeLines[1];
-      return `<div class="code-line${inRange ? '' : ' context'}"><span class="ln">${l.line_num}</span><span class="src">${escapeHtml(l.content)}</span></div>`;
+      const srcHtml = highlighted[i] ?? escapeHtml(l.content ?? '');
+      return `<div class="code-line${inRange ? '' : ' context'}"><span class="ln">${l.line_num}</span><span class="src">${srcHtml}</span></div>`;
     }).join('');
     return `<div class="block-code">${html}</div>`;
+  }
+
+  // -------- Syntax highlighter (TS/JS/Python) --------
+  // Single-pass tokenizer that handles line + block comments, string literals
+  // (single/double/backtick + Python triple-quoted), numbers, keywords,
+  // builtin types, and function-call identifiers. Returns one HTML-escaped
+  // line per source line. Unrecognized languages return escaped plain text.
+  const HL_LANGS = {
+    ts: {
+      keywords: new Set(['abstract','as','async','await','break','case','catch','class','const','continue','default','delete','do','else','enum','export','extends','finally','for','from','function','get','if','implements','import','in','instanceof','interface','is','keyof','let','namespace','new','of','private','protected','public','readonly','return','satisfies','set','static','super','switch','this','throw','try','type','typeof','var','void','while','with','yield']),
+      types: new Set(['string','number','boolean','any','unknown','never','void','undefined','null','object','Array','Promise','Set','Map','Record','Partial','Omit','Pick','Readonly','ReadonlySet','ReadonlyMap','AbortController','AbortSignal','Error']),
+      builtins: new Set(['true','false','null','undefined','console','globalThis','window','document','process','Math','JSON','Object','Date']),
+      lineComment: '//',
+      blockComment: ['/*', '*/'],
+      strings: ['"', "'", '`'],
+    },
+    js: null,   // alias resolved below
+    tsx: null,
+    jsx: null,
+    typescript: null,
+    javascript: null,
+    py: {
+      keywords: new Set(['and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield']),
+      types: new Set(['int','float','str','bool','bytes','list','dict','tuple','set','frozenset','None','True','False']),
+      builtins: new Set(['print','len','range','open','enumerate','zip','map','filter','sorted','reversed','sum','min','max','abs','any','all','isinstance','type','self','cls']),
+      lineComment: '#',
+      blockComment: null,
+      strings: ['"""', "'''", '"', "'"],
+    },
+    python: null,
+  };
+  // Resolve language aliases.
+  HL_LANGS.js = HL_LANGS.tsx = HL_LANGS.jsx = HL_LANGS.typescript = HL_LANGS.javascript = HL_LANGS.ts;
+  HL_LANGS.python = HL_LANGS.py;
+
+  function highlightCode(source, lang) {
+    const cfg = HL_LANGS[lang];
+    if (!cfg) {
+      // Unknown language → just escape and split by line.
+      return source.split('\n').map(escapeHtml);
+    }
+    const parts = []; // [{type, text}]
+    let i = 0;
+    const n = source.length;
+    const isIdStart = (c) => /[A-Za-z_$]/.test(c);
+    const isIdCont  = (c) => /[A-Za-z0-9_$]/.test(c);
+
+    while (i < n) {
+      const ch = source[i];
+
+      // Line comment
+      if (cfg.lineComment && source.startsWith(cfg.lineComment, i)) {
+        const j = source.indexOf('\n', i);
+        const end = j < 0 ? n : j;
+        parts.push({ type: 'com', text: source.slice(i, end) });
+        i = end;
+        continue;
+      }
+      // Block comment
+      if (cfg.blockComment && source.startsWith(cfg.blockComment[0], i)) {
+        const close = cfg.blockComment[1];
+        const j = source.indexOf(close, i + cfg.blockComment[0].length);
+        const end = j < 0 ? n : j + close.length;
+        parts.push({ type: 'com', text: source.slice(i, end) });
+        i = end;
+        continue;
+      }
+      // String literal — try the strings list, longest delimiter first.
+      let matchedString = false;
+      for (const q of cfg.strings) {
+        if (source.startsWith(q, i)) {
+          let j = i + q.length;
+          while (j < n) {
+            if (source[j] === '\\' && q.length === 1) { j += 2; continue; }
+            if (source.startsWith(q, j)) { j += q.length; break; }
+            j++;
+          }
+          parts.push({ type: 'str', text: source.slice(i, j) });
+          i = j;
+          matchedString = true;
+          break;
+        }
+      }
+      if (matchedString) continue;
+
+      // Number
+      if (/[0-9]/.test(ch)) {
+        let j = i;
+        while (j < n && /[0-9._xXa-fA-F]/.test(source[j])) j++;
+        parts.push({ type: 'num', text: source.slice(i, j) });
+        i = j;
+        continue;
+      }
+
+      // Identifier / keyword / type / builtin / function call
+      if (isIdStart(ch)) {
+        let j = i;
+        while (j < n && isIdCont(source[j])) j++;
+        const word = source.slice(i, j);
+        let cls = null;
+        if (cfg.keywords.has(word)) cls = 'kw';
+        else if (cfg.types.has(word)) cls = 'type';
+        else if (cfg.builtins.has(word)) cls = 'builtin';
+        else {
+          // function call: identifier immediately followed by `(`
+          let k = j;
+          while (k < n && source[k] === ' ') k++;
+          if (source[k] === '(') cls = 'fn';
+        }
+        parts.push({ type: cls, text: word });
+        i = j;
+        continue;
+      }
+
+      // Operator / punct (cheap heuristic — single char)
+      if (/[+\-*/%=<>!&|^~?:]/.test(ch)) {
+        parts.push({ type: 'op', text: ch });
+        i++;
+        continue;
+      }
+      if (/[(){}\[\];,.]/.test(ch)) {
+        parts.push({ type: 'punct', text: ch });
+        i++;
+        continue;
+      }
+
+      // Whitespace / unknown — passthrough
+      parts.push({ type: null, text: ch });
+      i++;
+    }
+
+    // Re-assemble as HTML, splitting on newlines into one entry per line.
+    const lines = [['']];
+    for (const p of parts) {
+      const html = p.type
+        ? `<span class="tok-${p.type}">${escapeHtml(p.text)}</span>`
+        : escapeHtml(p.text);
+      // We need to break on raw '\n' in the text, not in the html.
+      const segments = p.text.split('\n');
+      if (segments.length === 1) {
+        lines[lines.length - 1][0] += html;
+      } else {
+        for (let s = 0; s < segments.length; s++) {
+          const seg = segments[s];
+          const segHtml = p.type
+            ? `<span class="tok-${p.type}">${escapeHtml(seg)}</span>`
+            : escapeHtml(seg);
+          lines[lines.length - 1][0] += segHtml;
+          if (s < segments.length - 1) lines.push(['']);
+        }
+      }
+    }
+    return lines.map(l => l[0]);
   }
 
   function parseLineRange(range) {
@@ -972,14 +1148,16 @@
   // -------- Dock --------
   function renderDock() {
     const dock = document.getElementById('dock');
+    const main = document.getElementById('main');
     if (!state.focusedBlockId) {
       dock.classList.remove('open');
+      main?.classList.remove('dock-open');
       dock.innerHTML = '';
       return;
     }
     const storyline = getStoryline(state.storylineId);
     const hit = findBlock(storyline, state.focusedBlockId);
-    if (!hit) { dock.classList.remove('open'); dock.innerHTML = ''; return; }
+    if (!hit) { dock.classList.remove('open'); main?.classList.remove('dock-open'); dock.innerHTML = ''; return; }
     const { block, col } = hit;
     const phaseDef = getPhaseDef(storyline, block.phase);
     const rp = block.right_panel ?? {};
@@ -1001,6 +1179,8 @@
       ${renderQASection(block, storyline, col)}
     `;
     dock.classList.add('open');
+    main?.classList.add('dock-open');
+    requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
     document.getElementById('dock-close').onclick = () => closeDock();
     bindTouchClicks();
     bindPrereqClicks();
@@ -1314,8 +1494,18 @@
     return out;
   }
 
+  // Keep the --topbar-h CSS var in sync with the actual topbar height so the
+  // fixed dock anchors right below it on resize / view change.
+  function syncTopbarHeight() {
+    const top = document.getElementById('topbar');
+    if (!top) return;
+    const h = Math.round(top.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--topbar-h', h + 'px');
+  }
+
   function setupResize() {
     window.addEventListener('resize', () => {
+      syncTopbarHeight();
       if (state.view === 'storyline') {
         requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
       }
@@ -1336,10 +1526,13 @@
   // -------- Top-level render --------
   function render() {
     renderTopbar();
+    syncTopbarHeight();
+    const main = document.getElementById('main');
     if (state.view === 'overview') {
       renderOverview();
       const dock = document.getElementById('dock');
       dock.classList.remove('open');
+      main?.classList.remove('dock-open');
       dock.innerHTML = '';
     } else {
       renderStoryline();
