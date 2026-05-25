@@ -5216,28 +5216,92 @@
       const fromEl = document.querySelector(`#canvas [data-block-id="${cssEscape(e.from)}"]`);
       const toEl   = document.querySelector(`#canvas [data-block-id="${cssEscape(e.to)}"]`);
       if (!fromEl || !toEl) continue;
-      const fr = fromEl.getBoundingClientRect();
-      const tr = toEl.getBoundingClientRect();
-      const fromX = fr.right - innerRect.left;
-      const fromY = fr.top + fr.height / 2 - innerRect.top;
-      const toX   = tr.left  - innerRect.left;
-      const toY   = tr.top + tr.height / 2 - innerRect.top;
-      const sweep = Math.max(40, (toX - fromX) * 0.4);
-      const c1x = fromX + sweep;
-      const c2x = toX - sweep;
-      const d = `M ${fromX} ${fromY} C ${c1x} ${fromY}, ${c2x} ${toY}, ${toX} ${toY}`;
+      const route = computeEdgeRoute(fromEl, toEl, innerRect);
+      if (!route) continue;
       const color = e.color || '#777';
       const cls = `edge-path${e.style === 'dashed' ? ' dashed' : ''}`;
-      parts.push(`<path class="${cls}" d="${d}" stroke="${color}" />`);
+      parts.push(`<path class="${cls}" d="${route.d}" stroke="${color}" />`);
       if (e.label) {
-        const midX = (fromX + toX) / 2;
-        const midY = (fromY + toY) / 2;
         const labelW = e.label.length * 6 + 12;
-        parts.push(`<rect class="edge-label-bg" x="${midX - labelW/2}" y="${midY - 8}" width="${labelW}" height="14" rx="2"/>`);
-        parts.push(`<text class="edge-label" x="${midX}" y="${midY + 3}" text-anchor="middle" style="--edge-color:${color}">${escapeHtml(e.label)}</text>`);
+        parts.push(`<rect class="edge-label-bg" x="${route.labelX - labelW/2}" y="${route.labelY - 8}" width="${labelW}" height="14" rx="2"/>`);
+        parts.push(`<text class="edge-label" x="${route.labelX}" y="${route.labelY + 3}" text-anchor="middle" style="--edge-color:${color}">${escapeHtml(e.label)}</text>`);
       }
     }
     svg.innerHTML = parts.join('');
+  }
+
+  // Pick edge endpoints + control points based on the relative position of
+  // source/target blocks. Three cases:
+  //  - forward inter-column (from.right < to.left): horizontal bezier exiting
+  //    right side of source, entering left side of target.
+  //  - same-column downward: vertical bezier from source bottom to target top,
+  //    staying inside the column.
+  //  - same-column upward (loop-back) OR backward inter-column: exit LEFT side
+  //    of source, sweep through the col-left gap, enter LEFT side of target.
+  function computeEdgeRoute(fromEl, toEl, innerRect) {
+    const fr = fromEl.getBoundingClientRect();
+    const tr = toEl.getBoundingClientRect();
+    const FL = fr.left  - innerRect.left;
+    const FR = fr.right - innerRect.left;
+    const FT = fr.top   - innerRect.top;
+    const FB = fr.bottom - innerRect.top;
+    const TL = tr.left  - innerRect.left;
+    const TR = tr.right - innerRect.left;
+    const TT = tr.top   - innerRect.top;
+    const TB = tr.bottom - innerRect.top;
+
+    const fromCX = (FL + FR) / 2;
+    const toCX   = (TL + TR) / 2;
+    const fromCY = (FT + FB) / 2;
+    const toCY   = (TT + TB) / 2;
+    // Same column when horizontal centers are within 40% of source width
+    // (catches typical grid cols where blocks share a left/right edge).
+    const sameCol = Math.abs(fromCX - toCX) < (FR - FL) * 0.4;
+
+    if (sameCol && TT > FB) {
+      // Same column, downward → vertical bezier
+      const startX = fromCX;
+      const startY = FB;
+      const endX   = toCX;
+      const endY   = TT;
+      const sweep  = Math.max(12, (endY - startY) * 0.3);
+      return {
+        d: `M ${startX} ${startY} C ${startX} ${startY + sweep}, ${endX} ${endY - sweep}, ${endX} ${endY}`,
+        labelX: (startX + endX) / 2,
+        labelY: (startY + endY) / 2,
+      };
+    }
+
+    if (TL > FR) {
+      // Forward inter-column → horizontal bezier right→left
+      const startX = FR;
+      const startY = fromCY;
+      const endX   = TL;
+      const endY   = toCY;
+      const sweep  = Math.max(40, (endX - startX) * 0.4);
+      return {
+        d: `M ${startX} ${startY} C ${startX + sweep} ${startY}, ${endX - sweep} ${endY}, ${endX} ${endY}`,
+        labelX: (startX + endX) / 2,
+        labelY: (startY + endY) / 2,
+      };
+    }
+
+    // Same-column upward (loop-back) OR backward inter-column → route LEFT
+    // through the gap to the left of the source column. The detour is small
+    // (just enough to clear the source/target blocks) so the edge sits in
+    // the inter-column whitespace rather than slashing across other content.
+    const startX = FL;
+    const startY = fromCY;
+    const endX   = TL;
+    const endY   = toCY;
+    const detour = sameCol ? 22 : Math.max(40, (FL - TL) * 0.4);
+    const c1x    = startX - detour;
+    const c2x    = endX   - detour;
+    return {
+      d: `M ${startX} ${startY} C ${c1x} ${startY}, ${c2x} ${endY}, ${endX} ${endY}`,
+      labelX: Math.min(c1x, c2x) + 4,
+      labelY: (startY + endY) / 2,
+    };
   }
 
   function cssEscape(s) {
