@@ -868,6 +868,152 @@
                 }
               },
               {
+                "id": "B1A",
+                "phase": "handoff",
+                "title": "INVOKE LIFECYCLE",
+                "line_range": "L386–400",
+                "one_liner": "The actual bridge from prompt() to runWithLifecycle. Wraps runAgentLoop inside an executor closure so the lifecycle wrapper only sees a (signal) ⇒ Promise<void> — symmetric with the continuation path.",
+                "code_view": {
+                  "file": "packages/agent/src/agent.ts",
+                  "language": "typescript",
+                  "context_start_line": 384,
+                  "context_end_line": 402,
+                  "lines": [
+                    {
+                      "line_num": 384,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 385,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 386,
+                      "content": "\tprivate async runPromptMessages(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 387,
+                      "content": "\t\tmessages: AgentMessage[],",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 388,
+                      "content": "\t\toptions: { skipInitialSteeringPoll?: boolean } = {},",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 389,
+                      "content": "\t): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 390,
+                      "content": "\t\tawait this.runWithLifecycle(async (signal) => {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 391,
+                      "content": "\t\t\tawait runAgentLoop(",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 392,
+                      "content": "\t\t\t\tmessages,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 393,
+                      "content": "\t\t\t\tthis.createContextSnapshot(),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 394,
+                      "content": "\t\t\t\tthis.createLoopConfig(options),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 395,
+                      "content": "\t\t\t\t(event) => this.processEvents(event),",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 396,
+                      "content": "\t\t\t\tsignal,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 397,
+                      "content": "\t\t\t\tthis.streamFn,",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 398,
+                      "content": "\t\t\t);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 399,
+                      "content": "\t\t});",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 400,
+                      "content": "\t}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 401,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 402,
+                      "content": "\tprivate async runContinuation(): Promise<void> {",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls this.runWithLifecycle, passing an inline async executor that invokes runAgentLoop with five inputs assembled here: the input messages, a fresh AgentContext snapshot (system prompt + transcript + tools copy), a fresh AgentLoopConfig (built by createLoopConfig with the optional skipInitialSteeringPoll override), the processEvents callback wired as event sink, the abort signal forwarded from runWithLifecycle, and this.streamFn (default streamSimple, replaced by streamProxy in proxied setups).",
+                  "why_its_here": "Single bridge between the Agent's public entry overloads and the lifecycle wrapper. Both prompt() and continue() route through this method so the actual lifecycle invocation lives in exactly one place — keeping prompt() and continue() thin (just reentry-guard + input normalization + queue handling) and centralizing the snapshot+config+callback wiring. The skipInitialSteeringPoll plumbing exists for the case where continue() already drained the steering queue, so the loop must not drain it a second time on entry.",
+                  "touches": [
+                    {
+                      "label": "runWithLifecycle",
+                      "kind": "function",
+                      "block": "B3"
+                    },
+                    {
+                      "label": "runAgentLoop",
+                      "kind": "external",
+                      "block": null
+                    },
+                    {
+                      "label": "createContextSnapshot",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "createLoopConfig",
+                      "kind": "function",
+                      "block": "B2"
+                    },
+                    {
+                      "label": "processEvents",
+                      "kind": "function",
+                      "block": "B7"
+                    },
+                    {
+                      "label": "streamFn",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ]
+                }
+              },
+              {
                 "id": "B2",
                 "phase": "handoff",
                 "title": "BUILD CONFIG",
@@ -1776,7 +1922,7 @@
         ],
         "edges": [
           {
-            "from": "B1",
+            "from": "B1A",
             "to": "B3",
             "label": "CALL",
             "style": "solid",
