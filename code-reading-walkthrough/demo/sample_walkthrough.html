@@ -281,7 +281,88 @@
     margin-left: 6px; font-weight: 400;
   }
 
-  /* ========== Walkthrough annotations ========== */
+  /* ========== Syntax highlighting ========== */
+  .sh-kw  { color: #cf222e; font-weight: 600; }
+  .sh-ty  { color: #8250df; }
+  .sh-str { color: #0a3069; }
+  .sh-num { color: #0550ae; }
+  .sh-cmt { color: #6e7781; font-style: italic; }
+  .sh-pp  { color: #953800; }
+  .sh-fn  { color: #8250df; }
+  .sh-op  { color: #24292f; }
+
+  /* ========== v0.4: Semantic block chunking ========== */
+
+  /* --- Preamble region (lines outside any walkthrough chunk) --- */
+  .code-table tr.preamble-line td.line-content { opacity: 0.5; }
+  .code-table tr.preamble-line td.line-num     { opacity: 0.45; }
+  .code-table tr.preamble-line td.change-marker{ opacity: 0.45; }
+
+  /* --- Semantic block wrapper --- */
+  .semantic-block {
+    border: 2px solid #d0d7de;
+    border-radius: 6px;
+    margin: 8px 6px;
+    overflow: hidden;
+    background: #ffffff;
+    transition: border-color 0.15s;
+  }
+  .semantic-block:hover { border-color: #0969da; }
+
+  .semantic-block-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px;
+    background: #f0edff;
+    border-bottom: 1px solid #e0daf5;
+    font-size: 11px;
+  }
+  .sb-chunk-role {
+    font-weight: 700; color: #6f42c1;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .sb-line-range {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #656d76;
+  }
+
+  .semantic-block .code-table { margin: 0; }
+
+  /* --- Inline explanation panel --- */
+  .sb-explanation {
+    padding: 10px 16px;
+    background: #f8f5ff;
+    border-top: 1px solid #e0daf5;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #24292f;
+  }
+  .file-block.compact-mode .sb-explanation { display: none; }
+
+  /* --- Mode toggle controls --- */
+  .wt-controls {
+    padding: 4px 12px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #eaeef2;
+    display: flex; justify-content: flex-end; gap: 8px;
+    align-items: center;
+  }
+  .wt-controls button {
+    font-size: 10px; font-family: inherit;
+    background: none; border: 1px solid #d0d7de;
+    border-radius: 4px; padding: 2px 8px;
+    cursor: pointer; color: #656d76;
+  }
+  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
+  .wt-controls button.active-mode {
+    background: #ddf4ff; border-color: #0969da; color: #0969da;
+    font-weight: 600;
+  }
+  .wt-mode-label {
+    font-size: 10px; color: #656d76;
+    margin-right: 4px;
+  }
+
+  /* Legacy annotation styles (fallback) */
   .wt-annotation {
     background: #f8f5ff;
     border-left: 3px solid #c9b8ff;
@@ -314,21 +395,6 @@
     line-height: 1.55;
   }
   .wt-annotation.wt-collapsed .wt-explanation { display: none; }
-
-  .wt-controls {
-    padding: 4px 12px;
-    background: #f6f8fa;
-    border-bottom: 1px solid #eaeef2;
-    display: flex; justify-content: flex-end; gap: 8px;
-  }
-  .wt-controls button {
-    font-size: 10px; font-family: inherit;
-    background: none; border: 1px solid #d0d7de;
-    border-radius: 4px; padding: 2px 8px;
-    cursor: pointer; color: #656d76;
-  }
-  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
-
   .wt-annotation-cell { padding: 0 !important; border: none !important; }
 
   /* ========== Step navigation footer ========== */
@@ -4239,6 +4305,98 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ========== Syntax highlighting ==========
+  const _SH_KEYWORDS = new Set([
+    'auto','break','case','catch','class','const','constexpr','continue',
+    'default','delete','do','else','enum','explicit','export','extern',
+    'false','final','for','friend','goto','if','inline','mutable',
+    'namespace','new','noexcept','nullptr','operator','override',
+    'private','protected','public','register','return','sizeof','static',
+    'static_assert','struct','switch','template','this','throw','true',
+    'try','typedef','typename','union','using','virtual','void','volatile',
+    'while','yield',
+    'async','await','const','debugger','export','extends','function',
+    'import','in','instanceof','let','of','super','typeof','var',
+    'and','as','assert','async','await','class','def','del','elif',
+    'except','finally','from','global','import','in','is','lambda',
+    'nonlocal','not','or','pass','raise','with',
+    'chan','defer','fallthrough','func','go','interface','map','package',
+    'range','select','type',
+    'crate','dyn','fn','impl','let','loop','match','mod','move','mut',
+    'pub','ref','self','Self','trait','unsafe','use','where',
+    'abstract','boolean','byte','extends','final','implements','interface',
+    'native','package','synchronized','throws','transient',
+  ]);
+
+  const _SH_TYPES = new Set([
+    'int','long','short','float','double','char','bool','unsigned','signed',
+    'int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t',
+    'size_t','ssize_t','ptrdiff_t','uintptr_t',
+    'string','String','str','Vec','Box','Option','Result','HashMap','HashSet',
+    'Array','Map','Set','Promise','Iterator',
+    'std','vector','unordered_map','shared_ptr','unique_ptr',
+    'i8','i16','i32','i64','u8','u16','u32','u64','f32','f64','usize','isize',
+    'any','never','unknown','undefined','null','None','True','False',
+    'number','boolean','object','symbol','bigint',
+  ]);
+
+  let _shMultilineComment = false;
+  function resetHighlightState() { _shMultilineComment = false; }
+
+  function highlightLine(raw, lang) {
+    if (raw == null) return '';
+    let s = escapeHtml(raw);
+    if (!s.trim()) return s;
+    const PH = [];
+    let out = '';
+    if (_shMultilineComment) {
+      const endIdx = s.indexOf('*/');
+      if (endIdx === -1) return `<span class="sh-cmt">${s}</span>`;
+      out += `<span class="sh-cmt">${s.slice(0, endIdx + 2)}</span>`;
+      s = s.slice(endIdx + 2);
+      _shMultilineComment = false;
+      if (!s) return out;
+    }
+    function ph(cls, text) {
+      const idx = PH.length;
+      PH.push(`<span class="${cls}">${text}</span>`);
+      return `\x00${idx}\x00`;
+    }
+    if (/^\s*#(include|define|ifdef|ifndef|endif|pragma|if|else|elif|undef|error|warning)/.test(s))
+      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    if (/^\s*@\w/.test(s) && (lang === 'python' || lang === 'py'))
+      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    s = s.replace(/&quot;((?:[^&]|&(?!quot;))*)&quot;/g, (m) => ph('sh-str', m));
+    s = s.replace(/&#39;((?:[^&]|&(?!#39;))*)&#39;/g, (m) => ph('sh-str', m));
+    s = s.replace(/`([^`]*)`/g, (m) => ph('sh-str', escapeHtml(m)));
+    s = s.replace(/(\/\/.*)$/, (m) => ph('sh-cmt', m));
+    if (['python','py','ruby','rb','shell','bash','sh','yaml','yml','toml'].includes(lang))
+      s = s.replace(/(#.*)$/, (m) => ph('sh-cmt', m));
+    const mlStart = s.indexOf('/*');
+    if (mlStart !== -1) {
+      const mlEnd = s.indexOf('*/', mlStart + 2);
+      if (mlEnd !== -1) {
+        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart, mlEnd + 2)) + s.slice(mlEnd + 2);
+      } else {
+        _shMultilineComment = true;
+        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart));
+      }
+    }
+    s = s.replace(/\b(0x[0-9a-fA-F]+[uUlL]*)\b/g, '<span class="sh-num">$1</span>');
+    s = s.replace(/\b(\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*)\b/g, '<span class="sh-num">$1</span>');
+    s = s.replace(/\b([a-zA-Z_]\w*)\b/g, (m, w) => {
+      if (_SH_KEYWORDS.has(w)) return `<span class="sh-kw">${w}</span>`;
+      if (_SH_TYPES.has(w)) return `<span class="sh-ty">${w}</span>`;
+      return m;
+    });
+    s = s.replace(/\b([a-zA-Z_]\w*)\s*(?=\()/g, (m, fn) => {
+      if (_SH_KEYWORDS.has(fn) || _SH_TYPES.has(fn)) return m;
+      return `<span class="sh-fn">${fn}</span>`;
+    });
+    s = s.replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    return out + s;
+  }
+
   function renderInlineMarkdown(s) {
     if (s == null) return '';
     let out = escapeHtml(s);
@@ -4966,26 +5124,95 @@
     const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
     const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
     const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
+    const lang = (fv.language || '').toLowerCase();
 
     const fpHtml = renderFunctionPurpose(fv.function_purpose);
 
     const wt = fv.walkthrough || [];
-    const annByRowIndex = {};
-    wt.forEach(ann => {
-      let lastIdx = -1;
-      for (let i = 0; i < fv.lines.length; i++) {
-        if (fv.lines[i].line_num === ann.line_end) lastIdx = i;
-      }
-      if (lastIdx !== -1) annByRowIndex[lastIdx] = ann;
-    });
     const hasWt = wt.length > 0;
 
-    const wtControls = hasWt ? `
-      <div class="wt-controls">
-        <button onclick="toggleAllAnnotations('${blockId}', false)">Hide all</button>
-        <button onclick="toggleAllAnnotations('${blockId}', true)">Show all</button>
-      </div>` : '';
+    // --- v0.4: Semantic block rendering ---
+    if (hasWt) {
+      const sortedWt = [...wt].sort((a, b) => a.line_start - b.line_start);
 
+      const lineChunkMap = {};
+      sortedWt.forEach((ann, ci) => {
+        for (let ln = ann.line_start; ln <= ann.line_end; ln++) {
+          lineChunkMap[ln] = ci;
+        }
+      });
+
+      const segments = [];
+      let curSeg = null;
+      for (let i = 0; i < fv.lines.length; i++) {
+        const line = fv.lines[i];
+        const ci = lineChunkMap[line.line_num];
+        const segType = ci !== undefined ? 'chunk' : 'preamble';
+        const segKey = segType === 'chunk' ? ci : -1;
+
+        if (!curSeg || curSeg.type !== segType || curSeg.key !== segKey) {
+          curSeg = { type: segType, key: segKey, rows: [] };
+          segments.push(curSeg);
+        }
+        curSeg.rows.push(line);
+      }
+
+      const segParts = [];
+      segments.forEach(seg => {
+        resetHighlightState();
+        const rows = seg.rows.map(line => {
+          const cls = `line-${line.change}` + (seg.type === 'preamble' ? ' preamble-line' : '');
+          const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
+          return `<tr class="${cls}">
+            <td class="line-num">${line.line_num}</td>
+            <td class="change-marker">${marker}</td>
+            <td class="line-content">${highlightLine(line.content, lang)}</td>
+          </tr>`;
+        }).join('');
+
+        if (seg.type === 'preamble') {
+          segParts.push(`<table class="code-table">${rows}</table>`);
+        } else {
+          const ann = sortedWt[seg.key];
+          const rangeLabel = ann.line_start === ann.line_end
+            ? `Line ${ann.line_start}`
+            : `Lines ${ann.line_start}–${ann.line_end}`;
+          segParts.push(`
+            <div class="semantic-block">
+              <div class="semantic-block-header">
+                <span class="sb-chunk-role">${escapeHtml(ann.chunk_role)}</span>
+                <span class="sb-line-range">${rangeLabel}</span>
+              </div>
+              <table class="code-table">${rows}</table>
+              <div class="sb-explanation">${renderInlineMarkdown(ann.explanation)}</div>
+            </div>`);
+        }
+      });
+
+      const wtControls = `
+        <div class="wt-controls">
+          <span class="wt-mode-label">View:</span>
+          <button class="active-mode" onclick="setBlockMode('${blockId}', 'inline', this)">Inline</button>
+          <button onclick="setBlockMode('${blockId}', 'compact', this)">Compact</button>
+        </div>`;
+
+      return `
+        <div class="${klass}" id="${blockId}">
+          <div class="file-header">
+            <span class="file-path">${escapeHtml(fv.file)}</span>
+            <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
+            ${refLabel}
+          </div>
+          ${why}
+          ${fpHtml}
+          ${wtControls}
+          <div class="semantic-blocks-container">${segParts.join('')}</div>
+        </div>
+      `;
+    }
+
+    // --- Fallback: no walkthrough chunks ---
+    resetHighlightState();
     const parts = [];
     for (let i = 0; i < fv.lines.length; i++) {
       const line = fv.lines[i];
@@ -4994,25 +5221,8 @@
       parts.push(`<tr class="${cls}">
         <td class="line-num">${line.line_num}</td>
         <td class="change-marker">${marker}</td>
-        <td class="line-content">${escapeHtml(line.content)}</td>
+        <td class="line-content">${highlightLine(line.content, lang)}</td>
       </tr>`);
-
-      const ann = annByRowIndex[i];
-      if (ann) {
-        const rangeLabel = ann.line_start === ann.line_end
-          ? `Line ${ann.line_start}`
-          : `Lines ${ann.line_start}–${ann.line_end}`;
-        parts.push(`<tr><td colspan="3" class="wt-annotation-cell">
-          <div class="wt-annotation" data-block-id="${blockId}">
-            <div class="wt-annotation-header">
-              <span class="wt-toggle" onclick="toggleAnnotation(this)">▾</span>
-              <span class="wt-line-range">${rangeLabel}</span>
-              <span class="wt-chunk-role">${escapeHtml(ann.chunk_role)}</span>
-            </div>
-            <div class="wt-explanation">${renderInlineMarkdown(ann.explanation)}</div>
-          </div>
-        </td></tr>`);
-      }
     }
 
     return `
@@ -5024,12 +5234,28 @@
         </div>
         ${why}
         ${fpHtml}
-        ${wtControls}
         <table class="code-table">${parts.join('')}</table>
       </div>
     `;
   }
 
+  // v0.4: Toggle between inline and compact mode for a file-block
+  function setBlockMode(blockId, mode, btnEl) {
+    const block = document.getElementById(blockId);
+    if (!block) return;
+    if (mode === 'compact') {
+      block.classList.add('compact-mode');
+    } else {
+      block.classList.remove('compact-mode');
+    }
+    const controls = block.querySelector('.wt-controls');
+    if (controls) {
+      controls.querySelectorAll('button').forEach(b => b.classList.remove('active-mode'));
+      if (btnEl) btnEl.classList.add('active-mode');
+    }
+  }
+
+  // Legacy toggle functions (kept for backward compat)
   function toggleAnnotation(toggleEl) {
     const ann = toggleEl.closest('.wt-annotation');
     ann.classList.toggle('wt-collapsed');
