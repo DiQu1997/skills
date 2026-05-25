@@ -1,4 +1,4 @@
-# Analyze Code — Prompt Template (v0.4-reading)
+# Analyze Code — Prompt Template (v0.5-reading)
 
 Use this prompt for the analysis phase of the workflow in `SKILL.md`.
 
@@ -13,6 +13,14 @@ You are a **research assistant**, not a reviewer. There are no PR
 comments to write, no judgements to render. Stay factual; surface the
 ideas the code embodies; explain the design where it's non-obvious.
 
+The output binds to `prompts/schema.md` v0.5-reading. The big shift
+from v0.4: each full-depth storyline is now a **flow diagram** — small
+labeled `blocks` of code laid out in `cols` (lanes, usually one per
+function), with optional `edges` showing cross-block control flow.
+Clicking a block in the rendered UI expands its code inline AND opens
+a right-side dock with the block's full annotation (what it does, why
+it's here, touches, failure mode, etc.).
+
 ## Context provided
 
 - A **scope**: either explicit file/folder paths (Mode A) or a topic
@@ -23,13 +31,17 @@ ideas the code embodies; explain the design where it's non-obvious.
 
 ## Your output
 
-A single JSON document conforming to `schema.md` v0.4-reading. Includes:
-- Top-level `scope` block recording what you read and why
-- Per-storyline: `purpose`, `architectural_context`, `change_overview`,
-  `reading_roadmap`, `mental_model_anchor`, `importance_scores`, `depth`
-- Per-step: `code_view` with `function_purpose` + `walkthrough`,
-  `invariants`, `key_data_structures`, `usage_context`,
-  `codebase_patterns`, `design_rationale`, `analysis`, `prerequisites`
+A single JSON document conforming to `schema.md` v0.5-reading. Per
+storyline:
+- Top-level metadata + `scope` block recording what you read and why
+- `importance_scores`, `depth`, `summary`
+- For full-depth storylines: `mental_model_anchor`, `purpose`,
+  `architectural_context`, `change_overview`, `diagram` (with `phases`,
+  `cols`, `blocks`, optional `edges`)
+- For each block: `title`, `line_range`, `one_liner`, `code_view`,
+  `right_panel` (`what_it_does`, `why_its_here`, `touches`,
+  `failure_mode`, plus optional `invariants` / `key_data_structures` /
+  `prerequisites`)
 
 ## Workflow phases
 
@@ -52,8 +64,7 @@ Detect the mode from the user's input:
      `reason` (entry-point | type-def | core-flow | dependency | tests)
      and optional `note` justifying why this file is in-bounds
    - `excluded[]` — files you considered and chose not to include, with
-     a one-line `reason` per file (e.g. "tests skipped", "generated
-     code", "secondary path")
+     a one-line `reason` per file
    - `importance_criteria` — one paragraph describing how you'll pick
      the top-N storylines and why this run weights some lenses over
      others (e.g. "topic is a flow question, so entry_point and
@@ -76,7 +87,7 @@ Read the **full file** for each entry in `discovered_scope`. You'll need:
 - Language tag (filename extension + content sniffing)
 - Function/class boundaries enclosing meaningful logic
 - Top-level type/data-structure declarations
-- Symbols referenced from changed lines (for `supporting_definitions`)
+- Symbols referenced from focal lines (for cross-references)
 
 Take notes on what each file contributes before grouping. Don't start
 identifying storylines until you've actually read every in-scope file.
@@ -116,7 +127,6 @@ Score *every* storyline on the four importance lenses (1–3 each):
 
 Compute `total = centrality + conceptual_weight + entry_point + novelty`.
 Tie-break: `entry_point > centrality > conceptual_weight > novelty`.
-
 Provide `rationale` (one short sentence) when any sub-score is 3 OR when
 `total ≤ 5`. Otherwise rationale may be null.
 
@@ -126,20 +136,22 @@ Pick `N`:
 - Top-N storylines → `depth: "full"`
 - Remaining storylines → `depth: "summary"`
 
-### Phase 4 — For full-depth storylines, populate context
+### Phase 4 — Storyline-level fields (full-depth)
 
-For each `depth: "full"` storyline:
+For each `depth: "full"` storyline, populate:
 
 #### `mental_model_anchor` — the keystone field
 
 One short, vivid analogy/picture/metaphor (1–3 sentences) the reader
 should walk away with. Example:
-*"Think of the MemTable as a sorted log staged in RAM. Writes always
-go to its tail; reads scan it before falling through to disk."*
+*"Think of it as a try/finally wrapped around an executor. startTurn
+validates and hands off; runWithLifecycle owns the streaming + abort
+state; handleRunFailure converts thrown errors into synthetic assistant
+messages; finishRun is the idempotent finalizer."*
 
-This is the **most important single field** for reading mode. If you
-can't articulate the anchor crisply, you don't yet understand the
-storyline well enough — go re-read the code.
+This is the **most important single field**. If you can't articulate
+the anchor crisply, you don't yet understand the storyline well enough
+— go re-read the code.
 
 #### `purpose`
 - `stated`: what existing comments/docs claim, if any. Null if none.
@@ -150,219 +162,322 @@ storyline well enough — go re-read the code.
 - `system_role` — which part of the system this storyline lives in
 - `involved_modules` — list with `role_in_storyline` per module
 - `data_flow` — prose of how data/control moves through this storyline
-- `diagram` — Mermaid or ASCII when graph-like; else `{type: "none"}`
 
 #### `change_overview`
 Multi-paragraph holistic description: the *idea* of the storyline, why
 it earns its place in the codebase, how its pieces hang together. Not a
 file-by-file recap.
 
-#### `reading_roadmap`
-Brief description of how the steps connect, in reading order. Example:
-*"S1.1 introduces the MemTable struct. S1.2 traces an Add(). S1.3 traces
-a Get() that depends on the seq number set in S1.2."*
+### Phase 5 — Design the diagram
 
-### Phase 5 — Order steps within each storyline
+For each full-depth storyline, decide the diagram's **shape**.
 
-Logical reading order, not alphabetical:
-- **For a structure-first storyline**: types and data structures first,
-  then the operations on them.
-- **For a flow-first storyline**: entry point first, then each function
-  in the call chain.
-- **Definitions before uses** in all cases.
-- **Earlier dependencies before later** dependents.
+#### Pick the columns (`diagram.cols`)
 
-### Phase 6 — Build code_view for each step
+**Default — one column per function.** Walk the storyline's call chain
+and assign each function its own column, left-to-right in call order
+(entry-point on the left, called functions to the right). Set
+`col.function` to the function name; the UI prepends "ƒ" and
+auto-numbers as "STEP 1 / STEP 2 / ...".
 
-#### `primary_changes`
-Show the **full enclosing function/block** containing the code, with
-unchanged lines included so the reader sees code in context. All lines
-have `change: "unchanged"` (the field is kept for template
-compatibility). Capture `context_start_line`, `context_end_line`,
-`language`.
+**When functions are too small (<10 lines each) or too numerous (>6),**
+collapse them into logical lanes instead. Examples:
+- `input layer | core | output layer`
+- `happy path | error path`
+- `request prep | dispatch | response shaping`
 
-If a step touches multiple functions/files, list each as a separate
-entry, ordered logically.
+Set `col.function: null` for lane-style columns and pick a `col.label`.
 
-#### `supporting_definitions` (0–3 entries)
-Code referenced by `primary_changes` that the reader needs to follow
-along — type definition, called function, key constant. Each gets a
-`why_included` line.
+**Cap: 6 columns per diagram.** If you'd need more, either split into
+multiple storylines or merge sibling helper functions into one lane.
 
-### Phase 7 — Build walkthrough + function_purpose + invariants + key_data_structures
+#### Pick the phases (`diagram.phases`)
 
-#### `function_purpose` (when function-scoped)
-- `function_name` (or null for anonymous block)
-- `structure: "single"` for one coherent purpose; `"multi_section"` for
-  long/multi-concern functions
-- `problem_solved` — motivation: "the system needs Y; this provides Y"
-- `without_it` — counter-factual: "if this didn't exist, callers would
-  pay X cost / risk Y / be unable to do Z"
+3–7 phase categories per diagram. These are **color tags**, not layout
+rows — blocks across columns DO NOT need to align by phase.
 
-These two together force articulation of why the function earns its keep.
+Prefer the named phase tokens (the renderer styles them with accessible
+muted swatches):
 
-#### `walkthrough[]` — code-attached annotations
-**Sparse, mental-model-centric.** For each candidate chunk ask: *"Does
-understanding this chunk help the reader build a mental model of how this
-code works?"* Annotate when yes; skip when no. A 30-line function might
-have 2–4 annotations, not 30.
+| Token | Use for |
+|-------|---------|
+| `guard` | Pre-condition checks, validation, early returns |
+| `setup` | Wiring, initialization, allocation, classification |
+| `main` | Core logic — the block's reason to exist |
+| `handoff` | Calls into other functions / async hand-off |
+| `cleanup` | Resource release, idempotent finalizers |
+| `error` | Failure paths, catch blocks, retry decisions |
+| `persist` | Writing to durable storage or external sinks |
+| `emit` | Producing output (events, messages, responses) |
 
-Each annotation:
-- `line_start`, `line_end` (within the FileView's line range)
-- `chunk_role` — short tag: `'the public entrypoint'`,
-  `'main logic'`, `'invariant guard'`, `'error path'`,
-  `'fast-path optimization'`, etc.
-- `explanation` — substantial paragraph: what this chunk does AND why
-  this way
+Pick a subset that matches the storyline's shape. If a phase isn't
+useful, omit it. If you need a phase not in the table, declare it with
+a `color` field (any CSS color); the label can be any short word.
 
-Failure modes to avoid:
-- Annotating every line (noise; dilutes attention)
-- Annotating only the "interesting" line without the unchanged context
-  it interacts with (reader can't connect)
+Set `diagram.file_badge` to the dominant filename (e.g.
+`turn-runner.ts`) only when one file truly dominates the storyline.
+Set `diagram.subtitle` to a tight tagline like *"four functions, one
+lifecycle"* — it appears next to the file badge.
 
-#### `invariants`
-1–4 invariants per substantive step. Things that must always hold here:
-pre/post-conditions, structural guarantees, ordering requirements,
-allocation rules. Skip on trivial steps.
+### Phase 6 — Partition each column into blocks
 
-Examples:
-- *"The seq number is monotonically increasing across all calls to Add()."*
-- *"After ApproximateMemoryUsage() returns, no allocator state has changed."*
-- *"Callers hold the write lock when invoking this function."*
+This is where most of the work is. **Block sizing is the single biggest
+quality bar.**
 
-#### `key_data_structures`
-The nouns the reader must keep in their head while reading this step.
-Each has `name`, `shape` (one-line — "sorted skiplist of (key, seq, value)"),
-`role` (why the reader needs to know it).
+#### Block sizing rules
 
-Skip when no new structures are introduced. A step that simply uses
-already-introduced structures may have zero entries.
+- **3–15 lines per block (the in-range core).** 5–10 is the sweet spot.
+- **Never a 1-line block** unless that single line is structurally
+  essential AND the surrounding logic already lives in adjacent blocks.
+  A bare `return value;` or a stand-alone `throw new Error(...)` is
+  almost never its own block — fold it into the neighboring block whose
+  decision produced it.
+- **Don't atomize** straight-line code into 5 single-statement blocks.
+  Merge contiguous lines that serve one concern (setup, emit, persist)
+  into one block.
+- **Don't lump** distinct phases together. A guard, the main logic,
+  and a cleanup are three different concerns — three blocks.
+- If you can describe a block in a single `one_liner` without using
+  "and", the size is right. If you keep wanting "and", split.
 
-### Phase 8 — Build factual context fields
+A function of 20–40 lines typically yields 3–6 blocks. A small helper
+of 5–8 lines may be a single block. A 100-line function should usually
+be split into multiple storylines or refactored conceptually — but if
+it must remain one column, expect 6–10 blocks.
 
-#### `usage_context` — "where this is called from in the larger system"
-- `primary_usage_scenario` — narrative: when this code is hit, what's
-  typically happening upstream
-- `callers` — file:line + snippet + context, for actual callers found
-  via grep. If callers can't be reliably located (dynamic dispatch,
-  external API), set `[]` and mention in `analysis`.
-- `call_patterns` — observed across callers: "always invoked with X",
-  "called once per request"
-- `implicit_dependencies` — other code that depends on the *behavior*
-  (not just signature) of this step's code
+#### Block coverage discipline
 
-#### `codebase_patterns`
-- `similar_code_elsewhere` — analogous places in the repo (file:line
-  + how it's analogous). Use grep aggressively.
-- `convention_alignment` — does this follow how similar things are
-  done elsewhere?
-- `deviations` — if it deviates, what and what's visible from code
-  about why
+Not every line needs to be in a block. Trivial connective lines
+(blank lines, single-statement loop tails, the closing brace of a
+guarded return) can be left ungrouped — they show up as **dimmed
+context** when the reader expands an adjacent block, because each
+block's `code_view` carries a wider line window than its `line_range`.
 
-#### `design_rationale`
-For non-trivial steps, list at least one alternative the design could
-have taken:
-- `approach` — description
-- `evidence_kind: "evidenced"` — visible in code/comments (commented-out
-  alternatives, header notes)
-- `evidence_kind: "analytical"` — reader-side reasoning; don't claim
-  the author considered it
-- `tradeoff_vs_chosen_design` — what's gained / lost vs the chosen
-  design
+But within a function, the *significant* logic should be covered.
+If a reader could ask "what does THIS chunk do?" and your blocks
+don't have an answer, you missed a block.
 
-This replaces v0.3's `alternative_approaches`. Same shape; reframed for
-reading mode (not "why was this PR's approach chosen" but "why does the
-existing code commit to this design").
+### Phase 7 — Author each block
 
-### Phase 9 — Identify prerequisites
+For every block:
 
-For each step, identify whether the reader needs to recall something
-from earlier:
-- A symbol introduced in an earlier step now used (`prior_step`)
-- A data structure defined earlier (`data_structure`)
-- An external concept (`external_concept`) — a known idiom, an
-  external library, a domain concept
+#### `id`
+Unique within the document (or at least within the storyline; prefer
+globally unique like `B1`, `B2`...). Edges and touches reference these.
 
-Be specific, not patronizing. Don't explain things the reader obviously
-knows. Do remind them of details from 5 minutes ago they might've forgotten.
+#### `phase`
+The id of one of the `diagram.phases` entries. Color-tags the block.
 
-### Phase 10 — Summary-depth storylines: minimum fields only
+#### `title`
+One- to three-word UPPERCASE label that names the role. Examples:
+`GUARD`, `BUILD EXECUTOR`, `MAIN LOGIC`, `EMIT`, `STATE RESET`,
+`ERROR PATH`, `CLASSIFY`, `PERSIST`, `RESOLVE`, `CLEANUP`.
+
+Bad titles: `Step 1`, `Lines 412-414`, `Function entry`, `Helper code`.
+
+#### `line_range`
+The **block core** range, formatted as `L<start>` or `L<start>–<end>`
+(use en-dash `–`, not hyphen). Examples: `L412–414`, `L419`,
+`L455–460`.
+
+This is the range shown on the block card. The `code_view` separately
+carries `context_start_line` / `context_end_line` which can be wider —
+include 1–4 lines of context above and below the block core so the
+reader sees how the block fits into the surrounding code.
+
+#### `one_liner`
+The text shown on the card face — 1–2 substantial sentences. **The
+reader should learn something useful from it without clicking to
+expand.** Capture WHAT this block does AND WHY this way.
+
+Good: *"Only one active turn at a time — overlapping runs would race
+on the streaming message buffer and the abort controller."*
+
+Bad (label, not explanation): *"Guard against re-entry."*
+Bad (just what, no why): *"Checks if activeRun is non-null."*
+
+#### `code_view`
+The single FileView for this block's code:
+- `file`, `language`
+- `context_start_line` / `context_end_line` — the wider window shown
+  when the reader expands the block (typically `line_range` ± 1–4
+  lines on each side)
+- `lines[]` — every line in `[context_start_line, context_end_line]`
+  with `line_num`, `content`, `change: "unchanged"`
+
+#### `right_panel`
+
+The content the dock shows when the block is the dock's focus.
+
+- `what_it_does` — paragraph (2–4 sentences). Factual restatement of
+  the mechanics: what fields are read/written, what calls are made,
+  what events emit. Slightly longer and more concrete than `one_liner`.
+- `why_its_here` — paragraph (2–4 sentences). The **design rationale**.
+  Why does this block exist at this position in the flow? What would
+  break or be worse if it didn't? Lean on the storyline's
+  `mental_model_anchor` and `change_overview` for framing.
+- `touches[]` — 0–6 chips: symbols this block interacts with. Each:
+  - `label` — the symbol name (e.g. `handleRunFailure`,
+    `controller.signal.aborted`, `this.activeRun`)
+  - `kind` — `function | type | variable | external`
+  - `block` — when the touched symbol resolves to **another block in
+    this same diagram** (e.g. a function the block calls IS another
+    column's first block), set `block` to that block's id. The chip
+    becomes clickable; clicking jumps to that block.
+  - Skip trivial touches. Don't list every variable read. List the
+    symbols the reader needs to remember to understand the block.
+- `failure_mode[]` — 0–3 bullets: what can go wrong here, OR an
+  explicit non-failure claim (e.g. *"No throw — handled & emitted as
+  synthetic message."*). Skip on truly benign blocks.
+
+Optional extras (populate when substantive, omit otherwise):
+- `invariants` — things that must always hold at this block (1–3 max)
+- `key_data_structures` — only for blocks that introduce a structure
+  the reader must keep in head
+- `prerequisites` — pointers to earlier blocks / data structures /
+  external concepts the reader needs to recall. Use `kind: prior_block`
+  + `reference_id: <block_id>` when pointing within the same diagram.
+
+### Phase 8 — Identify edges
+
+Edges visualize **cross-block control flow that matters for
+understanding the lifecycle.** Don't draw an edge for every call —
+draw the structural ones.
+
+#### When to draw an edge
+
+- A function in column A calls a function in column B (the call IS the
+  storyline's structure): edge from A's "handoff" block to B's first
+  block. Label `CALL`. Style: solid.
+- A `try { … } catch { F }` where the catch dispatches to a function in
+  another column: edge from the try block to the catch handler's first
+  block. Label `CATCH`. Style: solid. Color: red (`#c54343`).
+- A `try { … } finally { G }` where the finally calls another column's
+  function: edge from the try block to that finalizer's first block.
+  Label `FINALLY`. Style: dashed. Color: purple (`#7a5cc4`).
+- An event/callback registration that fires into another column: edge
+  with label `EMIT` or `CALLBACK`. Style: dashed.
+- Early-return / cancellation paths that hop to a finalizer: dashed.
+
+#### When NOT to draw an edge
+
+- Reading a shared variable that another block also reads. Use a
+  `touch` chip instead.
+- A call into a third-party / external function. Not on the canvas →
+  no edge.
+- A call from a block to the very next block in the SAME column. The
+  column's top-to-bottom reading order already implies sequence.
+
+#### Cap
+
+3–6 edges per diagram. More than 8 edges = unreadable. If you find
+yourself wanting more, the columns probably need restructuring.
+
+Color defaults:
+- `red` (#c54343): exception / error paths
+- `purple` (#7a5cc4): finally / post-condition / cleanup
+- `green` (#2f7a2f): synchronous happy-path calls
+- `gray` (#777, the default): generic flow
+
+### Phase 9 — Summary-depth storylines: minimum fields only
 
 For `depth: "summary"` storylines, populate only:
 - `id`, `title`, `kind`, `depth`, `importance_scores`
 - `summary` (one paragraph — what this storyline is, in plain language)
 - `files_touched`
 
-Omit `steps`, `mental_model_anchor`, `purpose`, `architectural_context`,
-`change_overview`, `reading_roadmap`. The user can always promote a
-summary storyline later — render `summary` to be useful even on its own.
+Omit `diagram`, `mental_model_anchor`, `purpose`,
+`architectural_context`, `change_overview`. The reader can promote a
+summary later — render `summary` to be useful even on its own.
 
-### Phase 11 — Validate and emit JSON
+### Phase 10 — Validate and emit JSON
 
-Validate:
-- Every step `id` unique
-- Every `prerequisites[].reference_id` of kind `prior_step` resolves to
-  a step that exists in the document
-- Every full-depth step has non-empty `code_view.primary_changes`
-- Every full-depth storyline has non-null `mental_model_anchor`
+Validate before emitting:
+- Every block `id` unique within its diagram
+- Every `edges[].from` and `edges[].to` resolves to a block in the
+  same diagram
+- Every `right_panel.touches[].block` (when non-null) resolves to a
+  block in the same diagram
+- Every `right_panel.prerequisites[].reference_id` of kind
+  `prior_block` resolves to a block in the same diagram
+- Every full-depth storyline has non-null `mental_model_anchor`,
+  non-empty `diagram.cols`, and at least 3 blocks total
 - Every storyline's `importance_scores.total` equals the sum of its
   four sub-scores
 - `scope.mode` is `"files"` or `"topic"`
 
 Emit one JSON document. No prose around it. No code fences. Just JSON.
 
-## Calibration: what "enough context" looks like
+## Calibration: what "enough" looks like
 
-A reader going through the document should be able to:
-1. **Understand each storyline's idea** without reading the code
-   (because `mental_model_anchor` + `change_overview` cover it)
-2. **Hold the right nouns in their head** while reading code (because
-   `key_data_structures` covers it)
-3. **Trust their reading** as they go (because `invariants` covers what
-   must always hold, so they can sanity-check)
-4. **Connect the code to the system** (because `usage_context` covers it)
-5. **Compare against the codebase** (because `codebase_patterns` covers it)
-6. **Reason about why the design is what it is** (because
-   `design_rationale` covers it)
+A reader scanning the rendered diagram should be able to:
+1. **Read the storyline as a single picture** — the columns, the phase
+   tags, the edges tell the lifecycle without expanding any block.
+2. **Understand any block's role** from its title + one_liner alone,
+   before clicking to see code or the right-panel.
+3. **Click any block and learn the design rationale** — `why_its_here`
+   should answer "why does this exist HERE?" not just "what does it do?".
+4. **Hold the right nouns in their head** while reading code (because
+   `mental_model_anchor` + occasional `key_data_structures` cover it).
+5. **Trace control flow** between columns via edges, with labels making
+   the relationship clear (CALL / CATCH / FINALLY / EMIT).
 
-If after reading your document the reader would still need to grep the
-codebase to feel confident, you didn't research deep enough.
+If after scanning your diagram a reader would still need to grep the
+codebase to feel confident about the storyline, you didn't research
+deep enough or your blocks aren't carrying enough rationale.
 
 ## Common failure modes
 
-- **Generic mental_model_anchor**: "This handles X" is a description,
-  not an anchor. The anchor must be a *picture* the reader can hold.
-- **Storyline-per-file**: ignoring that storylines should be *ideas*,
+- **Tiny blocks (1–2 lines each).** Re-merge. A 1-line block must be
+  structurally essential, not just "a line I want to point at".
+- **Mega blocks (20+ lines).** Re-split. If you can't summarize in
+  one sentence without "and", it's two blocks.
+- **Block titles that just say `STEP 1` / `BLOCK A`.** Title = role
+  (GUARD, EMIT, CLEANUP), not a sequence number.
+- **`one_liner` that's a label** ("Initialize controller"). Make it a
+  rationale ("AbortController is created here so the same controller
+  can later be cancelled from agent.abort() without re-plumbing.").
+- **Generic `mental_model_anchor`** ("This handles X"). Not an anchor.
+  An anchor is a *picture* — a metaphor, an analogy, a structural shape.
+- **Storyline-per-file** — ignoring that storylines should be *ideas*,
   not files. Reorganize.
-- **Walkthrough as line-by-line narration**: the heuristic is "does this
-  build the reader's mental model?" Most lines do not.
-- **Missing the why for design choices**: if you skip
-  `design_rationale`, the reader is stuck wondering "why this and not
-  the obvious other thing?"
-- **Importance scoring as vibes**: every score must map to the rubric.
-  When in doubt, default to 2 and only assign 3 with a one-line reason.
-- **Going deep without scope confirmation in Mode B**: the
-  stop-and-confirm step is non-negotiable.
-- **Padded analysis on trivial code**: a getter function does not need
-  invariants, design_rationale, or analysis. Set them empty/null.
+- **Edges everywhere.** Cap at ~6. If you have more, columns are
+  wrong — restructure.
+- **Phases used for layout.** Phases are color tags. Blocks within a
+  column appear in authored order, NOT grouped by phase. If you wanted
+  rows-of-phase alignment, that's not the model — pick a different
+  diagram shape (different `cols`) instead.
+- **Padded `right_panel` on trivial blocks.** A bare guard checking
+  `if (closed) throw` does not need `invariants`, `key_data_structures`,
+  or `prerequisites`. Set them empty / omit.
+- **Importance scoring as vibes.** Every score maps to the rubric.
+  Default to 2; only assign 3 with a one-line reason.
+- **Going deep without scope confirmation in Mode B.** Stop-and-confirm
+  is non-negotiable.
 
 ## Length expectations
 
-For a complex full-depth step in a non-trivial codebase:
-- `mental_model_anchor` (storyline-level): 1–3 sentences, vivid
-- `summary` (step-level): 1–3 sentences, factual
-- `invariants`: 1–4 items
-- `key_data_structures`: 0–3 items
-- `walkthrough[]`: 2–5 annotations on a 30-line function
-- `usage_context.callers`: 1–5 entries when locatable
-- `codebase_patterns`: 1–3 findings
-- `design_rationale`: 1–3 alternatives
-- `analysis`: a paragraph when notable; null when not
+For a complex full-depth storyline in a non-trivial codebase:
+- `mental_model_anchor`: 1–3 sentences, vivid
+- `change_overview`: 2–4 paragraphs
+- `diagram.cols`: 2–5 columns (3–4 most common)
+- `diagram.phases`: 3–6 phases
+- `diagram.edges`: 3–6 edges (sometimes 0 if storyline is a single
+  vertical column with no cross-flow)
+- blocks per column: 3–6 (smaller helpers may have just 1–2)
+- `block.one_liner`: 1–2 sentences
+- `right_panel.what_it_does`: 2–4 sentences
+- `right_panel.why_its_here`: 2–4 sentences
+- `right_panel.touches`: 0–6 chips
+- `right_panel.failure_mode`: 0–3 bullets
+- `right_panel.invariants`: 0–3 items (often 0)
 
-For trivial steps (mechanical helper, standard pattern), most fields
-can be brief or null. Calibrate.
+For trivial storylines (mechanical helpers, standard patterns),
+prefer `depth: "summary"`. Don't author a diagram you wouldn't enjoy
+reading.
 
 ## Output format
 
-Emit only the JSON document. No surrounding prose. The skill's `render.py`
-will inject your JSON into the HTML template.
+Emit only the JSON document. No surrounding prose. The skill's
+`render.py` will inject it into the HTML template; any non-JSON
+output corrupts the rendered file.
