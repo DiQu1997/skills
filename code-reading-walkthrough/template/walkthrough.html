@@ -187,7 +187,11 @@
     border-color: #c9cdd2;
     box-shadow: var(--shadow-md);
   }
-  .block.selected {
+  .block.expanded {
+    border-color: #b9bfc7;
+    box-shadow: var(--shadow-md);
+  }
+  .block.focused {
     border-color: var(--border-strong);
     border-width: 2px;
     padding: 11px 13px;
@@ -609,7 +613,8 @@
   const state = {
     view: 'overview',
     storylineId: null,
-    selectedBlockId: null,
+    expandedBlockIds: [],    // independent toggle per block, click order
+    focusedBlockId: null,    // which block's content fills the dock
 
     liveMode: false,
     serverInfo: null,
@@ -626,7 +631,8 @@
       localStorage.setItem(STORAGE_PREFIX + 'view', JSON.stringify({
         view: state.view,
         storylineId: state.storylineId,
-        selectedBlockId: state.selectedBlockId,
+        expandedBlockIds: state.expandedBlockIds,
+        focusedBlockId: state.focusedBlockId,
       }));
     } catch (e) {}
   }
@@ -636,6 +642,7 @@
       if (!raw) return;
       const v = JSON.parse(raw);
       Object.assign(state, v);
+      if (!Array.isArray(state.expandedBlockIds)) state.expandedBlockIds = [];
     } catch (e) {}
   }
 
@@ -819,9 +826,13 @@
   function renderBlock(block, storyline) {
     const phaseDef = getPhaseDef(storyline, block.phase);
     const { bg, fg } = phaseColorVars(phaseDef?.color ?? block.phase);
-    const isSelected = state.selectedBlockId === block.id;
+    const isExpanded = state.expandedBlockIds.includes(block.id);
+    const isFocused = state.focusedBlockId === block.id;
+    const cls = ['block'];
+    if (isFocused) cls.push('focused');
+    if (isExpanded) cls.push('expanded');
     return `
-      <div class="block${isSelected ? ' selected' : ''}" data-block-id="${escapeAttr(block.id)}"
+      <div class="${cls.join(' ')}" data-block-id="${escapeAttr(block.id)}"
            data-phase="${escapeAttr(block.phase)}"
            style="--phase-bg:${bg};--phase-fg:${fg};">
         <div class="block-head">
@@ -830,7 +841,7 @@
         </div>
         <div class="block-title">${escapeHtml(block.title || '')}</div>
         <div class="block-one-liner">${escapeHtml(block.one_liner || '')}</div>
-        ${isSelected ? renderBlockCode(block) : ''}
+        ${isExpanded ? renderBlockCode(block) : ''}
       </div>
     `;
   }
@@ -859,14 +870,55 @@
     document.querySelectorAll('#canvas .block').forEach(el => {
       el.onclick = (e) => {
         e.stopPropagation();
-        selectBlock(el.dataset.blockId);
+        toggleBlock(el.dataset.blockId);
       };
     });
   }
 
-  // -------- Selection --------
-  function selectBlock(id) {
-    state.selectedBlockId = (state.selectedBlockId === id) ? null : id;
+  // -------- Block toggle --------
+  // Click toggles a block's expansion independently. Focus (= dock content)
+  // follows the most recent expand. If the focused block is collapsed, focus
+  // walks back to whatever was expanded just before; if nothing's expanded,
+  // the dock closes.
+  function toggleBlock(id) {
+    const idx = state.expandedBlockIds.indexOf(id);
+    if (idx >= 0) {
+      state.expandedBlockIds.splice(idx, 1);
+      if (state.focusedBlockId === id) {
+        state.focusedBlockId = state.expandedBlockIds.length
+          ? state.expandedBlockIds[state.expandedBlockIds.length - 1]
+          : null;
+      }
+    } else {
+      state.expandedBlockIds.push(id);
+      state.focusedBlockId = id;
+    }
+    saveState();
+    renderStoryline();
+    renderDock();
+    requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+  }
+
+  function focusBlock(id, { expand = true } = {}) {
+    if (expand && !state.expandedBlockIds.includes(id)) {
+      state.expandedBlockIds.push(id);
+    }
+    state.focusedBlockId = id;
+    saveState();
+    renderStoryline();
+    renderDock();
+    requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+  }
+
+  function closeDock() {
+    state.focusedBlockId = null;
+    saveState();
+    renderDock();
+  }
+
+  function collapseAll() {
+    state.expandedBlockIds = [];
+    state.focusedBlockId = null;
     saveState();
     renderStoryline();
     renderDock();
@@ -920,13 +972,13 @@
   // -------- Dock --------
   function renderDock() {
     const dock = document.getElementById('dock');
-    if (!state.selectedBlockId) {
+    if (!state.focusedBlockId) {
       dock.classList.remove('open');
       dock.innerHTML = '';
       return;
     }
     const storyline = getStoryline(state.storylineId);
-    const hit = findBlock(storyline, state.selectedBlockId);
+    const hit = findBlock(storyline, state.focusedBlockId);
     if (!hit) { dock.classList.remove('open'); dock.innerHTML = ''; return; }
     const { block, col } = hit;
     const phaseDef = getPhaseDef(storyline, block.phase);
@@ -949,7 +1001,7 @@
       ${renderQASection(block, storyline, col)}
     `;
     dock.classList.add('open');
-    document.getElementById('dock-close').onclick = () => selectBlock(state.selectedBlockId);
+    document.getElementById('dock-close').onclick = () => closeDock();
     bindTouchClicks();
     bindPrereqClicks();
     bindQAControls(block, storyline, col);
@@ -1012,13 +1064,7 @@
       el.onclick = () => {
         const id = el.dataset.touchBlock;
         if (!id) return;
-        if (state.selectedBlockId !== id) {
-          state.selectedBlockId = id;
-          saveState();
-          renderStoryline();
-          renderDock();
-          requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
-        }
+        focusBlock(id);
         scrollBlockIntoView(id);
       };
     });
@@ -1028,13 +1074,7 @@
       el.onclick = () => {
         const id = el.dataset.prereqBlock;
         if (!id) return;
-        if (state.selectedBlockId !== id) {
-          state.selectedBlockId = id;
-          saveState();
-          renderStoryline();
-          renderDock();
-          requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
-        }
+        focusBlock(id);
         scrollBlockIntoView(id);
       };
     });
@@ -1216,19 +1256,22 @@
   function goToOverview() {
     state.view = 'overview';
     state.storylineId = null;
-    state.selectedBlockId = null;
+    state.expandedBlockIds = [];
+    state.focusedBlockId = null;
     saveState();
     render();
   }
   function goToStoryline(id) {
     state.view = 'storyline';
     state.storylineId = id;
-    state.selectedBlockId = null;
+    state.expandedBlockIds = [];
+    state.focusedBlockId = null;
     saveState();
     render();
   }
   function resetView() {
-    state.selectedBlockId = null;
+    state.expandedBlockIds = [];
+    state.focusedBlockId = null;
     saveState();
     if (state.view === 'storyline') {
       renderStoryline();
@@ -1245,7 +1288,8 @@
       const tag = document.activeElement?.tagName;
       if (tag === 'TEXTAREA' || tag === 'INPUT') return;
       if (e.key === 'Escape') {
-        if (state.selectedBlockId) { state.selectedBlockId = null; saveState(); renderStoryline(); renderDock(); requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId))); }
+        if (state.focusedBlockId) closeDock();
+        else if (state.expandedBlockIds.length) collapseAll();
         else if (state.view === 'storyline') goToOverview();
         return;
       }
@@ -1253,15 +1297,11 @@
       if ((e.key === 'j' || e.key === 'k') && state.view === 'storyline') {
         const ids = collectBlockIds(getStoryline(state.storylineId));
         if (!ids.length) return;
-        const idx = ids.indexOf(state.selectedBlockId);
+        const idx = ids.indexOf(state.focusedBlockId);
         const next = e.key === 'j' ? (idx < 0 ? 0 : Math.min(ids.length - 1, idx + 1)) : Math.max(0, idx - 1);
         const id = ids[next];
-        state.selectedBlockId = id;
-        saveState();
-        renderStoryline();
-        renderDock();
+        focusBlock(id);
         scrollBlockIntoView(id);
-        requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
       }
     });
   }
@@ -1314,7 +1354,8 @@
     if (state.view === 'storyline' && !getStoryline(state.storylineId)) {
       state.view = 'overview';
       state.storylineId = null;
-      state.selectedBlockId = null;
+      state.expandedBlockIds = [];
+      state.focusedBlockId = null;
     }
     render();
     bindKeyboard();
