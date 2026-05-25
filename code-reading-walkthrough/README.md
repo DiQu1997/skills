@@ -62,13 +62,30 @@ challenge the picks.
 
 ```bash
 python3 render.py demo/sample_walkthrough.json demo/sample_walkthrough.html
-open demo/sample_walkthrough.html  # or xdg-open / open in browser manually
+
+# Static — open the file directly, no Q&A:
+open demo/sample_walkthrough.html
+
+# OR live — companion server enables a 💬 Q&A section per step:
+python3 server/live_walkthrough.py demo/sample_walkthrough.html
+# Detached server stays up after this script exits. Stop with:
+#   python3 server/live_walkthrough.py --stop demo/sample_walkthrough.html
 ```
 
 The demo is a Mode A walkthrough of `code-review-narrative` itself —
 storyline-grouping the JSON contract, the analysis prompt, the render
 pipeline, the template architecture, and the v0.3 walkthrough-annotation
 system. Four full-depth storylines + three summary cards.
+
+## Live mode
+
+The static HTML works standalone. Live mode is an opt-in layer: the
+page detects the companion `server/live_server.py` via `/__alive` and
+reveals a per-step chat input. Questions go to `POST /ask`, which shells
+out to `codex exec` (default) or `claude -p` (`--cli claude`); answers
+persist in a sidecar `<basename>.followups.json` next to the HTML and
+re-load on revisit. Concurrency is capped (default 2 in-flight calls)
+and the server binds 127.0.0.1 only — do not expose beyond loopback.
 
 ## Files
 
@@ -81,7 +98,12 @@ code-reading-walkthrough/
 │   ├── schema.md                   ← v0.4-reading JSON schema
 │   └── analyze_code.md             ← analysis prompt with two-mode scoping
 ├── template/
-│   └── walkthrough.html            ← single-file HTML/CSS/JS template
+│   └── walkthrough.html            ← single-file HTML/CSS/JS template (live-mode chat input baked in)
+├── server/
+│   ├── live_server.py              ← Q&A HTTP server (/__alive, /followups, /ask)
+│   ├── live_walkthrough.py         ← wrapper: starts/reuses server, opens browser
+│   └── prompts/
+│       └── followup_prompt.md      ← reading-mode follow-up prompt template
 └── demo/
     ├── sample_walkthrough.json     ← v0.4-reading demo data
     └── sample_walkthrough.html     ← rendered output

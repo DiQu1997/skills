@@ -281,7 +281,88 @@
     margin-left: 6px; font-weight: 400;
   }
 
-  /* ========== Walkthrough annotations ========== */
+  /* ========== Syntax highlighting ========== */
+  .sh-kw  { color: #cf222e; font-weight: 600; }
+  .sh-ty  { color: #8250df; }
+  .sh-str { color: #0a3069; }
+  .sh-num { color: #0550ae; }
+  .sh-cmt { color: #6e7781; font-style: italic; }
+  .sh-pp  { color: #953800; }
+  .sh-fn  { color: #8250df; }
+  .sh-op  { color: #24292f; }
+
+  /* ========== v0.4: Semantic block chunking ========== */
+
+  /* --- Preamble region (lines outside any walkthrough chunk) --- */
+  .code-table tr.preamble-line td.line-content { opacity: 0.5; }
+  .code-table tr.preamble-line td.line-num     { opacity: 0.45; }
+  .code-table tr.preamble-line td.change-marker{ opacity: 0.45; }
+
+  /* --- Semantic block wrapper --- */
+  .semantic-block {
+    border: 2px solid #d0d7de;
+    border-radius: 6px;
+    margin: 8px 6px;
+    overflow: hidden;
+    background: #ffffff;
+    transition: border-color 0.15s;
+  }
+  .semantic-block:hover { border-color: #0969da; }
+
+  .semantic-block-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px;
+    background: #f0edff;
+    border-bottom: 1px solid #e0daf5;
+    font-size: 11px;
+  }
+  .sb-chunk-role {
+    font-weight: 700; color: #6f42c1;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .sb-line-range {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: #656d76;
+  }
+
+  .semantic-block .code-table { margin: 0; }
+
+  /* --- Inline explanation panel --- */
+  .sb-explanation {
+    padding: 10px 16px;
+    background: #f8f5ff;
+    border-top: 1px solid #e0daf5;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #24292f;
+  }
+  .file-block.compact-mode .sb-explanation { display: none; }
+
+  /* --- Mode toggle controls --- */
+  .wt-controls {
+    padding: 4px 12px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #eaeef2;
+    display: flex; justify-content: flex-end; gap: 8px;
+    align-items: center;
+  }
+  .wt-controls button {
+    font-size: 10px; font-family: inherit;
+    background: none; border: 1px solid #d0d7de;
+    border-radius: 4px; padding: 2px 8px;
+    cursor: pointer; color: #656d76;
+  }
+  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
+  .wt-controls button.active-mode {
+    background: #ddf4ff; border-color: #0969da; color: #0969da;
+    font-weight: 600;
+  }
+  .wt-mode-label {
+    font-size: 10px; color: #656d76;
+    margin-right: 4px;
+  }
+
+  /* Legacy annotation styles (fallback) */
   .wt-annotation {
     background: #f8f5ff;
     border-left: 3px solid #c9b8ff;
@@ -314,21 +395,6 @@
     line-height: 1.55;
   }
   .wt-annotation.wt-collapsed .wt-explanation { display: none; }
-
-  .wt-controls {
-    padding: 4px 12px;
-    background: #f6f8fa;
-    border-bottom: 1px solid #eaeef2;
-    display: flex; justify-content: flex-end; gap: 8px;
-  }
-  .wt-controls button {
-    font-size: 10px; font-family: inherit;
-    background: none; border: 1px solid #d0d7de;
-    border-radius: 4px; padding: 2px 8px;
-    cursor: pointer; color: #656d76;
-  }
-  .wt-controls button:hover { background: #eaeef2; color: #1a1a1a; }
-
   .wt-annotation-cell { padding: 0 !important; border: none !important; }
 
   /* ========== Step navigation footer ========== */
@@ -937,6 +1003,164 @@
   .step-diagram-legend .legend-line.dashed {
     border-top-style: dashed; border-top-color: #6f42c1;
   }
+
+  /* ========== Live-mode Q&A section ========== */
+  .analysis-section.qa { border-left-color: #1f883d; }
+  .analysis-section.qa .section-title { color: #1a7f37; }
+  .analysis-section.qa .section-header { background: #f6fff8; }
+
+  .qa-input-row {
+    display: flex; flex-direction: column; gap: 6px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed #d0d7de;
+  }
+  .qa-textarea {
+    width: 100%;
+    min-height: 56px;
+    max-height: 200px;
+    resize: vertical;
+    padding: 8px 10px;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #1a1a1a;
+    background: #ffffff;
+  }
+  .qa-textarea:focus {
+    outline: none;
+    border-color: #0969da;
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.15);
+  }
+  .qa-textarea:disabled {
+    background: #f6f8fa; color: #656d76;
+  }
+  .qa-input-controls {
+    display: flex; align-items: center; gap: 8px;
+    justify-content: space-between;
+  }
+  .qa-hint {
+    font-size: 10.5px; color: #656d76;
+  }
+  .qa-ask-btn {
+    padding: 5px 14px;
+    background: #1a7f37; color: white;
+    border: 1px solid #1a7f37; border-radius: 4px;
+    font-size: 12px; font-weight: 600;
+    font-family: inherit; cursor: pointer;
+  }
+  .qa-ask-btn:hover:not(:disabled) { background: #1f883d; }
+  .qa-ask-btn:disabled {
+    background: #94d3a2; border-color: #94d3a2; cursor: not-allowed;
+  }
+  .qa-cancel-btn {
+    padding: 5px 10px;
+    background: #ffffff; color: #cf222e;
+    border: 1px solid #d0d7de; border-radius: 4px;
+    font-size: 11px; font-family: inherit; cursor: pointer;
+  }
+  .qa-cancel-btn:hover { border-color: #cf222e; }
+
+  .qa-pending {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    background: #f6fff8;
+    border-left: 3px solid #1f883d;
+    border-radius: 0 4px 4px 0;
+    font-size: 12px; color: #1a7f37;
+    margin-bottom: 10px;
+  }
+  .qa-spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid #aceebb;
+    border-top-color: #1a7f37;
+    border-radius: 50%;
+    animation: qa-spin 0.7s linear infinite;
+  }
+  @keyframes qa-spin { to { transform: rotate(360deg); } }
+  .qa-elapsed {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: #656d76;
+  }
+
+  .qa-error {
+    padding: 8px 10px;
+    background: #ffebe9;
+    border-left: 3px solid #cf222e;
+    border-radius: 0 4px 4px 0;
+    font-size: 12px; color: #82071e;
+    margin-bottom: 10px;
+    word-break: break-word;
+  }
+
+  .qa-list { display: flex; flex-direction: column; gap: 12px; }
+  .qa-item {
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+  .qa-item-question {
+    padding: 8px 10px;
+    background: #f6f8fa;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #1a1a1a;
+    border-bottom: 1px solid #eaeef2;
+    word-break: break-word;
+  }
+  .qa-item-question::before { content: '❯ '; color: #1a7f37; font-weight: 700; }
+  .qa-item-answer {
+    padding: 10px 12px;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .qa-item-answer p { margin-bottom: 8px; }
+  .qa-item-answer p:last-child { margin-bottom: 0; }
+  .qa-item-answer ul, .qa-item-answer ol {
+    margin-left: 20px; margin-bottom: 8px;
+  }
+  .qa-item-answer li { margin-bottom: 4px; }
+  .qa-item-answer pre {
+    background: #f6f8fa;
+    padding: 8px 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    margin: 6px 0;
+  }
+  .qa-item-answer code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.92em;
+    background: rgba(0,0,0,0.05);
+    padding: 1px 4px; border-radius: 3px;
+  }
+  .qa-item-answer pre code { background: transparent; padding: 0; }
+  .qa-item-meta {
+    padding: 4px 10px;
+    background: #fafbfc;
+    border-top: 1px solid #eaeef2;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    color: #656d76;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  }
+
+  /* Live/static badge in left pane header */
+  .live-badge {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 10px; font-weight: 700;
+    padding: 1px 6px; border-radius: 8px;
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .live-badge.live   { background: #dafbe1; color: #1a7f37; }
+  .live-badge.static { background: #eaeef2; color: #656d76; }
 
 </style>
 </head>
@@ -3998,6 +4222,12 @@
     currentStorylineId: null,
     currentStepId: null,
     sectionCollapsed: {},
+
+    // Live mode (companion server detected via /__alive)
+    liveMode: false,
+    serverInfo: null,        // { cli, model, walkthrough_key, ... } when liveMode
+    followups: {},           // { [stepId]: [qaEntry, ...] } newest-first
+    pendingAsk: null,        // { stepId, storylineId, question, startedAt, controller, error }
   };
 
   // Default-collapsed sections (others default-expanded). Reading-mode set:
@@ -4075,6 +4305,98 @@
       .replace(/'/g, '&#39;');
   }
 
+  // ========== Syntax highlighting ==========
+  const _SH_KEYWORDS = new Set([
+    'auto','break','case','catch','class','const','constexpr','continue',
+    'default','delete','do','else','enum','explicit','export','extern',
+    'false','final','for','friend','goto','if','inline','mutable',
+    'namespace','new','noexcept','nullptr','operator','override',
+    'private','protected','public','register','return','sizeof','static',
+    'static_assert','struct','switch','template','this','throw','true',
+    'try','typedef','typename','union','using','virtual','void','volatile',
+    'while','yield',
+    'async','await','const','debugger','export','extends','function',
+    'import','in','instanceof','let','of','super','typeof','var',
+    'and','as','assert','async','await','class','def','del','elif',
+    'except','finally','from','global','import','in','is','lambda',
+    'nonlocal','not','or','pass','raise','with',
+    'chan','defer','fallthrough','func','go','interface','map','package',
+    'range','select','type',
+    'crate','dyn','fn','impl','let','loop','match','mod','move','mut',
+    'pub','ref','self','Self','trait','unsafe','use','where',
+    'abstract','boolean','byte','extends','final','implements','interface',
+    'native','package','synchronized','throws','transient',
+  ]);
+
+  const _SH_TYPES = new Set([
+    'int','long','short','float','double','char','bool','unsigned','signed',
+    'int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t',
+    'size_t','ssize_t','ptrdiff_t','uintptr_t',
+    'string','String','str','Vec','Box','Option','Result','HashMap','HashSet',
+    'Array','Map','Set','Promise','Iterator',
+    'std','vector','unordered_map','shared_ptr','unique_ptr',
+    'i8','i16','i32','i64','u8','u16','u32','u64','f32','f64','usize','isize',
+    'any','never','unknown','undefined','null','None','True','False',
+    'number','boolean','object','symbol','bigint',
+  ]);
+
+  let _shMultilineComment = false;
+  function resetHighlightState() { _shMultilineComment = false; }
+
+  function highlightLine(raw, lang) {
+    if (raw == null) return '';
+    let s = escapeHtml(raw);
+    if (!s.trim()) return s;
+    const PH = [];
+    let out = '';
+    if (_shMultilineComment) {
+      const endIdx = s.indexOf('*/');
+      if (endIdx === -1) return `<span class="sh-cmt">${s}</span>`;
+      out += `<span class="sh-cmt">${s.slice(0, endIdx + 2)}</span>`;
+      s = s.slice(endIdx + 2);
+      _shMultilineComment = false;
+      if (!s) return out;
+    }
+    function ph(cls, text) {
+      const idx = PH.length;
+      PH.push(`<span class="${cls}">${text}</span>`);
+      return `\x00${idx}\x00`;
+    }
+    if (/^\s*#(include|define|ifdef|ifndef|endif|pragma|if|else|elif|undef|error|warning)/.test(s))
+      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    if (/^\s*@\w/.test(s) && (lang === 'python' || lang === 'py'))
+      return out + ph('sh-pp', s).replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    s = s.replace(/&quot;((?:[^&]|&(?!quot;))*)&quot;/g, (m) => ph('sh-str', m));
+    s = s.replace(/&#39;((?:[^&]|&(?!#39;))*)&#39;/g, (m) => ph('sh-str', m));
+    s = s.replace(/`([^`]*)`/g, (m) => ph('sh-str', escapeHtml(m)));
+    s = s.replace(/(\/\/.*)$/, (m) => ph('sh-cmt', m));
+    if (['python','py','ruby','rb','shell','bash','sh','yaml','yml','toml'].includes(lang))
+      s = s.replace(/(#.*)$/, (m) => ph('sh-cmt', m));
+    const mlStart = s.indexOf('/*');
+    if (mlStart !== -1) {
+      const mlEnd = s.indexOf('*/', mlStart + 2);
+      if (mlEnd !== -1) {
+        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart, mlEnd + 2)) + s.slice(mlEnd + 2);
+      } else {
+        _shMultilineComment = true;
+        s = s.slice(0, mlStart) + ph('sh-cmt', s.slice(mlStart));
+      }
+    }
+    s = s.replace(/\b(0x[0-9a-fA-F]+[uUlL]*)\b/g, '<span class="sh-num">$1</span>');
+    s = s.replace(/\b(\d+\.?\d*(?:[eE][+-]?\d+)?[fFlLuU]*)\b/g, '<span class="sh-num">$1</span>');
+    s = s.replace(/\b([a-zA-Z_]\w*)\b/g, (m, w) => {
+      if (_SH_KEYWORDS.has(w)) return `<span class="sh-kw">${w}</span>`;
+      if (_SH_TYPES.has(w)) return `<span class="sh-ty">${w}</span>`;
+      return m;
+    });
+    s = s.replace(/\b([a-zA-Z_]\w*)\s*(?=\()/g, (m, fn) => {
+      if (_SH_KEYWORDS.has(fn) || _SH_TYPES.has(fn)) return m;
+      return `<span class="sh-fn">${fn}</span>`;
+    });
+    s = s.replace(/\x00(\d+)\x00/g, (_, i) => PH[i]);
+    return out + s;
+  }
+
   function renderInlineMarkdown(s) {
     if (s == null) return '';
     let out = escapeHtml(s);
@@ -4085,6 +4407,44 @@
     } else {
       out = out.replace(/\n/g, '<br>');
     }
+    return out;
+  }
+
+  // Richer markdown renderer for Q&A answer bodies — handles fenced
+  // code blocks, bullet lists, and paragraphs. Used only for live-mode
+  // CLI replies, which come back in markdown.
+  function renderRichMarkdown(s) {
+    if (s == null) return '';
+    // 1. Extract fenced code blocks first to placeholders so their content
+    //    isn't touched by the other transforms.
+    const codeBlocks = [];
+    let body = String(s).replace(/```([a-zA-Z0-9_+\-]*)\n([\s\S]*?)```/g, (m, lang, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push({ lang: (lang || '').trim(), code });
+      return ` FENCED_${idx} `;
+    });
+    // 2. Now safely escape everything outside fences.
+    body = escapeHtml(body);
+    // 3. Inline markup (run BEFORE list/paragraph splitting so they nest).
+    body = body.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    body = body.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // 4. Convert paragraphs and bullet lists block-by-block.
+    const blocks = body.split(/\n{2,}/).map(block => {
+      const lines = block.split('\n');
+      const isBulletList = lines.length > 0 && lines.every(l => /^\s*[-*]\s+/.test(l));
+      if (isBulletList) {
+        const items = lines.map(l => l.replace(/^\s*[-*]\s+/, '')).map(li => `<li>${li}</li>`).join('');
+        return `<ul class="bullet-list">${items}</ul>`;
+      }
+      return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+    });
+    let out = blocks.join('');
+    // 5. Restore fenced code blocks (escape their content for safety).
+    out = out.replace(/ FENCED_(\d+) /g, (m, n) => {
+      const cb = codeBlocks[Number(n)];
+      const langAttr = cb.lang ? ` data-lang="${escapeHtml(cb.lang)}"` : '';
+      return `<pre><code${langAttr}>${escapeHtml(cb.code)}</code></pre>`;
+    });
     return out;
   }
 
@@ -4764,26 +5124,95 @@
     const refLabel = isReference ? '<span class="reference-label">reference</span>' : '';
     const why = isReference && fv.why_included ? `<div class="why-included">${escapeHtml(fv.why_included)}</div>` : '';
     const lineRange = `lines ${fv.context_start_line}–${fv.context_end_line}`;
+    const lang = (fv.language || '').toLowerCase();
 
     const fpHtml = renderFunctionPurpose(fv.function_purpose);
 
     const wt = fv.walkthrough || [];
-    const annByRowIndex = {};
-    wt.forEach(ann => {
-      let lastIdx = -1;
-      for (let i = 0; i < fv.lines.length; i++) {
-        if (fv.lines[i].line_num === ann.line_end) lastIdx = i;
-      }
-      if (lastIdx !== -1) annByRowIndex[lastIdx] = ann;
-    });
     const hasWt = wt.length > 0;
 
-    const wtControls = hasWt ? `
-      <div class="wt-controls">
-        <button onclick="toggleAllAnnotations('${blockId}', false)">Hide all</button>
-        <button onclick="toggleAllAnnotations('${blockId}', true)">Show all</button>
-      </div>` : '';
+    // --- v0.4: Semantic block rendering ---
+    if (hasWt) {
+      const sortedWt = [...wt].sort((a, b) => a.line_start - b.line_start);
 
+      const lineChunkMap = {};
+      sortedWt.forEach((ann, ci) => {
+        for (let ln = ann.line_start; ln <= ann.line_end; ln++) {
+          lineChunkMap[ln] = ci;
+        }
+      });
+
+      const segments = [];
+      let curSeg = null;
+      for (let i = 0; i < fv.lines.length; i++) {
+        const line = fv.lines[i];
+        const ci = lineChunkMap[line.line_num];
+        const segType = ci !== undefined ? 'chunk' : 'preamble';
+        const segKey = segType === 'chunk' ? ci : -1;
+
+        if (!curSeg || curSeg.type !== segType || curSeg.key !== segKey) {
+          curSeg = { type: segType, key: segKey, rows: [] };
+          segments.push(curSeg);
+        }
+        curSeg.rows.push(line);
+      }
+
+      const segParts = [];
+      segments.forEach(seg => {
+        resetHighlightState();
+        const rows = seg.rows.map(line => {
+          const cls = `line-${line.change}` + (seg.type === 'preamble' ? ' preamble-line' : '');
+          const marker = line.change === 'added' ? '+' : (line.change === 'removed' ? '−' : ' ');
+          return `<tr class="${cls}">
+            <td class="line-num">${line.line_num}</td>
+            <td class="change-marker">${marker}</td>
+            <td class="line-content">${highlightLine(line.content, lang)}</td>
+          </tr>`;
+        }).join('');
+
+        if (seg.type === 'preamble') {
+          segParts.push(`<table class="code-table">${rows}</table>`);
+        } else {
+          const ann = sortedWt[seg.key];
+          const rangeLabel = ann.line_start === ann.line_end
+            ? `Line ${ann.line_start}`
+            : `Lines ${ann.line_start}–${ann.line_end}`;
+          segParts.push(`
+            <div class="semantic-block">
+              <div class="semantic-block-header">
+                <span class="sb-chunk-role">${escapeHtml(ann.chunk_role)}</span>
+                <span class="sb-line-range">${rangeLabel}</span>
+              </div>
+              <table class="code-table">${rows}</table>
+              <div class="sb-explanation">${renderInlineMarkdown(ann.explanation)}</div>
+            </div>`);
+        }
+      });
+
+      const wtControls = `
+        <div class="wt-controls">
+          <span class="wt-mode-label">View:</span>
+          <button class="active-mode" onclick="setBlockMode('${blockId}', 'inline', this)">Inline</button>
+          <button onclick="setBlockMode('${blockId}', 'compact', this)">Compact</button>
+        </div>`;
+
+      return `
+        <div class="${klass}" id="${blockId}">
+          <div class="file-header">
+            <span class="file-path">${escapeHtml(fv.file)}</span>
+            <span style="color:#656d76; font-size: 11px;">${lineRange} · ${escapeHtml(fv.language)}</span>
+            ${refLabel}
+          </div>
+          ${why}
+          ${fpHtml}
+          ${wtControls}
+          <div class="semantic-blocks-container">${segParts.join('')}</div>
+        </div>
+      `;
+    }
+
+    // --- Fallback: no walkthrough chunks ---
+    resetHighlightState();
     const parts = [];
     for (let i = 0; i < fv.lines.length; i++) {
       const line = fv.lines[i];
@@ -4792,25 +5221,8 @@
       parts.push(`<tr class="${cls}">
         <td class="line-num">${line.line_num}</td>
         <td class="change-marker">${marker}</td>
-        <td class="line-content">${escapeHtml(line.content)}</td>
+        <td class="line-content">${highlightLine(line.content, lang)}</td>
       </tr>`);
-
-      const ann = annByRowIndex[i];
-      if (ann) {
-        const rangeLabel = ann.line_start === ann.line_end
-          ? `Line ${ann.line_start}`
-          : `Lines ${ann.line_start}–${ann.line_end}`;
-        parts.push(`<tr><td colspan="3" class="wt-annotation-cell">
-          <div class="wt-annotation" data-block-id="${blockId}">
-            <div class="wt-annotation-header">
-              <span class="wt-toggle" onclick="toggleAnnotation(this)">▾</span>
-              <span class="wt-line-range">${rangeLabel}</span>
-              <span class="wt-chunk-role">${escapeHtml(ann.chunk_role)}</span>
-            </div>
-            <div class="wt-explanation">${renderInlineMarkdown(ann.explanation)}</div>
-          </div>
-        </td></tr>`);
-      }
     }
 
     return `
@@ -4822,12 +5234,28 @@
         </div>
         ${why}
         ${fpHtml}
-        ${wtControls}
         <table class="code-table">${parts.join('')}</table>
       </div>
     `;
   }
 
+  // v0.4: Toggle between inline and compact mode for a file-block
+  function setBlockMode(blockId, mode, btnEl) {
+    const block = document.getElementById(blockId);
+    if (!block) return;
+    if (mode === 'compact') {
+      block.classList.add('compact-mode');
+    } else {
+      block.classList.remove('compact-mode');
+    }
+    const controls = block.querySelector('.wt-controls');
+    if (controls) {
+      controls.querySelectorAll('button').forEach(b => b.classList.remove('active-mode'));
+      if (btnEl) btnEl.classList.add('active-mode');
+    }
+  }
+
+  // Legacy toggle functions (kept for backward compat)
   function toggleAnnotation(toggleEl) {
     const ann = toggleEl.closest('.wt-annotation');
     ann.classList.toggle('wt-collapsed');
@@ -4866,6 +5294,158 @@
         <div class="section-body">${contentHtml}</div>
       </div>
     `;
+  }
+
+  // ========== Live-mode Q&A ==========
+
+  function formatRelTime(iso) {
+    if (!iso) return '';
+    try {
+      const t = new Date(iso).getTime();
+      const now = Date.now();
+      const dsec = Math.max(0, Math.round((now - t) / 1000));
+      if (dsec < 60) return `${dsec}s ago`;
+      if (dsec < 3600) return `${Math.round(dsec/60)}m ago`;
+      if (dsec < 86400) return `${Math.round(dsec/3600)}h ago`;
+      return new Date(iso).toLocaleDateString();
+    } catch (_) { return iso; }
+  }
+
+  function renderQAItem(qa) {
+    const meta = [
+      formatRelTime(qa.asked_at),
+      qa.cli ? `${qa.cli}${qa.model ? ' · ' + qa.model : ''}` : '',
+      qa.elapsed_s != null ? `${qa.elapsed_s.toFixed(1)}s` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="qa-item" data-qa-id="${escapeHtml(qa.id)}">
+        <div class="qa-item-question">${escapeHtml(qa.question)}</div>
+        <div class="qa-item-answer">${renderRichMarkdown(qa.answer_markdown)}</div>
+        <div class="qa-item-meta"><span>${escapeHtml(meta)}</span></div>
+      </div>`;
+  }
+
+  function renderQAInput(stepId, storylineId, isPending) {
+    if (isPending) {
+      const elapsed = state.pendingAsk && state.pendingAsk.startedAt
+        ? Math.round((Date.now() - state.pendingAsk.startedAt) / 1000) : 0;
+      return `
+        <div class="qa-pending">
+          <span class="qa-spinner"></span>
+          <span>Thinking… <span class="qa-elapsed" id="qa-elapsed">${elapsed}s</span></span>
+          <button class="qa-cancel-btn" onclick="cancelAsk()">Cancel</button>
+        </div>`;
+    }
+    return `
+      <div class="qa-input-row">
+        <textarea class="qa-textarea" id="qa-input-${escapeHtml(stepId)}"
+                  placeholder="Ask a follow-up about this step…"
+                  onkeydown="qaKeyDown(event, '${escapeHtml(stepId)}', '${escapeHtml(storylineId)}')"></textarea>
+        <div class="qa-input-controls">
+          <span class="qa-hint">⌘/Ctrl + Enter to ask · ${escapeHtml(state.serverInfo && state.serverInfo.cli || 'cli')}${state.serverInfo && state.serverInfo.model ? ' · ' + escapeHtml(state.serverInfo.model) : ''}</span>
+          <button class="qa-ask-btn" onclick="askFromInput('${escapeHtml(stepId)}', '${escapeHtml(storylineId)}')">Ask</button>
+        </div>
+      </div>`;
+  }
+
+  function qaKeyDown(ev, stepId, storylineId) {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+      ev.preventDefault();
+      askFromInput(stepId, storylineId);
+    }
+  }
+
+  function askFromInput(stepId, storylineId) {
+    const ta = document.getElementById('qa-input-' + stepId);
+    if (!ta) return;
+    const question = ta.value.trim();
+    if (!question) { ta.focus(); return; }
+    submitQuestion(stepId, storylineId, question);
+  }
+
+  function cancelAsk() {
+    if (state.pendingAsk && state.pendingAsk.controller) {
+      try { state.pendingAsk.controller.abort(); } catch (_) {}
+    }
+    state.pendingAsk = null;
+    if (_qaElapsedTimer) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; }
+    renderRight();
+  }
+
+  let _qaElapsedTimer = null;
+
+  function submitQuestion(stepId, storylineId, question) {
+    if (!state.liveMode) return;
+    const controller = ('AbortController' in window) ? new AbortController() : null;
+    state.pendingAsk = {
+      stepId, storylineId, question,
+      startedAt: Date.now(),
+      controller,
+      error: null,
+    };
+    renderRight();
+    // Tick the elapsed counter every second while pending
+    if (_qaElapsedTimer) clearInterval(_qaElapsedTimer);
+    _qaElapsedTimer = setInterval(() => {
+      if (!state.pendingAsk) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; return; }
+      const el = document.getElementById('qa-elapsed');
+      if (el) el.textContent = Math.round((Date.now() - state.pendingAsk.startedAt) / 1000) + 's';
+    }, 1000);
+
+    fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ step_id: stepId, storyline_id: storylineId, question }),
+      signal: controller ? controller.signal : undefined,
+    })
+      .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
+      .then(({ ok, status, body }) => {
+        if (_qaElapsedTimer) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; }
+        if (!state.pendingAsk) return;  // cancelled
+        if (!ok) {
+          state.pendingAsk = {
+            ...state.pendingAsk,
+            error: (body && (body.error || body.stderr)) || `HTTP ${status}`,
+          };
+          renderRight();
+          return;
+        }
+        // Success — prepend to followups[stepId]
+        if (!state.followups[stepId]) state.followups[stepId] = [];
+        state.followups[stepId] = [body, ...state.followups[stepId]];
+        state.pendingAsk = null;
+        renderRight();
+      })
+      .catch(err => {
+        if (_qaElapsedTimer) { clearInterval(_qaElapsedTimer); _qaElapsedTimer = null; }
+        if (!state.pendingAsk) return;  // cancelled
+        if (err && err.name === 'AbortError') {
+          state.pendingAsk = null;
+          renderRight();
+          return;
+        }
+        state.pendingAsk = {
+          ...state.pendingAsk,
+          error: 'Network error: ' + (err && err.message ? err.message : 'unknown'),
+        };
+        renderRight();
+      });
+  }
+
+  function buildQASectionContent(step, storyline) {
+    const stepFollowups = state.followups[step.id] || [];
+    const isPending = !!(state.pendingAsk && state.pendingAsk.stepId === step.id);
+    const errorMsg = (state.pendingAsk && state.pendingAsk.stepId === step.id && state.pendingAsk.error) || null;
+
+    let html = '';
+    html += renderQAInput(step.id, storyline.id, isPending);
+    if (errorMsg) {
+      html += `<div class="qa-error">${escapeHtml(errorMsg)}</div>`;
+    }
+    if (stepFollowups.length > 0) {
+      html += `<div class="qa-list">${stepFollowups.map(renderQAItem).join('')}</div>`;
+    }
+    return html;
   }
 
   function renderRight() {
@@ -5016,6 +5596,14 @@
       sections.push(section('analysis', 'analysis', '分析 Analysis', 'deep', renderInlineMarkdown(step.analysis)));
     }
 
+    // Q&A — only renders in live mode (or when prior followups exist for this step).
+    const stepFollowups = state.followups[step.id] || [];
+    const showQA = state.liveMode || stepFollowups.length > 0;
+    if (showQA) {
+      const qaTag = state.liveMode ? 'live' : 'static';
+      sections.push(section('qa', 'qa', '💬 Q&A', qaTag, buildQASectionContent(step, storyline)));
+    }
+
     if (sections.length === 0) {
       right.innerHTML = '<div class="empty-state">No context attached to this step.</div>';
     } else {
@@ -5095,6 +5683,52 @@
     }
   });
 
+  // ========== Live-mode preflight ==========
+  // Detects whether a companion live_server.py is serving this page,
+  // and loads any prior follow-up Q&As from the sidecar. Both fetches
+  // are time-boxed so the page renders normally even if /__alive hangs.
+  function preflight() {
+    const timeoutMs = 1500;
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('preflight-timeout')), timeoutMs));
+    const probe = (url) => Promise.race([
+      fetch(url, { method: 'GET', cache: 'no-store' }).then(r => r.ok ? r.json() : Promise.reject(new Error('http ' + r.status))),
+      timeout,
+    ]);
+
+    return Promise.allSettled([probe('/__alive'), probe('/followups')]).then(([alive, fups]) => {
+      if (alive.status === 'fulfilled' && alive.value && alive.value.ok) {
+        state.liveMode = true;
+        state.serverInfo = alive.value;
+      }
+      if (fups.status === 'fulfilled' && fups.value && Array.isArray(fups.value.qa)) {
+        // Group by step_id, newest first within each group.
+        const byStep = {};
+        for (const qa of fups.value.qa) {
+          if (!qa.step_id) continue;
+          (byStep[qa.step_id] || (byStep[qa.step_id] = [])).push(qa);
+        }
+        for (const k of Object.keys(byStep)) {
+          byStep[k].sort((a, b) => (b.asked_at || '').localeCompare(a.asked_at || ''));
+        }
+        state.followups = byStep;
+      }
+    });
+  }
+
+  function renderLiveBadge() {
+    const sub = document.getElementById('pr-subtitle');
+    if (!sub) return;
+    const existing = document.getElementById('live-badge');
+    if (existing) existing.remove();
+    const badge = document.createElement('div');
+    badge.id = 'live-badge';
+    badge.className = 'live-badge ' + (state.liveMode ? 'live' : 'static');
+    badge.textContent = state.liveMode
+      ? `live · ${(state.serverInfo && state.serverInfo.cli) || 'cli'}`
+      : 'static';
+    sub.parentNode.insertBefore(badge, sub.nextSibling);
+  }
+
   // ========== Init ==========
   function init() {
     if (typeof WALKTHROUGH_DATA === 'undefined' || WALKTHROUGH_DATA === null) {
@@ -5106,6 +5740,7 @@
 
     // Restore prior view from localStorage if available
     const saved = loadState();
+    let restored = false;
     if (saved) {
       if (saved.sectionCollapsed) state.sectionCollapsed = saved.sectionCollapsed;
       if (saved.view === 'step' && saved.currentStepId && findStep(saved.currentStepId)) {
@@ -5113,15 +5748,22 @@
         state.currentStorylineId = saved.currentStorylineId;
         state.currentStepId = saved.currentStepId;
         rerender();
-        return;
+        restored = true;
       } else if (saved.view === 'storyline_overview' && saved.currentStorylineId && findStoryline(saved.currentStorylineId)) {
         state.view = 'storyline_overview';
         state.currentStorylineId = saved.currentStorylineId;
         rerender();
-        return;
+        restored = true;
       }
     }
-    goToReadingOverview();
+    if (!restored) goToReadingOverview();
+
+    // Probe for the live server. If found, refresh the right pane so
+    // the Q&A section appears for the current view.
+    preflight().then(() => {
+      renderLiveBadge();
+      if (state.view === 'step') renderRight();
+    });
   }
   init();
 </script>

@@ -140,8 +140,48 @@ python3 render.py walkthrough.json output.html
 ```
 The renderer finds the `/*WALKTHROUGH_DATA_PLACEHOLDER*/` in
 `template/walkthrough.html`, injects the JSON via `json.dumps()` with
-`</` → `<\/` escaping, and writes the output. Tell the user where it
-went and suggest opening it in a browser.
+`</` → `<\/` escaping, and writes the output.
+
+### Phase 13: Open in live mode (default behavior)
+
+Immediately after rendering, run:
+
+```bash
+python3 server/live_walkthrough.py <walkthrough.html>
+```
+
+This wrapper detects whether a companion `live_server.py` is already
+serving this HTML on a port in `8765–8775`. If yes, it just opens the
+browser. If no, it starts the server in the background (detached,
+survives this script exiting) and then opens the browser. The server
+enables a "💬 Q&A" section on each step where the reader can ask
+follow-up questions about the code; answers are written to a sidecar
+`<basename>.followups.json` next to the HTML and persist across runs.
+
+Tell the user the URL (e.g. `http://127.0.0.1:8765/`) and that the
+"live" badge in the upper-left subtitle confirms live mode is active.
+If they prefer a static-only file with no Q&A, they can skip this step
+and open the HTML directly via `file://` — every Q&A section just won't
+appear (unless a sidecar with prior answers exists, in which case those
+render statically).
+
+To stop the server later: `python3 server/live_walkthrough.py --stop`
+(kills all live-walkthrough servers) or `--stop <html>` (just one).
+
+The server defaults to `codex exec` (use `--cli claude` for `claude -p`
+instead). The chosen CLI must be on PATH; if neither is available, fall
+back to telling the user to open the HTML directly.
+
+The server caps concurrent `/ask` subprocesses (default 2) and rejects
+duplicate questions for the same step with a 429. It binds 127.0.0.1
+only and **must not** be exposed beyond loopback — `/ask` runs the CLI
+on user-supplied input, so external exposure is a cost/exec risk.
+
+The follow-up prompt template at `server/prompts/followup_prompt.md`
+instructs the CLI to ground answers in the established
+`mental_model_anchor` / `invariants` / `key_data_structures` rather
+than introducing a competing framing — reading-mode questions are about
+building understanding, not evaluating changes.
 
 ## Importance scoring rubric
 
@@ -197,8 +237,11 @@ can see and challenge the picks.
 - `README.md` — short user-facing intro
 - `prompts/schema.md` — full JSON schema specification
 - `prompts/analyze_code.md` — detailed analysis prompt (used during phases 0–11)
-- `template/walkthrough.html` — single-file HTML/CSS/JS template
+- `template/walkthrough.html` — single-file HTML/CSS/JS template (with live-mode chat input + Q&A section)
 - `render.py` — helper script: injects JSON into template
+- `server/live_server.py` — companion HTTP server that powers live-mode Q&A (`/__alive`, `/followups`, `/ask` → `codex exec` by default, or `claude -p` via `--cli claude`); enforces a global concurrency cap and per-step in-flight gate; falls back to extracting `WALKTHROUGH_DATA` from the HTML if no sibling JSON is found
+- `server/live_walkthrough.py` — wrapper that starts (or reuses) `live_server.py` in the background and opens the browser; supports `--status` and `--stop`
+- `server/prompts/followup_prompt.md` — prompt template fed to the CLI for each follow-up question (reading-mode voice: ground answers in the established mental model)
 - `demo/sample_walkthrough.json` — reference example (Mode A on this skill's sibling)
 - `demo/sample_walkthrough.html` — rendered demo
 

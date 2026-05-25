@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-live_server.py — companion server for code-review-narrative skill.
+live_server.py — companion server for code-reading-walkthrough skill.
 
-Serves the rendered review HTML and exposes a /ask endpoint that shells
-out to `codex exec` (or `claude -p` via --cli claude) to answer
+Serves the rendered walkthrough HTML and exposes a /ask endpoint that
+shells out to `codex exec` (or `claude -p` via --cli claude) to answer
 follow-up questions about a specific step. Answers persist in a sidecar
 `<basename>.followups.json` next to the HTML.
 
@@ -16,8 +16,8 @@ via --max-concurrent) and at most one question per step can be in
 flight at a time. Excess requests get 429.
 
 Usage:
-    python3 live_server.py <path/to/review.html> \
-        [--port 8765] [--cli codex|claude] [--model <id>] \
+    python3 live_server.py <path/to/walkthrough.html> \\
+        [--port 8765] [--cli codex|claude] [--model <id>] \\
         [--repo <repo-path>] [--bare] [--max-concurrent 2]
 """
 
@@ -49,7 +49,7 @@ PROMPT_TEMPLATE_PATH = Path(__file__).parent / "prompts" / "followup_prompt.md"
 _HTML_PATH: Path = None
 _JSON_PATH: Path = None
 _SIDECAR_PATH: Path = None
-_REVIEW_DATA: dict = None
+_WALKTHROUGH_DATA: dict = None
 _CLI: str = DEFAULT_CLI
 _CLI_BIN: str = None
 _MODEL: str = None
@@ -66,14 +66,15 @@ _in_flight_steps: set = set()
 # ----- Walkthrough key ---------------------------------------------------
 
 def compute_walkthrough_key(metadata: dict) -> str:
-    """Stable id that survives re-renders of the same review.
+    """Stable id that survives re-renders of the same walkthrough.
 
-    Mirrors the localStorage key the page uses (djb2 over commit+target),
-    but as a plain SHA-1 since we're in Python land and don't need the
-    JS-compatible algorithm — the page never reads this key.
+    Reading-mode metadata uses commit + target (vs review-mode's
+    base_commit + head_commit + title). Mirrors the localStorage
+    key the page derives so the server's sidecar lines up with the
+    HTML's persisted view state.
     """
-    base = (metadata.get("base_commit", "") or "") + "|" \
-         + (metadata.get("head_commit", "") or "") + "|" \
+    base = (metadata.get("commit", "") or "") + "|" \
+         + (metadata.get("target", "") or "") + "|" \
          + (metadata.get("title", "") or "")
     return hashlib.sha1(base.encode("utf-8")).hexdigest()[:16]
 
@@ -84,7 +85,7 @@ def load_sidecar() -> dict:
     if not _SIDECAR_PATH.exists():
         return {
             "schema_version": "1",
-            "walkthrough_key": compute_walkthrough_key(_REVIEW_DATA["metadata"]),
+            "walkthrough_key": compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"]),
             "qa": [],
         }
     try:
@@ -94,11 +95,11 @@ def load_sidecar() -> dict:
         print(f"[live_server] WARN: could not read sidecar {_SIDECAR_PATH}: {e}", file=sys.stderr)
         return {
             "schema_version": "1",
-            "walkthrough_key": compute_walkthrough_key(_REVIEW_DATA["metadata"]),
+            "walkthrough_key": compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"]),
             "qa": [],
         }
     # Mismatched key → start fresh, but keep old as .legacy.<ts>
-    expected = compute_walkthrough_key(_REVIEW_DATA["metadata"])
+    expected = compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"])
     if data.get("walkthrough_key") and data["walkthrough_key"] != expected:
         ts = int(time.time())
         legacy = _SIDECAR_PATH.with_suffix(_SIDECAR_PATH.suffix + f".legacy.{ts}")
@@ -128,7 +129,7 @@ def append_qa(entry: dict) -> None:
 # ----- Prompt building ---------------------------------------------------
 
 def find_step(step_id: str):
-    for sl in _REVIEW_DATA.get("storylines", []):
+    for sl in _WALKTHROUGH_DATA.get("storylines", []):
         for st in sl.get("steps", []) or []:
             if st["id"] == step_id:
                 return sl, st
@@ -136,7 +137,7 @@ def find_step(step_id: str):
 
 
 def _render_file_view(fv: dict, why_included: str = None) -> list:
-    """Render a single FileView (primary_change or supporting_definition).
+    """Render a single FileView (primary_changes or supporting_definition).
     Returns lines (no trailing newline) ready to be joined."""
     parts = []
     header = f"--- {fv['file']} (lines {fv['context_start_line']}–{fv['context_end_line']}, {fv['language']}) ---"
@@ -159,7 +160,10 @@ def _render_file_view(fv: dict, why_included: str = None) -> list:
                 parts.append(f"  • without_it:     {fp['without_it']}")
 
     for line in fv.get("lines", []):
-        marker = "+" if line["change"] == "added" else ("-" if line["change"] == "removed" else " ")
+        # Reading mode: all lines are "unchanged" — render as plain code.
+        # We still tolerate added/removed in case the same renderer ever
+        # gets reused across modes.
+        marker = "+" if line.get("change") == "added" else ("-" if line.get("change") == "removed" else " ")
         parts.append(f"{line['line_num']:5d} {marker} {line['content']}")
 
     wt = fv.get("walkthrough") or []
@@ -181,7 +185,7 @@ def render_code_view(code_view: dict) -> str:
         parts.append("")
     sd = code_view.get("supporting_definitions") or []
     if sd:
-        parts.append("## Supporting definitions (referenced by the change, not modified)")
+        parts.append("## Supporting definitions (referenced by the code, not the focus)")
         for fv in sd:
             parts.extend(_render_file_view(fv, why_included=fv.get("why_included")))
             parts.append("")
@@ -194,10 +198,14 @@ def _bullets(items, prefix="- "):
 
 
 def _render_storyline_context(storyline: dict) -> list:
-    """Storyline-level header: purpose, architecture, overview, roadmap."""
+    """Storyline-level header: mental model, purpose, architecture,
+    overview, roadmap. Reading-mode equivalent of the review version."""
     out = [f"# Storyline: {storyline.get('title','')} ({storyline.get('id','')})"]
     if storyline.get("summary"):
         out.append(f"\n_{storyline['summary']}_")
+
+    if storyline.get("mental_model_anchor"):
+        out.append(f"\n## Mental model anchor\n{storyline['mental_model_anchor']}")
 
     purpose = storyline.get("purpose") or {}
     if purpose.get("stated") or purpose.get("evident") or purpose.get("discrepancy"):
@@ -225,24 +233,34 @@ def _render_storyline_context(storyline: dict) -> list:
             out.append("```")
 
     if storyline.get("change_overview"):
-        out.append(f"\n## Change overview\n{storyline['change_overview']}")
+        out.append(f"\n## Overview\n{storyline['change_overview']}")
     if storyline.get("reading_roadmap"):
         out.append(f"\n## Reading roadmap\n{storyline['reading_roadmap']}")
     return out
 
 
 def _render_step_factual_context(step: dict) -> list:
-    """Step-level factual context (research-assistant fields)."""
-    out = []
-    if step.get("prior_role"):
-        out.append(f"\n## Prior role (what existed before this change)\n{step['prior_role']}")
+    """Step-level factual context (reading-mode research-assistant fields).
 
-    bd = step.get("behavior_delta") or {}
-    if bd.get("before") or bd.get("after") or bd.get("diff"):
-        out.append("\n## Behavior delta")
-        if bd.get("before"): out.append(f"- Before: {bd['before']}")
-        if bd.get("after"):  out.append(f"- After:  {bd['after']}")
-        if bd.get("diff"):   out.append(f"- Diff:   {bd['diff']}")
+    Differs from review mode by using invariants / key_data_structures /
+    design_rationale in place of behavior_delta + the analytical fields.
+    """
+    out = []
+
+    if step.get("invariants"):
+        out.append("\n## Invariants (what must always hold here)")
+        out.extend(_bullets(step["invariants"]))
+
+    kds = step.get("key_data_structures") or []
+    if kds:
+        out.append("\n## Key data structures")
+        for d in kds:
+            name = d.get("name", "?")
+            shape = d.get("shape", "")
+            role = d.get("role", "")
+            out.append(f"- **{name}** — {shape}")
+            if role:
+                out.append(f"    role: {role}")
 
     uc = step.get("usage_context") or {}
     has_uc = uc.get("primary_usage_scenario") or uc.get("callers") or uc.get("call_patterns") or uc.get("implicit_dependencies")
@@ -263,63 +281,33 @@ def _render_step_factual_context(step: dict) -> list:
             out.append("- Implicit dependencies:")
             out.extend(_bullets(uc["implicit_dependencies"], prefix="  • "))
 
-    tc = step.get("test_coverage") or {}
-    has_tc = tc.get("covered_by") or tc.get("added_in_this_pr") or tc.get("not_covered")
-    if has_tc:
-        out.append("\n## Test coverage")
-        if tc.get("covered_by"):
-            out.append("- Covered by existing tests:")
-            for t in tc["covered_by"]:
-                out.append(f"  • {t.get('file','?')} :: {t.get('test_name','?')} — {t.get('what_it_tests','')}")
-        if tc.get("added_in_this_pr"):
-            out.append("- Added in this PR:")
-            for t in tc["added_in_this_pr"]:
-                out.append(f"  • {t.get('file','?')} :: {t.get('test_name','?')} — {t.get('what_it_tests','')}")
-        if tc.get("not_covered"):
-            out.append("- Not covered:")
-            out.extend(_bullets(tc["not_covered"], prefix="  • "))
-
     cp = step.get("codebase_patterns") or {}
-    has_cp = cp.get("convention_alignment") or cp.get("deviations") or cp.get("similar_changes_elsewhere")
+    similar = cp.get("similar_code_elsewhere") or cp.get("similar_changes_elsewhere") or []
+    has_cp = cp.get("convention_alignment") or cp.get("deviations") or similar
     if has_cp:
         out.append("\n## Codebase patterns")
         if cp.get("convention_alignment"):
             out.append(f"- Convention alignment: {cp['convention_alignment']}")
         if cp.get("deviations"):
             out.append(f"- Deviations: {cp['deviations']}")
-        if cp.get("similar_changes_elsewhere"):
-            out.append("- Similar changes elsewhere:")
-            for s in cp["similar_changes_elsewhere"]:
+        if similar:
+            out.append("- Similar code elsewhere:")
+            for s in similar:
                 out.append(f"  • {s.get('file','?')}:{s.get('line','?')} — {s.get('note','')}")
 
-    alts = step.get("alternative_approaches") or []
-    if alts:
-        out.append("\n## Alternative approaches")
-        for a in alts:
+    # design_rationale supersedes review-mode's alternative_approaches;
+    # tolerate both for forward-compat.
+    dr = step.get("design_rationale") or step.get("alternative_approaches") or []
+    if dr:
+        out.append("\n## Design rationale (alternatives and trade-offs)")
+        for a in dr:
             out.append(f"- ({a.get('evidence_kind','?')}) {a.get('approach','')}")
-            if a.get("tradeoff_vs_chosen"):
-                out.append(f"    tradeoff: {a['tradeoff_vs_chosen']}")
-    return out
+            tr = a.get("tradeoff_vs_chosen_design") or a.get("tradeoff_vs_chosen")
+            if tr:
+                out.append(f"    tradeoff: {tr}")
 
-
-def _render_step_analysis(step: dict) -> list:
-    """Step-level analytical content (senior-reviewer fields)."""
-    out = []
-    if step.get("evaluation"):
-        out.append(f"\n## Existing evaluation\n{step['evaluation']}")
     if step.get("analysis"):
-        out.append(f"\n## Existing analysis\n{step['analysis']}")
-    if step.get("suggestions"):
-        out.append("\n## Existing suggestions")
-        out.extend(_bullets(step["suggestions"]))
-    concerns = step.get("concerns") or []
-    if concerns:
-        out.append("\n## Concerns")
-        for c in concerns:
-            sev = c.get("severity", "?")
-            out.append(f"- [{sev}] {c.get('concern','')}")
-            if c.get("evidence"):
-                out.append(f"    evidence: {c['evidence']}")
+        out.append(f"\n## Analysis\n{step['analysis']}")
     return out
 
 
@@ -327,11 +315,10 @@ def render_step_context(storyline: dict, step: dict, prior_qas: list) -> str:
     """Build the context block fed to the LLM.
 
     Mirrors what the reader sees in the right pane: storyline-level
-    purpose/architecture/overview, step-level factual context
-    (prior_role, behavior_delta, usage_context, test_coverage,
-    codebase_patterns, alternative_approaches), then existing analytical
-    content (evaluation, analysis, suggestions, concerns), then the code
-    block with walkthrough + function_purpose annotations.
+    mental_model_anchor/purpose/architecture/overview, step-level
+    factual context (invariants, key_data_structures, usage_context,
+    codebase_patterns, design_rationale, analysis), then the code block
+    with walkthrough + function_purpose annotations.
     """
     out = _render_storyline_context(storyline)
 
@@ -340,7 +327,6 @@ def render_step_context(storyline: dict, step: dict, prior_qas: list) -> str:
         out.append(f"\n## Step summary\n{step['summary']}")
 
     out.extend(_render_step_factual_context(step))
-    out.extend(_render_step_analysis(step))
 
     out.append("\n## Code under discussion")
     out.append(render_code_view(step.get("code_view", {})))
@@ -358,7 +344,7 @@ def load_prompt_template() -> str:
         # Fallback inline template — keeps the server runnable even if
         # the file got deleted.
         return (
-            "You are answering a follow-up question about a specific step in a code-review walkthrough.\n"
+            "You are answering a follow-up question about a specific step in a code-reading walkthrough.\n"
             "Answer in markdown. Be concise. Cite line numbers when relevant.\n"
             "If the question is about general syntax/grammar, answer that directly.\n\n"
             "{{CONTEXT}}\n\n"
@@ -466,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
                 "model": _MODEL,
                 "bare": _BARE,
                 "html": str(_HTML_PATH),
-                "walkthrough_key": compute_walkthrough_key(_REVIEW_DATA["metadata"]),
+                "walkthrough_key": compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"]),
                 "max_concurrent": _max_concurrent,
                 "in_flight_steps": in_flight,
             })
@@ -560,25 +546,14 @@ class Handler(BaseHTTPRequestHandler):
 
 # ----- Bootstrap ---------------------------------------------------------
 
-def find_review_json(html_path: Path) -> Path:
-    """Convention: <name>.json next to <name>.html."""
-    candidate = html_path.with_suffix(".json")
-    if not candidate.exists():
-        raise FileNotFoundError(
-            f"expected sibling JSON next to HTML: {candidate} (the rendered HTML must "
-            f"be paired with the source review JSON for the server to bundle prompt context)"
-        )
-    return candidate
-
-
 def extract_embedded_json(html_path: Path) -> dict:
-    """Recover REVIEW_DATA from the HTML itself.
+    """Recover WALKTHROUGH_DATA from the HTML itself.
 
     `render.py` injects the JSON via a literal replacement of
-    `/*REVIEW_DATA_PLACEHOLDER*/` with `json.dumps(data, indent=2)`. The
-    resulting block looks like `const REVIEW_DATA = { ... };` near the top
-    of the embedded <script>. We find that block, un-escape the `</` →
-    `<\\/` guard the renderer applies, and re-parse it as JSON.
+    `/*WALKTHROUGH_DATA_PLACEHOLDER*/` with `json.dumps(data, indent=2)`.
+    The resulting block looks like `const WALKTHROUGH_DATA = { ... };` near
+    the top of the embedded <script>. We find that block, un-escape the
+    `</` → `<\\/` guard the renderer applies, and re-parse it as JSON.
 
     The closing `}` is anchored on `\n}` (a brace at column 0) because
     `json.dumps(indent=2)` always emits the outermost close-brace at the
@@ -590,19 +565,19 @@ def extract_embedded_json(html_path: Path) -> dict:
     """
     import re
     text = html_path.read_text(encoding="utf-8")
-    m = re.search(r"const\s+REVIEW_DATA\s*=\s*(\{[\s\S]*?\n\})\s*;", text)
+    m = re.search(r"const\s+WALKTHROUGH_DATA\s*=\s*(\{[\s\S]*?\n\})\s*;", text)
     if not m:
-        raise ValueError("could not locate `const REVIEW_DATA = {...}` in HTML")
+        raise ValueError("could not locate `const WALKTHROUGH_DATA = {...}` in HTML")
     raw = m.group(1).replace("<\\/", "</")  # un-escape the </script> guard
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ValueError(f"embedded REVIEW_DATA failed to parse: {e}")
+        raise ValueError(f"embedded WALKTHROUGH_DATA failed to parse: {e}")
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Companion live server for code-review-narrative HTML reviews.")
-    p.add_argument("html", type=Path, help="Path to the rendered review HTML.")
+    p = argparse.ArgumentParser(description="Companion live server for code-reading-walkthrough HTML walkthroughs.")
+    p.add_argument("html", type=Path, help="Path to the rendered walkthrough HTML.")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--cli", choices=["codex", "claude"], default=DEFAULT_CLI)
     p.add_argument("--model", default=None, help="Model id passed through to the CLI.")
@@ -616,7 +591,7 @@ def parse_args():
 
 
 def main():
-    global _HTML_PATH, _JSON_PATH, _SIDECAR_PATH, _REVIEW_DATA
+    global _HTML_PATH, _JSON_PATH, _SIDECAR_PATH, _WALKTHROUGH_DATA
     global _CLI, _CLI_BIN, _MODEL, _REPO, _BARE
     global _ask_semaphore, _max_concurrent
 
@@ -631,23 +606,23 @@ def main():
     if args.json:
         _JSON_PATH = args.json.resolve()
         with open(_JSON_PATH, "r", encoding="utf-8") as f:
-            _REVIEW_DATA = json.load(f)
+            _WALKTHROUGH_DATA = json.load(f)
     else:
         sibling = _HTML_PATH.with_suffix(".json")
         if sibling.exists():
             _JSON_PATH = sibling.resolve()
             with open(_JSON_PATH, "r", encoding="utf-8") as f:
-                _REVIEW_DATA = json.load(f)
+                _WALKTHROUGH_DATA = json.load(f)
         else:
             try:
-                _REVIEW_DATA = extract_embedded_json(_HTML_PATH)
+                _WALKTHROUGH_DATA = extract_embedded_json(_HTML_PATH)
             except ValueError as e:
                 sys.exit(
                     f"No sibling JSON at {sibling}, and could not extract from HTML: {e}\n"
                     f"  Pass --json <path> if the source JSON lives elsewhere."
                 )
             _JSON_PATH = None
-            print(f"[live_server] no sibling JSON found — recovered REVIEW_DATA from {_HTML_PATH.name}")
+            print(f"[live_server] no sibling JSON found — recovered WALKTHROUGH_DATA from {_HTML_PATH.name}")
 
     _SIDECAR_PATH = _HTML_PATH.with_suffix(".followups.json")
 
@@ -673,7 +648,7 @@ def main():
     if _REPO:
         print(f"[live_server] repo cwd: {_REPO}")
     print(f"[live_server] max concurrent /ask: {_max_concurrent}")
-    print(f"[live_server] storylines: {len(_REVIEW_DATA.get('storylines', []))}, steps: {sum(len(s.get('steps') or []) for s in _REVIEW_DATA.get('storylines', []))}")
+    print(f"[live_server] storylines: {len(_WALKTHROUGH_DATA.get('storylines', []))}, steps: {sum(len(s.get('steps') or []) for s in _WALKTHROUGH_DATA.get('storylines', []))}")
     print(f"[live_server] listening on http://127.0.0.1:{args.port}/   (Ctrl-C to stop)")
     print(f"[live_server] WARNING: binds loopback only — do NOT change the bind address. "
           f"/ask runs the CLI on arbitrary input; exposing this beyond 127.0.0.1 is a cost/exec risk.")
