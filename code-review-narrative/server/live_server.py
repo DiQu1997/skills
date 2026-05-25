@@ -576,18 +576,21 @@ def extract_embedded_json(html_path: Path) -> dict:
 
     `render.py` injects the JSON via a literal replacement of
     `/*REVIEW_DATA_PLACEHOLDER*/` with `json.dumps(data, indent=2)`. The
-    resulting line looks like `const REVIEW_DATA = { ... };` near the top
+    resulting block looks like `const REVIEW_DATA = { ... };` near the top
     of the embedded <script>. We find that block, un-escape the `</` →
     `<\\/` guard the renderer applies, and re-parse it as JSON.
+
+    The closing `}` is anchored on `\n}` (a brace at column 0) because
+    `json.dumps(indent=2)` always emits the outermost close-brace at the
+    start of its own line, while any `};` appearing inside a JSON string
+    value (e.g. a code-line being shown to the reader) is indented and
+    therefore won't false-match.
 
     Returns the parsed dict on success; raises ValueError otherwise.
     """
     import re
     text = html_path.read_text(encoding="utf-8")
-    # Match `const REVIEW_DATA = ` followed by a JSON object literal
-    # ending with `};`. The object spans many lines (indent=2), so use a
-    # non-greedy match anchored on the closing `};`.
-    m = re.search(r"const\s+REVIEW_DATA\s*=\s*(\{[\s\S]*?\})\s*;", text)
+    m = re.search(r"const\s+REVIEW_DATA\s*=\s*(\{[\s\S]*?\n\})\s*;", text)
     if not m:
         raise ValueError("could not locate `const REVIEW_DATA = {...}` in HTML")
     raw = m.group(1).replace("<\\/", "</")  # un-escape the </script> guard
