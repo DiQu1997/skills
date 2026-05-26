@@ -84,14 +84,26 @@ a real codebase walkthrough.
 
 The static HTML works standalone. Live mode is an opt-in layer: the
 page detects the companion `server/live_server.py` via `/__alive` and
-reveals a per-block chat input in the dock. Questions go to
-`POST /ask` with `{storyline_id, col_id, block_id, question}` and the
-server shells out to `codex exec` (default) or `claude -p`
-(`--cli claude`). Answers persist in a sidecar
-`<basename>.followups.json` keyed by `storyline_id/col_id/block_id`
-and re-load on revisit. Concurrency is capped (default 2 in-flight
-calls; per-block in-flight gate); the server binds 127.0.0.1 only —
-do not expose beyond loopback.
+enables two features:
+
+- **Per-block Q&A in the dock** — questions go to `POST /ask` with
+  `{storyline_id, col_id, block_id, question}`. The server shells out
+  to `codex exec` (default) or `claude -p` (`--cli claude`). Answers
+  persist in `<basename>.followups.json`.
+- **Promote-to-full on summary cards** — the previously-disabled
+  "Promote to full" button on summary-only storyline cards now calls
+  `POST /promote { storyline_id }`. The server shells out to author a
+  full-depth diagram for that storyline (1-3 min typical). The card
+  shows a pending spinner during the wait, then flips to the
+  full-depth card with a green "Promoted" badge. Result persists in
+  `<basename>.promotions.json` and rehydrates on reload. A small
+  "↺ Revert to summary" affordance drops the promotion back to the
+  original card.
+
+Concurrency is capped (default 2 in-flight CLI calls, shared between
+`/ask` and `/promote`; per-block and per-storyline in-flight gates).
+The server binds 127.0.0.1 only — both endpoints run the CLI on
+user-supplied input, do not expose beyond loopback.
 
 ## Files
 
@@ -106,10 +118,11 @@ code-reading-walkthrough/
 ├── template/
 │   └── walkthrough.html            ← single-file HTML/CSS/JS template (live-mode Q&A baked in)
 ├── server/
-│   ├── live_server.py              ← Q&A HTTP server (/__alive, /followups, /ask)
+│   ├── live_server.py              ← live-mode HTTP server (/__alive, /followups, /ask, /promotions, /promote, /promote/revert)
 │   ├── live_walkthrough.py         ← wrapper: starts/reuses server, opens browser
 │   └── prompts/
-│       └── followup_prompt.md      ← reading-mode follow-up prompt template
+│       ├── followup_prompt.md      ← reading-mode follow-up prompt template
+│       └── promote_prompt.md       ← promote-to-full prompt (ships schema + Phase 6 rules inline)
 └── demo/
     └── toy.json                    ← hand-authored v0.5 fixture
 ```
