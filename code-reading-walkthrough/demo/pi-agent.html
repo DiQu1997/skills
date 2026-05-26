@@ -132,12 +132,20 @@
     min-height: 100%;
     position: relative;
   }
-  .canvas-inner { position: relative; }
+  .canvas-inner {
+    position: relative;
+    /* Force the inner to be at least wide enough to hold N cols at their
+       minimum width. When the viewport is narrower (or the dock is open and
+       eats viewport space), this overflows .main and triggers the horizontal
+       scrollbar — keeps cols at a comfortable reading width instead of
+       shrinking them to fit. */
+    min-width: calc(var(--col-count, 4) * 320px + (var(--col-count, 4) - 1) * 28px);
+  }
 
   /* ------- Cols grid ------- */
   .cols {
     display: grid;
-    grid-template-columns: repeat(var(--col-count, 4), minmax(260px, 1fr));
+    grid-template-columns: repeat(var(--col-count, 4), minmax(320px, 1fr));
     gap: 28px;
     align-items: start;
     position: relative;
@@ -4914,8 +4922,8 @@
     const diagram = storyline.diagram;
     const cols = diagram.cols ?? [];
     canvas.innerHTML = `
-      <div class="canvas-inner">
-        <div class="cols" style="--col-count:${cols.length}">
+      <div class="canvas-inner" style="--col-count:${cols.length}">
+        <div class="cols">
           ${cols.map((c, i) => renderCol(c, i, storyline)).join('')}
         </div>
         <svg class="edges-svg" id="edges-svg"></svg>
