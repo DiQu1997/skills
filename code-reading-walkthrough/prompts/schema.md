@@ -254,9 +254,14 @@ A small chunk of code within a column (typically 3–10 lines).
 
 - A block should be one coherent concern. If you can describe it in a
   single `one_liner` without "and", the size is right.
-- 3–10 lines per block is typical. Single-line blocks are fine when a
-  single statement is its own concept (e.g. a `return`, a `throw`,
-  a single side-effecting call).
+- **Target 3–10 lines per block.** 11–20 acceptable only when
+  structurally indivisible (a complete try/catch/finally bracket whose
+  arms share state; a switch whose cases collectively form one
+  decision). **>20 lines is almost always a sign to split** — see the
+  full authoring rules in `prompts/analyze_code.md` Phase 6.
+- 1-line blocks are tolerated only when the line is a structurally
+  essential hinge (e.g. a `return`, a `throw`, a `break` from a guard);
+  prefer folding into the neighbor whose decision produced it.
 - Lines within a function don't need to be exhaustively partitioned —
   trivial connective lines can be left ungrouped.
 - Blocks within a column appear in **authored order** (top-down).

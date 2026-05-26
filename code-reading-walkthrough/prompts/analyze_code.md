@@ -222,28 +222,59 @@ lifecycle"* — it appears next to the file badge.
 ### Phase 6 — Partition each column into blocks
 
 This is where most of the work is. **Block sizing is the single biggest
-quality bar.**
+quality bar.** Two failure modes to avoid in equal measure: blocks too
+small (1-2 line slivers) and blocks too big (20+ line mega-blocks).
 
 #### Block sizing rules
 
-- **3–15 lines per block (the in-range core).** 5–10 is the sweet spot.
+- **Target range: 3–10 lines per block.** Most blocks should land here.
+- **11–20 lines: acceptable only when the block is *structurally
+  indivisible*.** Examples that legitimately stay whole:
+  - A complete `try { … } catch (e) { … } finally { … }` whose three
+    arms each carry shared state and where reading them apart would
+    lose the bracket. Author as ONE block.
+  - A `switch` whose cases share a local accumulator and the cases are
+    each 1–2 lines (splitting per-case would create slivers; the
+    switch reads as one decision).
+  - A small loop body where the loop control + body together form one
+    concern.
+  - A monolithic state-reset (5 sequential assignments that ALL belong
+    to "clear runtime state") — splitting would create slivers.
+- **>20 lines: HARD STOP, don't ship.** Before authoring, run this
+  check:
+  > "If I split this into 2-3 sub-blocks, would any sub-block be
+  > <3 lines? If yes, can I split differently so each piece is ≥3
+  > lines? If still no — is the whole block one structurally
+  > indivisible unit (above), and can I justify keeping it whole in
+  > the one_liner? Only then keep it whole. Otherwise split."
 - **Never a 1-line block** unless that single line is structurally
   essential AND the surrounding logic already lives in adjacent blocks.
   A bare `return value;` or a stand-alone `throw new Error(...)` is
-  almost never its own block — fold it into the neighboring block whose
-  decision produced it.
-- **Don't atomize** straight-line code into 5 single-statement blocks.
+  almost never its own block — fold it into the neighboring block
+  whose decision produced it.
+- **Don't atomize** straight-line code into N single-statement blocks.
   Merge contiguous lines that serve one concern (setup, emit, persist)
   into one block.
 - **Don't lump** distinct phases together. A guard, the main logic,
   and a cleanup are three different concerns — three blocks.
-- If you can describe a block in a single `one_liner` without using
-  "and", the size is right. If you keep wanting "and", split.
+- **The one_liner test**: if you can describe the block in a single
+  `one_liner` without using "and" (or with a single "and" that's
+  pairing two halves of the same concern, like "setup the controller
+  and stash it in activeRun"), the size is right. If you keep wanting
+  "and" or you reach for ";", split.
 
-A function of 20–40 lines typically yields 3–6 blocks. A small helper
-of 5–8 lines may be a single block. A 100-line function should usually
-be split into multiple storylines or refactored conceptually — but if
-it must remain one column, expect 6–10 blocks.
+#### Calibration
+
+A function of 20–40 lines typically yields **4–7 blocks** (NOT 3-6 —
+err toward more, smaller blocks when in doubt). A small helper of 5–8
+lines may be a single block. A 100-line function should usually be
+split into multiple storylines OR multiple cols — but if it must
+remain one column, expect 8–14 blocks.
+
+The sub-agent's most common mistake: keeping a 30–50 line `try { … }
+catch { … } finally { … } else-ladder` whole because "each branch is
+only 3-5 lines, splitting would create slivers." A 3-5 line block is
+NOT a sliver — that's a healthy block. Split it.
 
 #### Block coverage discipline
 
@@ -256,6 +287,16 @@ block's `code_view` carries a wider line window than its `line_range`.
 But within a function, the *significant* logic should be covered.
 If a reader could ask "what does THIS chunk do?" and your blocks
 don't have an answer, you missed a block.
+
+#### Final sweep
+
+After authoring all blocks in a column, walk the list once more:
+1. Any block >20 lines? Apply the HARD STOP check above. Split unless
+   structurally indivisible AND you can justify it crisply.
+2. Any block <3 lines that isn't a structurally-essential hinge? Merge
+   it into the neighbor whose decision produced it.
+3. Is the column too short (1-2 blocks) for what's clearly a multi-
+   concern function? You likely under-split.
 
 ### Phase 7 — Author each block
 
