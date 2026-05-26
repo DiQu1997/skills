@@ -182,9 +182,19 @@ This wrapper detects whether a companion `live_server.py` is already
 serving this HTML on a port in `8765–8775`. If yes, it just opens the
 browser. If no, it starts the server in the background (detached,
 survives this script exiting) and then opens the browser. The server
-enables a per-block Q&A section in the right-side dock; answers are
-written to a sidecar `<basename>.followups.json` next to the HTML
-(keyed by `storyline_id/col_id/block_id`) and persist across runs.
+enables two live-mode features:
+
+- **Per-block Q&A** in the right-side dock — questions go to `/ask`,
+  answers persist in `<basename>.followups.json` (keyed by
+  `storyline_id/col_id/block_id`).
+- **Promote-to-full** on summary-only storyline cards in the reading
+  overview — clicking the button calls `/promote`, which shells out to
+  the CLI to author a full-depth diagram for that storyline (typically
+  1-3 min). The card flips to a "Promoting…" pending state, then to
+  the full-depth card with a green "Promoted" badge. Result persists
+  in `<basename>.promotions.json` and rehydrates on reload. A small
+  "↺ Revert to summary" affordance drops the promotion back to the
+  original card.
 
 Tell the user the URL (e.g. `http://127.0.0.1:8765/`) and that the
 "live" badge in the top-right confirms live mode is active. If they
@@ -198,10 +208,19 @@ The server defaults to `codex exec` (use `--cli claude` for `claude -p`
 instead). The chosen CLI must be on PATH; if neither is available, fall
 back to telling the user to open the HTML directly.
 
-The server caps concurrent `/ask` subprocesses (default 2) and rejects
-duplicate questions for the same block with a 429. It binds 127.0.0.1
-only and **must not** be exposed beyond loopback — `/ask` runs the CLI
-on user-supplied input, so external exposure is a cost/exec risk.
+The server caps concurrent CLI subprocesses (default 2, shared between
+`/ask` and `/promote`). It rejects duplicate questions for the same
+block AND duplicate promote kicks for the same storyline with a 429.
+It binds 127.0.0.1 only and **must not** be exposed beyond loopback —
+both endpoints run the CLI on user-supplied input, so external exposure
+is a cost/exec risk.
+
+The promote prompt template at `server/prompts/promote_prompt.md`
+ships the schema + Phase 6 block-sizing rules inline so the CLI has
+everything it needs without reading the skill repo. The server
+validates the returned JSON against a structural check before
+persisting (id match, depth = full, mental_model_anchor present,
+≥3 blocks, edges resolve, importance_scores.total matches).
 
 The follow-up prompt template at `server/prompts/followup_prompt.md`
 instructs the CLI to ground answers in the established
@@ -259,9 +278,10 @@ when `total ≤ 5`. Score every storyline (full and summary).
 - `prompts/analyze_code.md` — detailed analysis prompt (used during phases 0–10)
 - `template/walkthrough.html` — single-file HTML/CSS/JS template (flow inspector + live-mode Q&A baked in)
 - `render.py` — helper script: injects JSON into template
-- `server/live_server.py` — companion HTTP server (`/__alive`, `/followups`, `/ask` → `codex exec` by default, or `claude -p` via `--cli claude`); per-block in-flight gate + global concurrency cap; falls back to extracting `WALKTHROUGH_DATA` from the HTML if no sibling JSON is found
+- `server/live_server.py` — companion HTTP server. Endpoints: `/__alive`, `/followups`, `/ask` (per-block Q&A), `/promotions`, `/promote`, `/promote/revert` (summary-to-full promotion). Shells out to `codex exec` (default) or `claude -p` (`--cli claude`); per-block + per-storyline in-flight gates plus a global concurrency cap shared between `/ask` and `/promote`; falls back to extracting `WALKTHROUGH_DATA` from the HTML if no sibling JSON is found
 - `server/live_walkthrough.py` — wrapper that starts (or reuses) `live_server.py` in the background and opens the browser; supports `--status` and `--stop`
 - `server/prompts/followup_prompt.md` — prompt template fed to the CLI for each follow-up question
+- `server/prompts/promote_prompt.md` — prompt template fed to the CLI when a summary-only storyline is promoted to full depth (ships the schema + Phase 6 sizing rules inline so the CLI has everything it needs without access to the skill repo)
 - `demo/toy.json` — hand-authored fixture exercising every schema feature; useful for template/server smoke-testing, not a real codebase walkthrough
 
 ## Relationship to sibling skills

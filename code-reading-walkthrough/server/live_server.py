@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -45,11 +46,13 @@ DEFAULT_MAX_CONCURRENT = 2
 SUBPROCESS_TIMEOUT_S = 300  # 5 min — codex/claude can take their time
 
 PROMPT_TEMPLATE_PATH = Path(__file__).parent / "prompts" / "followup_prompt.md"
+PROMOTE_PROMPT_TEMPLATE_PATH = Path(__file__).parent / "prompts" / "promote_prompt.md"
 
 # Resolved at server startup
 _HTML_PATH: Path = None
 _JSON_PATH: Path = None
 _SIDECAR_PATH: Path = None
+_PROMOTIONS_PATH: Path = None
 _WALKTHROUGH_DATA: dict = None
 _CLI: str = DEFAULT_CLI
 _CLI_BIN: str = None
@@ -57,11 +60,14 @@ _MODEL: str = None
 _REPO: Path = None
 _BARE: bool = False
 
-# Concurrency control for /ask. Initialized in main().
+# Concurrency control. /promote shares the global semaphore with /ask
+# but has its own per-storyline in-flight gate so a promotion in progress
+# rejects duplicate kicks for the same storyline.
 _ask_semaphore: threading.BoundedSemaphore = None
 _max_concurrent: int = DEFAULT_MAX_CONCURRENT
 _in_flight_lock = threading.Lock()
-_in_flight_blocks: set = set()   # set of "storyline_id/block_id" keys
+_in_flight_blocks: set = set()        # "storyline_id/block_id" keys (for /ask)
+_in_flight_promotions: set = set()    # storyline_id keys (for /promote)
 
 
 # ----- Walkthrough key ---------------------------------------------------
@@ -153,7 +159,111 @@ def _grouped_followups() -> dict:
     }
 
 
+# ----- Promotions sidecar -----------------------------------------------
+
+def load_promotions() -> dict:
+    """Returns { schema_version, walkthrough_key, promotions: { storyline_id: storyline } }."""
+    expected = compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"])
+    if not _PROMOTIONS_PATH.exists():
+        return {"schema_version": "1", "walkthrough_key": expected, "promotions": {}}
+    try:
+        with open(_PROMOTIONS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[live_server] WARN: could not read promotions {_PROMOTIONS_PATH}: {e}", file=sys.stderr)
+        return {"schema_version": "1", "walkthrough_key": expected, "promotions": {}}
+    if data.get("walkthrough_key") and data["walkthrough_key"] != expected:
+        ts = int(time.time())
+        legacy = _PROMOTIONS_PATH.with_suffix(_PROMOTIONS_PATH.suffix + f".legacy.{ts}")
+        try:
+            shutil.move(str(_PROMOTIONS_PATH), str(legacy))
+            print(f"[live_server] promotions key mismatch — archived to {legacy.name}")
+        except OSError:
+            pass
+        return {"schema_version": "1", "walkthrough_key": expected, "promotions": {}}
+    if "promotions" not in data or not isinstance(data["promotions"], dict):
+        data["promotions"] = {}
+    return data
+
+
+def save_promotions_atomic(data: dict) -> None:
+    tmp = _PROMOTIONS_PATH.with_suffix(_PROMOTIONS_PATH.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, _PROMOTIONS_PATH)
+
+
+def upsert_promotion(storyline_id: str, storyline: dict) -> None:
+    data = load_promotions()
+    data["promotions"][storyline_id] = storyline
+    save_promotions_atomic(data)
+
+
+def delete_promotion(storyline_id: str) -> bool:
+    data = load_promotions()
+    if storyline_id not in data.get("promotions", {}):
+        return False
+    del data["promotions"][storyline_id]
+    save_promotions_atomic(data)
+    return True
+
+
+def validate_promoted_storyline(s: dict, expected_id: str) -> tuple:
+    """Cheap structural check. Returns (ok, error_message)."""
+    if not isinstance(s, dict):
+        return False, "not a JSON object"
+    if s.get("id") != expected_id:
+        return False, f"id mismatch: expected {expected_id!r}, got {s.get('id')!r}"
+    if s.get("depth") not in (None, "full"):
+        return False, f"depth must be 'full' (or omitted), got {s.get('depth')!r}"
+    if not s.get("mental_model_anchor"):
+        return False, "mental_model_anchor is required for full-depth storylines"
+    diagram = s.get("diagram") or {}
+    cols = diagram.get("cols") or []
+    if not cols:
+        return False, "diagram.cols must be non-empty"
+    block_ids = set()
+    total_blocks = 0
+    for col in cols:
+        if not isinstance(col, dict):
+            return False, "every col must be a JSON object"
+        if not col.get("id"):
+            return False, "every col must have an id"
+        for b in col.get("blocks") or []:
+            bid = b.get("id")
+            if not bid:
+                return False, "every block must have an id"
+            if bid in block_ids:
+                return False, f"duplicate block id: {bid!r}"
+            block_ids.add(bid)
+            total_blocks += 1
+            if not b.get("code_view") or not (b["code_view"].get("lines") or []):
+                return False, f"block {bid!r} missing code_view.lines"
+    if total_blocks < 3:
+        return False, f"diagram must have at least 3 blocks total, got {total_blocks}"
+    for e in diagram.get("edges") or []:
+        if e.get("from") not in block_ids:
+            return False, f"edge 'from' references unknown block: {e.get('from')!r}"
+        if e.get("to") not in block_ids:
+            return False, f"edge 'to' references unknown block: {e.get('to')!r}"
+    scores = s.get("importance_scores") or {}
+    keys = ("centrality", "conceptual_weight", "entry_point", "novelty")
+    if all(k in scores for k in keys):
+        expected_total = sum(int(scores[k]) for k in keys)
+        if scores.get("total") != expected_total:
+            return False, f"importance_scores.total ({scores.get('total')}) != sum of sub-scores ({expected_total})"
+    return True, ""
+
+
 # ----- Prompt building ---------------------------------------------------
+
+def find_storyline(storyline_id: str):
+    for sl in _WALKTHROUGH_DATA.get("storylines", []):
+        if sl.get("id") == storyline_id:
+            return sl
+    return None
+
 
 def find_block(storyline_id: str, block_id: str):
     """Locate (storyline, col, block) by IDs. Returns (None, None, None) if not found."""
@@ -367,6 +477,83 @@ def build_prompt(storyline_id: str, block_id: str, question: str, prior_qas: lis
     return template.replace("{{CONTEXT}}", context).replace("{{QUESTION}}", question.strip())
 
 
+def load_promote_prompt_template() -> str:
+    if not PROMOTE_PROMPT_TEMPLATE_PATH.exists():
+        # Tiny inline fallback so the server still runs if the template
+        # file got deleted. Real usage ships the markdown template.
+        return (
+            "Promote the summary storyline below to FULL depth per the v0.5-reading schema.\n"
+            "Emit ONE JSON object, no surrounding prose, no markdown fences.\n\n"
+            "{{CONTEXT}}\n"
+        )
+    return PROMOTE_PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _render_promotion_context(storyline: dict) -> str:
+    md = _WALKTHROUGH_DATA.get("metadata", {}) or {}
+    summary = _WALKTHROUGH_DATA.get("summary", {}) or {}
+    scope = _WALKTHROUGH_DATA.get("scope", {}) or {}
+    other_storylines = [
+        s for s in _WALKTHROUGH_DATA.get("storylines", [])
+        if s.get("id") != storyline.get("id")
+    ]
+    out = []
+    out.append("# Walkthrough being extended")
+    out.append(f"- Title: {md.get('title', '?')}")
+    out.append(f"- Repo: {md.get('repo', '?')}")
+    out.append(f"- Topic / target: {md.get('target', '?')}")
+    if summary.get("one_line"):
+        out.append(f"- One-line pitch: {summary['one_line']}")
+    if summary.get("description"):
+        out.append(f"- Description: {summary['description']}")
+    if scope.get("importance_criteria"):
+        out.append(f"- Importance criteria: {scope['importance_criteria']}")
+
+    out.append("\n# Storyline to promote to FULL depth")
+    out.append(f"- id: {storyline.get('id', '?')}")
+    out.append(f"- title: {storyline.get('title', '?')}")
+    out.append(f"- kind: {storyline.get('kind', '?')}")
+    out.append(f"- summary: {storyline.get('summary', '')}")
+    out.append(f"- files_touched: {', '.join(storyline.get('files_touched', []) or [])}")
+    out.append(f"- importance_scores: {json.dumps(storyline.get('importance_scores', {}))}")
+
+    if other_storylines:
+        out.append("\n# Other storylines in this walkthrough (for vocabulary / voice consistency)")
+        for s in other_storylines[:8]:
+            depth = "full" if s.get("depth", "full") == "full" else "summary"
+            out.append(f"- {s.get('id','?')} [{depth}] {s.get('title','')}")
+            anchor = s.get("mental_model_anchor")
+            if anchor:
+                snippet = anchor.replace("\n", " ")[:240]
+                out.append(f"    anchor: {snippet}")
+    return "\n".join(out)
+
+
+def build_promote_prompt(storyline: dict) -> str:
+    template = load_promote_prompt_template()
+    context = _render_promotion_context(storyline)
+    return template.replace("{{CONTEXT}}", context)
+
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*\n|\n```\s*$", re.MULTILINE)
+
+
+def parse_cli_json(raw: str):
+    """Tolerant parser. Strips markdown fences if the LLM ignored instructions,
+    then JSON-parses. Returns (data, error_message)."""
+    text = (raw or "").strip()
+    text = _JSON_FENCE_RE.sub("", text)
+    # If there's leading prose, try to find the first '{' and parse from there
+    if not text.startswith("{"):
+        i = text.find("{")
+        if i > 0:
+            text = text[i:]
+    try:
+        return json.loads(text), None
+    except json.JSONDecodeError as e:
+        return None, str(e)
+
+
 # ----- CLI invocation ----------------------------------------------------
 
 def run_cli(prompt: str) -> dict:
@@ -450,7 +637,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html()
         elif path == "/__alive":
             with _in_flight_lock:
-                in_flight = sorted(_in_flight_blocks)
+                in_flight_b = sorted(_in_flight_blocks)
+                in_flight_p = sorted(_in_flight_promotions)
             self._send_json(200, {
                 "ok": True,
                 "cli": _CLI,
@@ -459,16 +647,19 @@ class Handler(BaseHTTPRequestHandler):
                 "html": str(_HTML_PATH),
                 "walkthrough_key": compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"]),
                 "max_concurrent": _max_concurrent,
-                "in_flight_blocks": in_flight,
+                "in_flight_blocks": in_flight_b,
+                "in_flight_promotions": in_flight_p,
             })
         elif path == "/followups":
             self._send_json(200, _grouped_followups())
+        elif path == "/promotions":
+            self._send_json(200, load_promotions())
         else:
             self._send_json(404, {"error": "not found", "path": path})
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != "/ask":
+        if path not in ("/ask", "/promote", "/promote/revert"):
             self._send_json(404, {"error": "not found", "path": path})
             return
         try:
@@ -479,6 +670,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"bad request body: {e}"})
             return
 
+        if path == "/promote":
+            self._handle_promote(body)
+            return
+        if path == "/promote/revert":
+            self._handle_promote_revert(body)
+            return
+
+        # path == "/ask" from here on
         storyline_id = body.get("storyline_id")
         col_id = body.get("col_id")
         block_id = body.get("block_id")
@@ -568,6 +767,92 @@ class Handler(BaseHTTPRequestHandler):
             with _in_flight_lock:
                 _in_flight_blocks.discard(block_key)
 
+    # --- /promote handler ---
+
+    def _handle_promote(self, body: dict) -> None:
+        storyline_id = body.get("storyline_id")
+        if not storyline_id:
+            self._send_json(400, {"error": "storyline_id is required"})
+            return
+        storyline = find_storyline(storyline_id)
+        if storyline is None:
+            self._send_json(404, {"error": f"unknown storyline: {storyline_id!r}"})
+            return
+
+        # Gate 1: one in-flight promotion per storyline (drop duplicate
+        # double-clicks / browser retries instead of spawning a second CLI).
+        with _in_flight_lock:
+            if storyline_id in _in_flight_promotions:
+                self._send_json(429, {
+                    "error": "another promotion is in flight for this storyline",
+                    "storyline_id": storyline_id,
+                })
+                return
+            _in_flight_promotions.add(storyline_id)
+
+        try:
+            # Gate 2: global concurrency cap (shared with /ask). Non-blocking.
+            if not _ask_semaphore.acquire(blocking=False):
+                self._send_json(429, {
+                    "error": f"server is at max concurrency ({_max_concurrent}); try again in a moment",
+                    "max_concurrent": _max_concurrent,
+                })
+                return
+            try:
+                prompt = build_promote_prompt(storyline)
+                result = run_cli(prompt)
+                if not result["ok"]:
+                    self._send_json(502, {
+                        "error": "cli call failed",
+                        "stderr": result["stderr"],
+                        "elapsed_s": result["elapsed_s"],
+                    })
+                    return
+
+                promoted, parse_err = parse_cli_json(result["answer"])
+                if parse_err:
+                    self._send_json(502, {
+                        "error": f"CLI returned invalid JSON: {parse_err}",
+                        "raw_preview": (result["answer"] or "")[:500],
+                        "elapsed_s": result["elapsed_s"],
+                    })
+                    return
+
+                ok, msg = validate_promoted_storyline(promoted, storyline_id)
+                if not ok:
+                    self._send_json(502, {
+                        "error": f"promoted storyline failed validation: {msg}",
+                        "raw_preview": json.dumps(promoted, ensure_ascii=False)[:600],
+                        "elapsed_s": result["elapsed_s"],
+                    })
+                    return
+
+                # Stamp the result so the frontend can render a "Promoted" badge.
+                promoted["promoted"] = True
+                promoted["depth"] = "full"
+                promoted["promoted_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                promoted["promoted_cli"] = _CLI
+                promoted["promoted_model"] = _MODEL
+
+                upsert_promotion(storyline_id, promoted)
+                self._send_json(200, {
+                    "storyline": promoted,
+                    "elapsed_s": round(result["elapsed_s"], 2),
+                })
+            finally:
+                _ask_semaphore.release()
+        finally:
+            with _in_flight_lock:
+                _in_flight_promotions.discard(storyline_id)
+
+    def _handle_promote_revert(self, body: dict) -> None:
+        storyline_id = body.get("storyline_id")
+        if not storyline_id:
+            self._send_json(400, {"error": "storyline_id is required"})
+            return
+        deleted = delete_promotion(storyline_id)
+        self._send_json(200, {"reverted": deleted, "storyline_id": storyline_id})
+
 
 # ----- Bootstrap ---------------------------------------------------------
 
@@ -616,7 +901,7 @@ def parse_args():
 
 
 def main():
-    global _HTML_PATH, _JSON_PATH, _SIDECAR_PATH, _WALKTHROUGH_DATA
+    global _HTML_PATH, _JSON_PATH, _SIDECAR_PATH, _PROMOTIONS_PATH, _WALKTHROUGH_DATA
     global _CLI, _CLI_BIN, _MODEL, _REPO, _BARE
     global _ask_semaphore, _max_concurrent
 
@@ -650,6 +935,7 @@ def main():
             print(f"[live_server] no sibling JSON found — recovered WALKTHROUGH_DATA from {_HTML_PATH.name}")
 
     _SIDECAR_PATH = _HTML_PATH.with_suffix(".followups.json")
+    _PROMOTIONS_PATH = _HTML_PATH.with_suffix(".promotions.json")
 
     _CLI = args.cli
     _CLI_BIN = shutil.which(_CLI)
@@ -667,6 +953,7 @@ def main():
     print(f"[live_server] HTML:     {_HTML_PATH}")
     print(f"[live_server] JSON:     {_JSON_PATH if _JSON_PATH else '(extracted from HTML)'}")
     print(f"[live_server] sidecar:  {_SIDECAR_PATH}")
+    print(f"[live_server] promotions: {_PROMOTIONS_PATH}")
     print(f"[live_server] CLI:      {_CLI} ({_CLI_BIN}){' [--bare]' if _BARE else ''}")
     if _MODEL:
         print(f"[live_server] model:    {_MODEL}")
