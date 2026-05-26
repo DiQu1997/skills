@@ -1,23 +1,31 @@
-# Walkthrough JSON Schema (v0.4-reading)
+# Walkthrough JSON Schema (v0.5-reading)
 
 This is the JSON contract between the analysis prompt and the HTML template
 for the `code-reading-walkthrough` skill — the reading-oriented sibling of
-`code-review-narrative`'s v0.3 schema.
+`code-review-narrative`.
 
-The schema reuses v0.3's storyline/step/code-view structure (including
-`function_purpose` and `walkthrough` annotations) and replaces the
-review-specific fields (behavior_delta, evaluation, suggestions, concerns)
-with reading-specific ones (mental_model_anchor, invariants,
-key_data_structures, design_rationale).
+## What changed from v0.4
+
+v0.5 replaces the linear `steps[]` model with a **flow inspector**: each
+full-depth storyline is rendered as a swimlane-style canvas where columns
+are functions / lanes, blocks are small chunks within a column (3–10 lines
+each), and edges between blocks visualize control flow (calls, catches,
+finally branches). Clicking a block expands its code inline; a right-side
+dock surfaces what / why / touches / failure-mode for the selected block.
+
+Storyline-level fields (`mental_model_anchor`, `purpose`,
+`architectural_context`, `change_overview`) carry over unchanged. The
+`code_view` shape, `function_purpose`, and `walkthrough` annotation
+structures from v0.4 carry over as building blocks for per-block content.
 
 ## Top level
 
 ```jsonc
 {
-  "schema_version": "0.4-reading",
-  "metadata": { ... },
-  "summary":  { ... },
-  "scope":    { ... },
+  "schema_version": "0.5-reading",
+  "metadata":   { ... },
+  "summary":    { ... },
+  "scope":      { ... },
   "storylines": [ ... ]
 }
 ```
@@ -108,14 +116,13 @@ appears in the final JSON.
     "involved_modules": [
       { "module": "string", "role_in_storyline": "string" }
     ],
-    "data_flow":       "string | null (high-level prose — input → transformation → output)",
-    "diagram":         { "type": "mermaid | ascii | none", "content": "string" }
+    "data_flow":       "string | null (high-level prose — input → transformation → output)"
   },
 
   "change_overview": "string (multiple paragraphs OK — what this storyline does as a whole, told as a reading)",
-  "reading_roadmap": "string (each step's role and how they connect)",
 
-  "steps": [ ... ]
+  // The flow inspector — replaces v0.4 `steps[]` + `reading_roadmap`.
+  "diagram": { ... }
 }
 ```
 
@@ -124,77 +131,135 @@ appears in the final JSON.
 When `depth === "summary"`, only these fields are required:
 - `id`, `title`, `kind`, `depth`, `importance_scores`, `summary`, `files_touched`
 
-`steps[]` is omitted (or empty array). `mental_model_anchor`, `purpose`,
-`architectural_context`, `change_overview`, `reading_roadmap` are omitted.
+`diagram` is omitted. `mental_model_anchor`, `purpose`,
+`architectural_context`, `change_overview` are omitted.
 
 The template renders summary-depth storylines as cards with a "Summary only"
-pill and a "Promote to full" button (button is signaling-only in v1 — clicking
-it does not auto-rerun the agent).
+pill and a "Promote to full" button.
 
-## steps
+## diagram
+
+The flow canvas for one full-depth storyline.
 
 ```jsonc
 {
-  "id":    "S1.1",
-  "title": "string",
-  "track": "core | supporting | utility | data | extension",
+  // Header shown above the canvas. Optional badge appears when a single
+  // file dominates the storyline (e.g. "turn-runner.ts").
+  "file_badge":     "string | null",
+  "subtitle":       "string | null (e.g. 'four functions, one lifecycle')",
 
-  "code_view": {
-    "primary_changes":       [ FileView ],            // for reading: this is just the code to read; "changes" is a misnomer kept for schema compatibility, all lines have change="unchanged"
-    "supporting_definitions":[ FileViewWithReason ]   // 0–3 entries
-  },
-
-  "summary": "string (factual: what this step shows, 1–3 sentences)",
-
-  "invariants": [ "string (what must always hold here — pre/post-conditions, structural guarantees, ordering)" ],
-
-  "key_data_structures": [
+  // Phase legend — LLM picks 3-7 phase categories per storyline. Phases
+  // are NOT used for layout (blocks don't align across columns by phase).
+  // They're color tags shown on each block and in a top-right legend.
+  "phases": [
     {
-      "name":  "string (e.g. 'MemTable')",
-      "shape": "string (brief — 'sorted skiplist of (key, seq, value) entries')",
-      "role":  "string (why the reader needs to keep it in head)"
+      "id":    "string (lowercase identifier, e.g. 'guard')",
+      "label": "string (display name, e.g. 'Guard')",
+      "color": "string (CSS color OR one of the named tokens below)"
     }
   ],
 
-  "usage_context": {
-    "primary_usage_scenario": "string (narrative: when this code is hit and what's typically happening upstream)",
-    "callers": [
-      {
-        "file":    "string",
-        "line":    "int",
-        "snippet": "string",
-        "context": "string (what this caller is doing, why it reaches into this code)"
-      }
-    ],
-    "call_patterns": [
-      "string (e.g. 'always invoked with non-empty input', 'called once per request from the hot path')"
-    ],
-    "implicit_dependencies": [
-      "string (e.g. 'callers assume sorted output', 'relies on side-effect of incrementing seq number')"
-    ]
-  },
-
-  "codebase_patterns": {
-    "similar_code_elsewhere": [
-      { "file": "string", "line": "int", "note": "string (how it's analogous)" }
-    ],
-    "convention_alignment": "string (does this follow established patterns in the codebase?)",
-    "deviations":           "string | null"
-  },
-
-  "design_rationale": [
+  // Columns — left-to-right, auto-numbered STEP 1, STEP 2... in the UI.
+  // Usually one column per function but the LLM can choose other lanes
+  // (e.g. 'happy path' / 'error path', 'request' / 'response').
+  "cols": [
     {
-      "approach":               "string (description of an alternative the design could have taken)",
-      "evidence_kind":          "evidenced | analytical",
-      "tradeoff_vs_chosen_design": "string (what's gained / lost vs the chosen design)"
+      "id":          "string (stable identifier referenced by blocks)",
+      "function":    "string | null (when col == a function, e.g. 'startTurn'; null for non-function lanes)",
+      "label":       "string (display label; defaults to `function` if function is set)",
+      "description": "string (one paragraph: what this function/lane does)",
+      "blocks":      [ Block ]
     }
   ],
 
-  "analysis": "string | null (deeper technical reasoning — performance, edge cases, system-wide ripples; null when nothing notable)",
-
-  "prerequisites": [ Prerequisite ]
+  // Edges between blocks. Drawn as bezier curves on an SVG overlay above
+  // the canvas. Omit / empty array for storylines without cross-block flow.
+  "edges": [
+    {
+      "from":  "string (block id)",
+      "to":    "string (block id, in any column)",
+      "label": "string | null (short, e.g. 'CALL', 'CATCH', 'FINALLY')",
+      "style": "solid | dashed",
+      "color": "string | null (CSS color; defaults to a neutral tone)"
+    }
+  ]
 }
 ```
+
+### Named phase color tokens
+
+These pre-defined tokens render to muted, accessible swatches. LLMs should
+prefer tokens to literal hex values unless a custom palette is needed.
+
+| Token        | Use for                                  |
+|--------------|------------------------------------------|
+| `guard`      | Pre-condition checks, validation         |
+| `setup`      | Wiring, initialization, allocation       |
+| `main`       | Core logic, the function's reason to be  |
+| `handoff`    | Calls into other functions / async hand-off |
+| `cleanup`    | Resource release, idempotent finalizers  |
+| `error`      | Failure paths, catch blocks              |
+| `persist`    | Writing to durable storage or external sinks |
+| `emit`       | Producing output (events, messages, responses) |
+
+A custom token can be declared inline by providing a hex `color`.
+
+## Block
+
+A small chunk of code within a column (typically 3–10 lines).
+
+```jsonc
+{
+  "id":         "string (unique within the diagram, e.g. 'B1', 'B2')",
+  "phase":      "string (id from diagram.phases)",
+  "title":      "string (uppercase short label, e.g. 'GUARD', 'BUILD EXECUTOR')",
+  "line_range": "string (display label, e.g. 'L412–414' or 'L419')",
+
+  "one_liner": "string (the rationale shown directly on the block face — 1-2 sentences explaining what this block does AND why)",
+
+  "code_view": FileView,   // shown when the block is expanded (clicked)
+
+  "right_panel": {
+    "what_it_does":    "string (paragraph — factual mechanics)",
+    "why_its_here":    "string (paragraph — design rationale: why this exists in the flow, what would break without it)",
+
+    "touches": [
+      // Chips shown in the right-panel TOUCHES section. Each is a symbol
+      // (function, variable, type) this block interacts with. The block id
+      // is optional — when present and resolvable, clicking the chip
+      // navigates to that block.
+      {
+        "label":   "string (e.g. 'handleRunFailure', 'AbortController.abort')",
+        "kind":    "function | type | variable | external",
+        "block":   "string | null (block id if the touch resolves to another block in this diagram)"
+      }
+    ],
+
+    "failure_mode": [
+      // Bullet items shown in the right-panel FAILURE MODE section.
+      "string (each item is one bullet — what can go wrong here OR an explicit non-failure claim)"
+    ],
+
+    // Optional extra sections — render below the four primary sections if present.
+    "invariants":          [ "string" ],
+    "key_data_structures": [
+      { "name": "string", "shape": "string", "role": "string" }
+    ],
+    "prerequisites":       [ Prerequisite ]
+  }
+}
+```
+
+### Block sizing guidance
+
+- A block should be one coherent concern. If you can describe it in a
+  single `one_liner` without "and", the size is right.
+- 3–10 lines per block is typical. Single-line blocks are fine when a
+  single statement is its own concept (e.g. a `return`, a `throw`,
+  a single side-effecting call).
+- Lines within a function don't need to be exhaustively partitioned —
+  trivial connective lines can be left ungrouped.
+- Blocks within a column appear in **authored order** (top-down).
 
 ### FileView
 
@@ -206,37 +271,6 @@ it does not auto-rerun the agent).
   "context_end_line":   "int",
   "lines": [
     { "line_num": "int", "content": "string", "change": "unchanged" }
-  ],
-
-  // Optional — function-level rationale (omit if not function-scoped)
-  "function_purpose": {
-    "function_name": "string | null",
-    "structure":     "single | multi_section",
-
-    // when structure == "single"
-    "problem_solved": "string (the problem this function exists to solve)",
-    "without_it":     "string (what callers / the system would do if this didn't exist)",
-
-    // when structure == "multi_section"
-    "sections": [
-      {
-        "line_start":     "int",
-        "line_end":       "int",
-        "section_name":   "string",
-        "problem_solved": "string",
-        "without_it":     "string"
-      }
-    ]
-  },
-
-  // Optional — code-attached walkthrough annotations (sparse, mental-model-centric)
-  "walkthrough": [
-    {
-      "line_start":  "int",
-      "line_end":    "int",
-      "chunk_role":  "string (e.g. 'the public entrypoint', 'main logic', 'invariant guard', 'error path')",
-      "explanation": "string (substantial paragraph: what this chunk does AND why this way)"
-    }
   ]
 }
 ```
@@ -245,32 +279,22 @@ For reading walkthroughs all `change` values are `"unchanged"` (the schema
 keeps the field for compatibility with the template's rendering code, which
 already handles `unchanged` as plain code lines).
 
-#### Walkthrough scope heuristic — reading mode
+`code_view.lines` should cover exactly the block's `line_range` plus a few
+lines of surrounding context (typically ±1–2 lines) so the reader can see
+where the block sits in the function. The renderer highlights the block's
+own line range; surrounding context lines render dimmer.
 
-For each candidate chunk, ask: *"Does understanding this chunk help the
-reader build a mental model of how this code works?"* Annotate when yes,
-skip when no. Aim for sparse, high-signal annotations — typically 2–4 per
-non-trivial function, not line-by-line narration.
-
-#### `function_purpose` design notes
-
-- `problem_solved` = motivation ("the system needs Y; this function provides Y").
-- `without_it` = counter-factual ("if this didn't exist, callers would pay X cost / risk Y / be unable to do Z").
-- For reading mode these articulate why the function earns its keep —
-  exactly what a new reader needs to anchor on.
-
-### FileViewWithReason
-
-Same as FileView (including optional `function_purpose` and `walkthrough`),
-plus `why_included: "string"` explaining why this supporting definition is
-needed to follow the primary code.
+v0.4's per-FileView `function_purpose` and `walkthrough[]` annotations
+are dropped from v0.5 — block-level `one_liner` + right-panel `what_it_does`
+replace them, and function-level purpose lives on the **column**
+(`cols[].description`) instead.
 
 ### Prerequisite
 
 ```jsonc
 {
-  "kind":         "prior_step | data_structure | external_concept",
-  "reference_id": "string (step ID for prior_step, otherwise free identifier)",
+  "kind":         "prior_block | data_structure | external_concept",
+  "reference_id": "string (block ID for prior_block, otherwise free identifier)",
   "summary":      "string (the actual reminder text shown to the reader)"
 }
 ```
@@ -281,40 +305,51 @@ The schema serves a single role for reading mode — **research assistant** —
 rather than the dual research-assistant + senior-reviewer role in
 `code-review-narrative`. There is no judgement layer:
 
-- `summary` (factual)
-- `invariants`, `key_data_structures` (factual mental-model scaffolding)
-- `mental_model_anchor` (factual + pedagogical — the picture to remember)
-- `usage_context`, `codebase_patterns` (factual context)
-- `design_rationale` (factual + analytical — why this design over others, tradeoffs only, no preference)
-- `analysis` (deeper technical reasoning, kept for cases where a step's
-  implications warrant a paragraph; null when nothing notable)
+- `one_liner` (block-face): factual + a touch of why
+- `right_panel.what_it_does`: factual mechanics
+- `right_panel.why_its_here`: design rationale (no preference, just trade-offs)
+- `right_panel.touches`: factual cross-references
+- `right_panel.failure_mode`: factual edge-case enumeration (or explicit non-failure claim)
+- `right_panel.invariants` / `key_data_structures` / `prerequisites`:
+  optional mental-model scaffolding when relevant
+- Storyline-level `mental_model_anchor`: the picture to remember
 
 Empty/null fields render as nothing. Don't pad.
 
 ## Always populate vs. populate when relevant
 
-**Always populate** (every full-depth step):
-- `id`, `title`, `track`
-- `code_view.primary_changes` (≥1 entry)
-- `summary`
-- `usage_context.primary_usage_scenario`
+**Always populate** (every block in a full-depth diagram):
+- `id`, `phase`, `title`, `line_range`, `one_liner`
+- `code_view` (full `FileView` covering the block's lines)
+- `right_panel.what_it_does`
+- `right_panel.why_its_here`
 
 **Populate when relevant** (may be empty/null):
-- `invariants` (substantive code only — null/[] for trivial steps)
-- `key_data_structures` (only the nouns the reader must hold in head)
-- `code_view.supporting_definitions`
-- `FileView.function_purpose` (when function-scoped)
-- `FileView.walkthrough` (when annotations aid understanding)
-- `usage_context.callers / call_patterns / implicit_dependencies`
-- `codebase_patterns`
-- `design_rationale`
-- `analysis`
-- `prerequisites`
+- `right_panel.touches` (chips for cross-block / external references)
+- `right_panel.failure_mode` (bullets — or explicit "No failure mode" sentence)
+- `right_panel.invariants`
+- `right_panel.key_data_structures`
+- `right_panel.prerequisites`
 
-A trivial helper-function step may have just `summary` + `code_view`. A
-core-algorithm step likely populates everything substantively.
+A trivial guard block may have just `what_it_does` + `why_its_here`. A
+core-algorithm block likely populates `touches` + `failure_mode` +
+`invariants` substantively.
 
-## Importance scoring rubric (mirrored here for self-containedness)
+## Edges — when to author them
+
+Author an edge when there's a control-flow or causal relationship that
+spans columns and isn't obvious from reading left-to-right. Examples:
+
+- `from: caller-block, to: callee's first block, label: "CALL"`
+- `from: try-block, to: catch-block in another function, label: "CATCH"`
+- `from: try-block, to: finally-block (often in a sibling function), label: "FINALLY"`
+- `from: event-emit, to: handler's entry block, label: "EMITS"`
+
+Don't author edges for purely linear flow within a column (the visual
+stacking already conveys order). Don't author edges for distant or
+purely informational relationships — put those in `touches` chips instead.
+
+## Importance scoring rubric
 
 Each lens scored 1–3, summed for `importance_scores.total` (range 4–12).
 
@@ -332,10 +367,15 @@ Default `N = clamp(ceil(0.4 * total_storylines), 4, 12)`.
 ## Validation
 
 In addition to JSON-shape validation:
-- All step `id`s unique within the document
-- All `prerequisites[].reference_id` of kind `prior_step` resolve to actual step IDs
-- Every full-depth step has non-empty `code_view.primary_changes`
-- Every full-depth storyline has non-null `mental_model_anchor`
+- All block `id`s unique within a diagram
+- All `edges[].from` and `edges[].to` reference block IDs that exist in
+  the same diagram
+- All `right_panel.touches[].block` references resolve when non-null
+- All `prerequisites[].reference_id` of kind `prior_block` resolve to actual block IDs
+- Every block has non-empty `code_view.lines`
+- `code_view.lines[].line_num` falls within (or adjacent to) `block.line_range`
+- Every full-depth storyline has non-null `mental_model_anchor` and a `diagram`
 - Every storyline has `importance_scores.total === sum of four sub-scores`
 - Exactly one storyline of any given `id`
 - `scope.mode` is `"files"` or `"topic"`
+- Each `block.phase` resolves to one of `diagram.phases[].id`

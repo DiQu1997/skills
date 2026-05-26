@@ -2,9 +2,10 @@
 """
 live_server.py — companion server for code-reading-walkthrough skill.
 
-Serves the rendered walkthrough HTML and exposes a /ask endpoint that
-shells out to `codex exec` (or `claude -p` via --cli claude) to answer
-follow-up questions about a specific step. Answers persist in a sidecar
+Serves the rendered walkthrough HTML (v0.5 flow-inspector schema) and
+exposes a /ask endpoint that shells out to `codex exec` (or `claude -p`
+via --cli claude) to answer follow-up questions about a specific block
+inside a storyline's diagram. Answers persist in a sidecar
 `<basename>.followups.json` next to the HTML.
 
 The static HTML (rendered by render.py) still works standalone — the
@@ -12,8 +13,8 @@ server only enables an opt-in "live mode" where the page detects the
 server's presence (via /__alive) and reveals a chat input.
 
 Concurrency is capped (default 2 in-flight subprocesses, configurable
-via --max-concurrent) and at most one question per step can be in
-flight at a time. Excess requests get 429.
+via --max-concurrent) and at most one question per (storyline,block)
+can be in flight at a time. Excess requests get 429.
 
 Usage:
     python3 live_server.py <path/to/walkthrough.html> \\
@@ -60,7 +61,7 @@ _BARE: bool = False
 _ask_semaphore: threading.BoundedSemaphore = None
 _max_concurrent: int = DEFAULT_MAX_CONCURRENT
 _in_flight_lock = threading.Lock()
-_in_flight_steps: set = set()
+_in_flight_blocks: set = set()   # set of "storyline_id/block_id" keys
 
 
 # ----- Walkthrough key ---------------------------------------------------
@@ -126,70 +127,86 @@ def append_qa(entry: dict) -> None:
     save_sidecar_atomic(data)
 
 
+def _grouped_followups() -> dict:
+    """Reshape sidecar's qa[] into the per-block grouped form the template
+    expects: { followups: { "<storyline_id>/<col_id>/<block_id>": [ ... ] } }.
+    Each entry carries (question, answer, ts) — the minimum the template
+    renders. The full record stays in sidecar.qa for later inspection."""
+    data = load_sidecar()
+    grouped: dict = {}
+    for q in data.get("qa", []) or []:
+        sid = q.get("storyline_id", "")
+        cid = q.get("col_id", "")
+        bid = q.get("block_id", "")
+        if not (sid and bid):
+            continue
+        key = f"{sid}/{cid}/{bid}"
+        grouped.setdefault(key, []).append({
+            "question": q.get("question", ""),
+            "answer": q.get("answer_markdown", ""),
+            "ts": q.get("asked_at", ""),
+        })
+    return {
+        "schema_version": data.get("schema_version", "1"),
+        "walkthrough_key": data.get("walkthrough_key", ""),
+        "followups": grouped,
+    }
+
+
 # ----- Prompt building ---------------------------------------------------
 
-def find_step(step_id: str):
+def find_block(storyline_id: str, block_id: str):
+    """Locate (storyline, col, block) by IDs. Returns (None, None, None) if not found."""
     for sl in _WALKTHROUGH_DATA.get("storylines", []):
-        for st in sl.get("steps", []) or []:
-            if st["id"] == step_id:
-                return sl, st
-    return None, None
+        if sl.get("id") != storyline_id:
+            continue
+        diagram = sl.get("diagram") or {}
+        for col in diagram.get("cols", []) or []:
+            for blk in col.get("blocks", []) or []:
+                if blk.get("id") == block_id:
+                    return sl, col, blk
+    return None, None, None
 
 
-def _render_file_view(fv: dict, why_included: str = None) -> list:
-    """Render a single FileView (primary_changes or supporting_definition).
-    Returns lines (no trailing newline) ready to be joined."""
+def get_phase_label(storyline: dict, phase_id: str) -> str:
+    for p in (storyline.get("diagram") or {}).get("phases", []) or []:
+        if p.get("id") == phase_id:
+            return p.get("label", phase_id)
+    return phase_id or ""
+
+
+def render_code_view(code_view: dict, block_range: str = "") -> str:
+    """Render a v0.5 block code_view: a single FileView { file, language,
+    context_start_line, context_end_line, lines[] }. Marks in-range lines
+    with `*` so the model knows which lines the block actually covers."""
+    if not code_view:
+        return ""
     parts = []
-    header = f"--- {fv['file']} (lines {fv['context_start_line']}–{fv['context_end_line']}, {fv['language']}) ---"
-    parts.append(header)
-    if why_included:
-        parts.append(f"[supporting definition — {why_included}]")
-
-    fp = fv.get("function_purpose")
-    if fp:
-        name = fp.get("function_name") or "(unnamed block)"
-        parts.append(f"[function_purpose for {name}]")
-        if fp.get("structure") == "multi_section":
-            for sec in fp.get("sections", []) or []:
-                parts.append(f"  • L{sec.get('line_start')}–{sec.get('line_end')} {sec.get('section_name','')}: "
-                             f"problem={sec.get('problem_solved','')} | without_it={sec.get('without_it','')}")
-        else:
-            if fp.get("problem_solved"):
-                parts.append(f"  • problem_solved: {fp['problem_solved']}")
-            if fp.get("without_it"):
-                parts.append(f"  • without_it:     {fp['without_it']}")
-
-    for line in fv.get("lines", []):
-        # Reading mode: all lines are "unchanged" — render as plain code.
-        # We still tolerate added/removed in case the same renderer ever
-        # gets reused across modes.
-        marker = "+" if line.get("change") == "added" else ("-" if line.get("change") == "removed" else " ")
-        parts.append(f"{line['line_num']:5d} {marker} {line['content']}")
-
-    wt = fv.get("walkthrough") or []
-    if wt:
-        parts.append("")
-        parts.append("[walkthrough annotations on this file]")
-        for ann in wt:
-            rng = (f"L{ann['line_start']}" if ann["line_start"] == ann["line_end"]
-                   else f"L{ann['line_start']}–{ann['line_end']}")
-            parts.append(f"  {rng} ({ann.get('chunk_role','')}): {ann.get('explanation','')}")
-    return parts
-
-
-def render_code_view(code_view: dict) -> str:
-    """Render primary_changes + supporting_definitions as a readable text block."""
-    parts = []
-    for fv in code_view.get("primary_changes", []) or []:
-        parts.extend(_render_file_view(fv))
-        parts.append("")
-    sd = code_view.get("supporting_definitions") or []
-    if sd:
-        parts.append("## Supporting definitions (referenced by the code, not the focus)")
-        for fv in sd:
-            parts.extend(_render_file_view(fv, why_included=fv.get("why_included")))
-            parts.append("")
+    f = code_view.get("file", "?")
+    lang = code_view.get("language", "")
+    parts.append(f"--- {f} (lines {code_view.get('context_start_line','?')}–{code_view.get('context_end_line','?')}, {lang}) ---")
+    if block_range:
+        parts.append(f"[block range: {block_range}]")
+    lo, hi = _parse_line_range(block_range)
+    for line in code_view.get("lines", []):
+        ln = line.get("line_num", 0)
+        in_range = (lo is not None and lo <= ln <= hi)
+        marker = "*" if in_range else " "
+        parts.append(f"{ln:5d} {marker} {line.get('content','')}")
     return "\n".join(parts)
+
+
+def _parse_line_range(range_str: str):
+    """Parse 'L412–414' / 'L419' / '412-414' → (412, 414) or (419, 419)."""
+    import re
+    if not range_str:
+        return None, None
+    m = re.match(r"L?(\d+)(?:[–—-](\d+))?", str(range_str))
+    if not m:
+        return None, None
+    lo = int(m.group(1))
+    hi = int(m.group(2)) if m.group(2) else lo
+    return lo, hi
 
 
 def _bullets(items, prefix="- "):
@@ -234,106 +251,94 @@ def _render_storyline_context(storyline: dict) -> list:
 
     if storyline.get("change_overview"):
         out.append(f"\n## Overview\n{storyline['change_overview']}")
-    if storyline.get("reading_roadmap"):
-        out.append(f"\n## Reading roadmap\n{storyline['reading_roadmap']}")
     return out
 
 
-def _render_step_factual_context(step: dict) -> list:
-    """Step-level factual context (reading-mode research-assistant fields).
-
-    Differs from review mode by using invariants / key_data_structures /
-    design_rationale in place of behavior_delta + the analytical fields.
-    """
+def _render_block_right_panel(block: dict) -> list:
+    """Render the block's right_panel fields (what the reader sees in the
+    dock when they click the block). v0.5 fields: what_it_does, why_its_here,
+    touches, failure_mode, plus optional invariants / key_data_structures /
+    prerequisites."""
+    rp = block.get("right_panel") or {}
     out = []
 
-    if step.get("invariants"):
-        out.append("\n## Invariants (what must always hold here)")
-        out.extend(_bullets(step["invariants"]))
+    if rp.get("what_it_does"):
+        out.append(f"\n## What it does\n{rp['what_it_does']}")
+    if rp.get("why_its_here"):
+        out.append(f"\n## Why it's here\n{rp['why_its_here']}")
 
-    kds = step.get("key_data_structures") or []
+    touches = rp.get("touches") or []
+    if touches:
+        out.append("\n## Touches")
+        for t in touches:
+            label = t.get("label", "?")
+            kind = t.get("kind", "")
+            ref = t.get("block")
+            line = f"- `{label}`"
+            if kind:
+                line += f" ({kind})"
+            if ref:
+                line += f" → block {ref}"
+            out.append(line)
+
+    fm = rp.get("failure_mode") or []
+    if fm:
+        out.append("\n## Failure mode")
+        out.extend(_bullets(fm))
+
+    inv = rp.get("invariants") or []
+    if inv:
+        out.append("\n## Invariants (what must always hold here)")
+        out.extend(_bullets(inv))
+
+    kds = rp.get("key_data_structures") or []
     if kds:
         out.append("\n## Key data structures")
         for d in kds:
-            name = d.get("name", "?")
-            shape = d.get("shape", "")
-            role = d.get("role", "")
-            out.append(f"- **{name}** — {shape}")
-            if role:
-                out.append(f"    role: {role}")
+            out.append(f"- **{d.get('name','?')}** — {d.get('shape','')}")
+            if d.get("role"):
+                out.append(f"    role: {d['role']}")
 
-    uc = step.get("usage_context") or {}
-    has_uc = uc.get("primary_usage_scenario") or uc.get("callers") or uc.get("call_patterns") or uc.get("implicit_dependencies")
-    if has_uc:
-        out.append("\n## Usage context")
-        if uc.get("primary_usage_scenario"):
-            out.append(f"- Primary usage scenario: {uc['primary_usage_scenario']}")
-        if uc.get("callers"):
-            out.append("- Callers:")
-            for c in uc["callers"]:
-                out.append(f"  • {c.get('file','?')}:{c.get('line','?')} — {c.get('context','')}")
-                if c.get("snippet"):
-                    out.append(f"      `{c['snippet']}`")
-        if uc.get("call_patterns"):
-            out.append("- Call patterns:")
-            out.extend(_bullets(uc["call_patterns"], prefix="  • "))
-        if uc.get("implicit_dependencies"):
-            out.append("- Implicit dependencies:")
-            out.extend(_bullets(uc["implicit_dependencies"], prefix="  • "))
+    prereqs = rp.get("prerequisites") or []
+    if prereqs:
+        out.append("\n## Prerequisites")
+        for p in prereqs:
+            kind = p.get("kind", "?")
+            ref = p.get("reference_id", "")
+            summary = p.get("summary", "")
+            out.append(f"- ({kind}{(' → '+ref) if ref else ''}) {summary}")
 
-    cp = step.get("codebase_patterns") or {}
-    similar = cp.get("similar_code_elsewhere") or cp.get("similar_changes_elsewhere") or []
-    has_cp = cp.get("convention_alignment") or cp.get("deviations") or similar
-    if has_cp:
-        out.append("\n## Codebase patterns")
-        if cp.get("convention_alignment"):
-            out.append(f"- Convention alignment: {cp['convention_alignment']}")
-        if cp.get("deviations"):
-            out.append(f"- Deviations: {cp['deviations']}")
-        if similar:
-            out.append("- Similar code elsewhere:")
-            for s in similar:
-                out.append(f"  • {s.get('file','?')}:{s.get('line','?')} — {s.get('note','')}")
-
-    # design_rationale supersedes review-mode's alternative_approaches;
-    # tolerate both for forward-compat.
-    dr = step.get("design_rationale") or step.get("alternative_approaches") or []
-    if dr:
-        out.append("\n## Design rationale (alternatives and trade-offs)")
-        for a in dr:
-            out.append(f"- ({a.get('evidence_kind','?')}) {a.get('approach','')}")
-            tr = a.get("tradeoff_vs_chosen_design") or a.get("tradeoff_vs_chosen")
-            if tr:
-                out.append(f"    tradeoff: {tr}")
-
-    if step.get("analysis"):
-        out.append(f"\n## Analysis\n{step['analysis']}")
     return out
 
 
-def render_step_context(storyline: dict, step: dict, prior_qas: list) -> str:
+def render_block_context(storyline: dict, col: dict, block: dict, prior_qas: list) -> str:
     """Build the context block fed to the LLM.
 
-    Mirrors what the reader sees in the right pane: storyline-level
-    mental_model_anchor/purpose/architecture/overview, step-level
-    factual context (invariants, key_data_structures, usage_context,
-    codebase_patterns, design_rationale, analysis), then the code block
-    with walkthrough + function_purpose annotations.
+    Mirrors what the reader sees: storyline-level mental_model_anchor /
+    purpose / architecture / overview, then the specific col + block they
+    have open (the col's function description, the block's title /
+    line_range / one_liner / right_panel content), then the code, then
+    any prior Q&A history on this block.
     """
     out = _render_storyline_context(storyline)
 
-    out.append(f"\n# Step: {step.get('title','')} ({step.get('id','')})")
-    if step.get("summary"):
-        out.append(f"\n## Step summary\n{step['summary']}")
+    col_label = col.get("label") or col.get("function") or col.get("id", "?")
+    col_desc = col.get("description") or ""
+    out.append(f"\n# Block in focus: {block.get('title','?')} ({block.get('id','?')})")
+    out.append(f"\n_Column:_ `{col_label}`{' — ' + col_desc if col_desc else ''}")
+    out.append(f"_Phase:_ {get_phase_label(storyline, block.get('phase',''))}")
+    out.append(f"_Lines:_ {block.get('line_range','?')}")
+    if block.get("one_liner"):
+        out.append(f"\n## Block one-liner (what the card shows)\n{block['one_liner']}")
 
-    out.extend(_render_step_factual_context(step))
+    out.extend(_render_block_right_panel(block))
 
     out.append("\n## Code under discussion")
-    out.append(render_code_view(step.get("code_view", {})))
+    out.append(render_code_view(block.get("code_view") or {}, block.get("line_range", "")))
 
     if prior_qas:
-        out.append("## Prior follow-up Q&A on this step (most recent last)")
-        for qa in prior_qas[-5:]:  # cap the trailing context at 5
+        out.append("\n## Prior follow-up Q&A on this block (most recent last)")
+        for qa in prior_qas[-5:]:
             out.append(f"\nQ: {qa.get('question','')}")
             out.append(f"A: {qa.get('answer_markdown','')}")
     return "\n".join(out)
@@ -344,7 +349,7 @@ def load_prompt_template() -> str:
         # Fallback inline template — keeps the server runnable even if
         # the file got deleted.
         return (
-            "You are answering a follow-up question about a specific step in a code-reading walkthrough.\n"
+            "You are answering a follow-up question about a specific block in a code-reading walkthrough.\n"
             "Answer in markdown. Be concise. Cite line numbers when relevant.\n"
             "If the question is about general syntax/grammar, answer that directly.\n\n"
             "{{CONTEXT}}\n\n"
@@ -353,12 +358,12 @@ def load_prompt_template() -> str:
     return PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
-def build_prompt(step_id: str, question: str, prior_qas: list) -> str:
-    storyline, step = find_step(step_id)
-    if step is None:
-        raise ValueError(f"unknown step_id: {step_id}")
+def build_prompt(storyline_id: str, block_id: str, question: str, prior_qas: list) -> str:
+    storyline, col, block = find_block(storyline_id, block_id)
+    if block is None:
+        raise ValueError(f"unknown block: {storyline_id}/{block_id}")
     template = load_prompt_template()
-    context = render_step_context(storyline, step, prior_qas)
+    context = render_block_context(storyline, col, block, prior_qas)
     return template.replace("{{CONTEXT}}", context).replace("{{QUESTION}}", question.strip())
 
 
@@ -445,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html()
         elif path == "/__alive":
             with _in_flight_lock:
-                in_flight = sorted(_in_flight_steps)
+                in_flight = sorted(_in_flight_blocks)
             self._send_json(200, {
                 "ok": True,
                 "cli": _CLI,
@@ -454,10 +459,10 @@ class Handler(BaseHTTPRequestHandler):
                 "html": str(_HTML_PATH),
                 "walkthrough_key": compute_walkthrough_key(_WALKTHROUGH_DATA["metadata"]),
                 "max_concurrent": _max_concurrent,
-                "in_flight_steps": in_flight,
+                "in_flight_blocks": in_flight,
             })
         elif path == "/followups":
-            self._send_json(200, load_sidecar())
+            self._send_json(200, _grouped_followups())
         else:
             self._send_json(404, {"error": "not found", "path": path})
 
@@ -474,27 +479,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"bad request body: {e}"})
             return
 
-        step_id = body.get("step_id")
+        storyline_id = body.get("storyline_id")
+        col_id = body.get("col_id")
+        block_id = body.get("block_id")
         question = (body.get("question") or "").strip()
-        if not step_id or not question:
-            self._send_json(400, {"error": "step_id and question are required"})
+        if not storyline_id or not block_id or not question:
+            self._send_json(400, {"error": "storyline_id, block_id, and question are required"})
             return
-        storyline, step = find_step(step_id)
-        if step is None:
-            self._send_json(404, {"error": f"unknown step_id: {step_id}"})
+        storyline, col, block = find_block(storyline_id, block_id)
+        if block is None:
+            self._send_json(404, {"error": f"unknown block: {storyline_id}/{block_id}"})
             return
+        # If client didn't pass col_id, recover from the resolved col so
+        # the QA entry still records it.
+        if not col_id:
+            col_id = col.get("id", "")
 
-        # Gate 1: at most one in-flight question per step. Catches the
+        block_key = f"{storyline_id}/{block_id}"
+
+        # Gate 1: at most one in-flight question per block. Catches the
         # browser-retry-on-network-blip case and double-clicks without
         # spawning a second subprocess for the same question.
         with _in_flight_lock:
-            if step_id in _in_flight_steps:
+            if block_key in _in_flight_blocks:
                 self._send_json(429, {
-                    "error": "another question is already in flight for this step",
-                    "step_id": step_id,
+                    "error": "another question is already in flight for this block",
+                    "storyline_id": storyline_id,
+                    "block_id": block_id,
                 })
                 return
-            _in_flight_steps.add(step_id)
+            _in_flight_blocks.add(block_key)
 
         try:
             # Gate 2: global concurrency cap. Non-blocking — excess
@@ -508,9 +522,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 sidecar = load_sidecar()
-                prior_qas = [q for q in sidecar["qa"] if q["step_id"] == step_id]
+                prior_qas = [
+                    q for q in sidecar["qa"]
+                    if q.get("storyline_id") == storyline_id and q.get("block_id") == block_id
+                ]
                 try:
-                    prompt = build_prompt(step_id, question, prior_qas)
+                    prompt = build_prompt(storyline_id, block_id, question, prior_qas)
                 except ValueError as e:
                     self._send_json(400, {"error": str(e)})
                     return
@@ -526,8 +543,9 @@ class Handler(BaseHTTPRequestHandler):
 
                 entry = {
                     "id": "qa-" + uuid.uuid4().hex[:12],
-                    "step_id": step_id,
-                    "storyline_id": storyline["id"],
+                    "storyline_id": storyline_id,
+                    "col_id": col_id,
+                    "block_id": block_id,
                     "question": question,
                     "answer_markdown": result["answer"],
                     "asked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -536,12 +554,19 @@ class Handler(BaseHTTPRequestHandler):
                     "elapsed_s": round(result["elapsed_s"], 2),
                 }
                 append_qa(entry)
-                self._send_json(200, entry)
+                # Return the entry in the shape the template expects: it
+                # only reads `answer` and `ts`, but we include the full
+                # record for completeness.
+                self._send_json(200, {
+                    "answer": entry["answer_markdown"],
+                    "ts": entry["asked_at"],
+                    **entry,
+                })
             finally:
                 _ask_semaphore.release()
         finally:
             with _in_flight_lock:
-                _in_flight_steps.discard(step_id)
+                _in_flight_blocks.discard(block_key)
 
 
 # ----- Bootstrap ---------------------------------------------------------
@@ -648,7 +673,12 @@ def main():
     if _REPO:
         print(f"[live_server] repo cwd: {_REPO}")
     print(f"[live_server] max concurrent /ask: {_max_concurrent}")
-    print(f"[live_server] storylines: {len(_WALKTHROUGH_DATA.get('storylines', []))}, steps: {sum(len(s.get('steps') or []) for s in _WALKTHROUGH_DATA.get('storylines', []))}")
+    storylines = _WALKTHROUGH_DATA.get("storylines", [])
+    total_blocks = sum(
+        sum(len(c.get("blocks") or []) for c in (s.get("diagram") or {}).get("cols", []) or [])
+        for s in storylines
+    )
+    print(f"[live_server] storylines: {len(storylines)}, blocks: {total_blocks}")
     print(f"[live_server] listening on http://127.0.0.1:{args.port}/   (Ctrl-C to stop)")
     print(f"[live_server] WARNING: binds loopback only — do NOT change the bind address. "
           f"/ask runs the CLI on arbitrary input; exposing this beyond 127.0.0.1 is a cost/exec risk.")
