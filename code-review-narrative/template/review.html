@@ -786,8 +786,9 @@
 
   .pr-overview, .storyline-overview {
     padding: 24px 32px 80px 32px;
-    max-width: 800px;
   }
+  .pr-overview { max-width: 1400px; }
+  .storyline-overview { max-width: 800px; }
   .pr-overview h1 { font-size: 22px; margin-bottom: 12px; word-wrap: break-word; }
   .storyline-overview h1 { font-size: 20px; margin-bottom: 12px; word-wrap: break-word; }
   .pr-overview h2, .storyline-overview h2 {
@@ -808,19 +809,45 @@
     border-radius: 0 6px 6px 0;
     margin-bottom: 8px;
   }
-  .pr-overview .storyline-summary {
+
+  /* Storyline section cards (PR overview) — each card pairs a clickable
+     head (title + badges + summary) with a body that shows the storyline's
+     DAG diagram. Replaces the old text-only ss-* list cards. */
+  .pr-overview .storyline-section {
+    margin-bottom: 28px;
+    background: #ffffff;
     border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 12px 16px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: border-color 0.1s;
+    border-radius: 10px;
+    overflow: hidden;
   }
-  .pr-overview .storyline-summary:hover { border-color: #0969da; }
-  .pr-overview .ss-title { font-weight: 600; margin-bottom: 6px; }
-  .pr-overview .ss-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-  .pr-overview .ss-summary { font-size: 13px; color: #656d76; }
-  .pr-overview .ss-confidence { font-size: 11px; color: #656d76; font-style: italic; margin-top: 6px; }
+  .pr-overview .storyline-head {
+    padding: 14px 20px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #d0d7de;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .pr-overview .storyline-head:hover { background: #eaeef2; }
+  .pr-overview .storyline-head h2 {
+    /* override the .pr-overview h2 uppercase/border styling for card titles */
+    font-size: 15px; font-weight: 600;
+    text-transform: none; letter-spacing: 0;
+    color: #1a1a1a;
+    margin: 0 0 6px;
+    padding: 0; border-bottom: none;
+    word-wrap: break-word;
+  }
+  .pr-overview .storyline-head .storyline-meta {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .pr-overview .storyline-head .head-summary {
+    font-size: 13px; color: #444; line-height: 1.45;
+  }
+  .pr-overview .storyline-body {
+    padding: 18px 20px 14px;
+    overflow-x: auto;
+  }
 
   .storyline-overview .purpose-block, .storyline-overview .arch-block {
     margin-bottom: 14px;
@@ -1651,19 +1678,28 @@
   }
 
   // ========== Center: PR overview ==========
+  // Layout: title + summary + description at top, then one section card per
+  // storyline (clickable head + DAG body), then the cross-storyline overview
+  // at the bottom as the "whole change in one frame" view. Each step box in
+  // every diagram navigates to that step's detail page; clicking a section
+  // head opens that storyline's overview.
   function renderPROverview() {
     const m = REVIEW_DATA.metadata;
     const s = REVIEW_DATA.summary;
-    const sls = REVIEW_DATA.storylines.map(sl => `
-      <div class="storyline-summary" onclick="goToStorylineOverview('${sl.id}')">
-        <div class="ss-title">${escapeHtml(sl.title)}</div>
-        <div class="ss-meta">
-          <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
-          <span class="badge badge-confidence-${sl.confidence}">${escapeHtml(sl.confidence)} confidence</span>
-          <span class="badge" style="background:#f6f8fa; color:#656d76; border-color:#d0d7de;">${sl.steps.length} step${sl.steps.length === 1 ? '' : 's'}</span>
+    const storylineSections = REVIEW_DATA.storylines.map(sl => `
+      <div class="storyline-section">
+        <div class="storyline-head" onclick="goToStorylineOverview('${escapeHtml(sl.id)}')">
+          <h2>${escapeHtml(sl.id)} · ${escapeHtml(sl.title)}</h2>
+          <div class="storyline-meta">
+            <span class="badge badge-kind">${escapeHtml(sl.kind)}</span>
+            <span class="badge badge-confidence-${sl.confidence}">${escapeHtml(sl.confidence)} confidence</span>
+            <span class="badge" style="background:#f6f8fa; color:#656d76; border-color:#d0d7de;">${sl.steps.length} step${sl.steps.length === 1 ? '' : 's'}</span>
+          </div>
+          <div class="head-summary">${escapeHtml(sl.summary)}</div>
         </div>
-        <div class="ss-summary">${escapeHtml(sl.summary)}</div>
-        <div class="ss-confidence">Why this grouping: ${escapeHtml(sl.confidence_reasoning)}</div>
+        <div class="storyline-body">
+          ${renderStorylineDiagram(sl)}
+        </div>
       </div>
     `).join('');
     const crossDiagram = renderCrossStorylineDiagram();
@@ -1673,10 +1709,10 @@
         <div class="one-liner">${escapeHtml(s.one_line)}</div>
         <div class="description">${renderInlineMarkdown(s.description)}</div>
 
-        ${crossDiagram ? `<h2>Storyline graph</h2>${crossDiagram}` : ''}
-
         <h2>Storylines (${REVIEW_DATA.storylines.length})</h2>
-        ${sls}
+        ${storylineSections}
+
+        ${crossDiagram ? `<h2>Cross-storyline overview</h2>${crossDiagram}` : ''}
       </div>
     `;
   }
@@ -1754,6 +1790,9 @@
 
         ${purposeBlocks ? `<h2>Purpose</h2>${purposeBlocks}` : ''}
 
+        <h2>Step graph</h2>
+        ${renderStorylineDiagram(sl)}
+
         ${archBlocks ? `<h2>Architectural context</h2>${archBlocks}` : ''}
 
         ${sl.change_overview ? `
@@ -1765,9 +1804,6 @@
           <h2>Reading roadmap</h2>
           <div>${renderInlineMarkdown(sl.reading_roadmap)}</div>
         ` : ''}
-
-        <h2>Step graph</h2>
-        ${renderStorylineDiagram(sl)}
 
         ${sl.steps.length > 0 ? `
           <button class="start-reading-btn" onclick="navigateToStep('${sl.steps[0].id}')">Start reading from ${escapeHtml(sl.steps[0].id)} →</button>
