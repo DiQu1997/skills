@@ -251,7 +251,14 @@
     line-height: 1.55;
     background: var(--code-bg);
     border-radius: 4px;
-    overflow-x: auto;
+    overflow: auto;
+    /* User can drag the bottom-right corner to resize the code panel.
+       ResizeObserver in JS persists the chosen size per block + redraws
+       edges so the SVG overlay tracks the new layout. */
+    resize: both;
+    min-height: 80px;
+    max-height: 80vh;
+    min-width: 240px;
   }
   .code-line { display: flex; gap: 12px; padding: 0 8px; }
   .code-line .ln {
@@ -4808,6 +4815,12 @@
     promotions: {},
     pendingPromotions: new Set(),
     promotionErrors: {},     // storyline_id → last error message
+
+    // Per-block code-panel sizes, set by the user dragging the resize
+    // handle on .block-code. Keyed by block id; { width, height } as raw
+    // CSS strings (e.g. "640px"). Re-applied on re-render so a block keeps
+    // its size across selections + page reloads.
+    blockSizes: {},
   };
 
   const STORAGE_PREFIX = 'walkthrough.v0.5.' +
@@ -4821,6 +4834,7 @@
         storylineId: state.storylineId,
         expandedBlockIds: state.expandedBlockIds,
         focusedBlockId: state.focusedBlockId,
+        blockSizes: state.blockSizes,
       }));
     } catch (e) {}
   }
@@ -4831,6 +4845,7 @@
       const v = JSON.parse(raw);
       Object.assign(state, v);
       if (!Array.isArray(state.expandedBlockIds)) state.expandedBlockIds = [];
+      if (!state.blockSizes || typeof state.blockSizes !== 'object') state.blockSizes = {};
     } catch (e) {}
   }
 
@@ -5049,6 +5064,7 @@
       </div>
     `;
     bindBlockClicks();
+    observeBlockCodePanels();
     renderEdges(storyline);
   }
 
@@ -5103,7 +5119,52 @@
       const srcHtml = highlighted[i] ?? escapeHtml(l.content ?? '');
       return `<div class="code-line${inRange ? '' : ' context'}"><span class="ln">${l.line_num}</span><span class="src">${srcHtml}</span></div>`;
     }).join('');
-    return `<div class="block-code">${html}</div>`;
+    // Re-apply any user-chosen resize from previous interactions so the
+    // panel doesn't snap back to default on every re-render.
+    const saved = state.blockSizes[block.id];
+    const sizeStyle = saved
+      ? `style="${saved.width ? `width:${escapeAttr(saved.width)};` : ''}${saved.height ? `height:${escapeAttr(saved.height)};` : ''}"`
+      : '';
+    return `<div class="block-code" data-block-code-for="${escapeAttr(block.id)}" ${sizeStyle}>${html}</div>`;
+  }
+
+  // Single ResizeObserver shared across all .block-code panels. Fires when
+  // the user drags the bottom-right corner; saves the new dimensions per
+  // block and triggers an edges redraw so the SVG overlay tracks the new
+  // layout. Created lazily on first use to avoid SSR issues.
+  let _blockResizeObserver = null;
+  function getBlockResizeObserver() {
+    if (_blockResizeObserver) return _blockResizeObserver;
+    _blockResizeObserver = new ResizeObserver(entries => {
+      let changed = false;
+      for (const entry of entries) {
+        const el = entry.target;
+        const blockId = el.dataset.blockCodeFor;
+        if (!blockId) continue;
+        // Element.style.width/height are only set after the user actually
+        // drags; if empty, skip (the change was a layout-driven reflow not
+        // a user resize).
+        const w = el.style.width || '';
+        const h = el.style.height || '';
+        if (!w && !h) continue;
+        const prev = state.blockSizes[blockId] || {};
+        if (prev.width === w && prev.height === h) continue;
+        state.blockSizes[blockId] = { width: w, height: h };
+        changed = true;
+      }
+      if (changed) saveState();
+      // Always recompute edges — block height can change from any reflow
+      // (selection, expansion, resize), and stale SVG positions look broken.
+      if (state.view === 'storyline') {
+        requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+      }
+    });
+    return _blockResizeObserver;
+  }
+
+  function observeBlockCodePanels() {
+    const ro = getBlockResizeObserver();
+    document.querySelectorAll('#canvas .block-code').forEach(el => ro.observe(el));
   }
 
   // -------- Syntax highlighter (TS/JS/Python) --------
@@ -5400,15 +5461,20 @@
     }
 
     if (TL > FR) {
-      // Forward inter-column → horizontal bezier right→left
+      // Forward inter-column. Both bezier control points sit at the gutter's
+      // horizontal midpoint, so the curve stays in the inter-column whitespace
+      // even when the gap is small (typical 28px CSS gap). The previous logic
+      // pushed control points outward by `sweep`, which on tight grids landed
+      // them INSIDE the opposite column and pulled the bezier across block
+      // bodies / code panels.
       const startX = FR;
       const startY = fromCY;
       const endX   = TL;
       const endY   = toCY;
-      const sweep  = Math.max(40, (endX - startX) * 0.4);
+      const midX   = (startX + endX) / 2;
       return {
-        d: `M ${startX} ${startY} C ${startX + sweep} ${startY}, ${endX - sweep} ${endY}, ${endX} ${endY}`,
-        labelX: (startX + endX) / 2,
+        d: `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`,
+        labelX: midX,
         labelY: (startY + endY) / 2,
       };
     }
