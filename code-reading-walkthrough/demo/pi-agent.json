@@ -256,7 +256,13 @@
                     "Throws synchronously if a run is already active — never enters runWithLifecycle, so no events are emitted.",
                     "Subscribers see nothing for a rejected prompt — the caller's await rejects, that's the only signal."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "prompt",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B1A",
@@ -730,7 +736,13 @@
                     "The duplicate guard at L452 cannot fire from prompt() (which already guards) but protects against direct private-method abuse.",
                     "No throw path here — every line either assigns state or installs the abortController."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "runWithLifecycle",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B4",
@@ -967,7 +979,13 @@
                     "If a listener throws on any of these four events, the promise rejects up to runWithLifecycle's catch — but we're already in the catch, so the error becomes the rejection of runWithLifecycle itself.",
                     "EMPTY_USAGE is shared by reference — subscribers must not mutate it (the constant is never observed to be mutated in this codebase)."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "handleRunFailure",
+                    "kind": "function"
+                  }
+                ]
               }
             ]
           },
@@ -1054,7 +1072,13 @@
                   "failure_mode": [
                     "Every statement is a synchronous assignment or a no-op optional call — no failure mode."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "finishRun",
+                    "kind": "function"
+                  }
+                ]
               }
             ]
           },
@@ -1306,7 +1330,13 @@
                     "After message_end, streamingMessage is undefined and the message appears in _state.messages exactly once.",
                     "pendingToolCalls is always a fresh Set reference after a tool lifecycle event."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "processEvents",
+                    "kind": "function"
+                  }
+                ]
               }
             ]
           }
@@ -1492,7 +1522,13 @@
                       "block": null
                     }
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "runAgentLoop",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B9",
@@ -1726,7 +1762,13 @@
                       "block": null
                     }
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "runLoop",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B12",
@@ -2584,7 +2626,13 @@
                       "block": null
                     }
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "executeToolCalls",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B17",
@@ -3080,7 +3128,13 @@
                       "role": "Heterogeneous array: immediate outcomes inline, deferred executes as closures. Resolved uniformly by the Promise.all step below."
                     }
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "executeToolCallsParallel",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B19",
@@ -3294,7 +3348,13 @@
                       "block": null
                     }
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "prepareToolCall",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B21",
@@ -3772,7 +3832,13 @@
                     "If a tool throws but has already emitted updates, the updates land before the final error — UIs see partial progress then an error.",
                     "If a tool ignores the signal it will run to completion despite an abort."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "executePreparedToolCall",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B23",
@@ -3991,7 +4057,13 @@
                   "failure_mode": [
                     "Throwing in afterToolCall replaces the (possibly successful) tool result with an error result — the contract recommends returning safe fallbacks instead."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "finalizeExecutedToolCall",
+                    "kind": "function"
+                  }
+                ]
               }
             ]
           }

@@ -346,6 +346,34 @@ The single FileView for this block's code:
 - `lines[]` — every line in `[context_start_line, context_end_line]`
   with `line_num`, `content`, `change: "unchanged"`
 
+#### `defines` (optional)
+
+If this block introduces a top-level symbol — a function definition, a
+class, an exported type, a notable constant — list it here:
+
+```jsonc
+"defines": [
+  { "name": "runWithLifecycle", "kind": "function" },
+  { "name": "AgentTool",        "kind": "type" }
+]
+```
+
+The renderer aggregates `defines` across all blocks in the walkthrough
+to build a symbol index. Identifiers in any block's code that match an
+indexed name become clickable — a popover shows the defining block's
+snippet plus a "jump to block" link.
+
+Rules:
+- Only list **top-level declarations** the reader might want to peek
+  at from elsewhere. Skip internal locals (`const result = …` inside
+  a function body), parameter names, loop variables.
+- Skip when the block doesn't introduce anything. Most blocks omit
+  this field — the entry point block of a function column is the
+  typical place to declare it.
+- Don't declare the same name in multiple blocks; pick the one
+  reader would most want to jump to (usually the actual declaration
+  site, not a re-export).
+
 #### `right_panel`
 
 The content the dock shows when the block is the dock's focus.
