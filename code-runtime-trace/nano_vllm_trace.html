@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nano-vLLM Runtime Trace</title>
+<style>
+  :root {
+    --bg:         #f5f5f4;
+    --bg-card:    #ffffff;
+    --bg-soft:    #f1f0ec;
+    --fg:         #1f2328;
+    --fg-soft:    #57606a;
+    --fg-faint:   #8b949e;
+    --border:     #e1e4e8;
+    --border-strong: #1f2328;
+    --accent:     #5b6cff;
+    --accent-soft:#eef0ff;
+    --code-bg:    #fbfaf7;
+
+    --st-waiting-bg:  #fdf3d6;   --st-waiting-fg:  #9a7409;
+    --st-running-bg:  #ddd3f0;   --st-running-fg:  #5b3e9c;
+    --st-finished-bg: #dfe3e6;   --st-finished-fg: #4a5560;
+
+    --blk-free-bg: #f6f8fa;      --blk-free-fg: #8b949e;
+    --blk-used-bg: #d6e4f5;      --blk-used-fg: #205493;
+    --blk-shared-bg: #ddd3f0;    --blk-shared-fg: #5b3e9c;
+    --blk-cached-only-bg: #f1f0ec; --blk-cached-only-fg: #8b6914;
+
+    --flash:      rgba(255, 220, 120, 0.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--fg);
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* ===== App shell ===== */
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 6px 18px;
+    align-items: center;
+  }
+  .topbar-title {
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .topbar-subtitle {
+    color: var(--fg-soft);
+    font-size: 12px;
+    grid-column: 1 / 2;
+  }
+  .topbar-subtitle .sub-chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    background: var(--bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+  .step-bar {
+    grid-column: 2 / 3;
+    grid-row: 1 / 3;
+    display: flex; flex-direction: column; align-items: stretch;
+    gap: 6px; min-width: 360px;
+  }
+  .step-line {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--fg-soft);
+  }
+  .step-counter {
+    font-family: ui-monospace, monospace;
+    font-weight: 600; color: var(--fg);
+    background: var(--bg); padding: 2px 8px; border-radius: 3px;
+  }
+  .step-title {
+    flex: 1;
+    color: var(--fg);
+    font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .transport { display: flex; align-items: center; gap: 4px; }
+  .transport button {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--fg);
+    padding: 4px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .transport button:hover { background: var(--bg-soft); }
+  .transport button:disabled { opacity: 0.4; cursor: default; }
+  .transport .play { font-weight: bold; min-width: 36px; }
+  .transport select {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--fg); font-size: 11px;
+    padding: 3px 4px; border-radius: 3px;
+    margin-left: 4px;
+  }
+  .scrubber-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .scrubber {
+    flex: 1; appearance: none;
+    height: 4px;
+    background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--pct, 0%), var(--border) var(--pct, 0%), var(--border) 100%);
+    border-radius: 2px; outline: none;
+  }
+  .scrubber::-webkit-slider-thumb {
+    appearance: none; width: 12px; height: 12px;
+    background: var(--accent); border-radius: 50%; cursor: pointer;
+  }
+  .scrubber::-moz-range-thumb {
+    width: 12px; height: 12px;
+    background: var(--accent); border: none; border-radius: 50%; cursor: pointer;
+  }
+
+  /* ===== Main grid ===== */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 0;
+    overflow: hidden;
+  }
+  .code-pane {
+    border-right: 1px solid var(--border);
+    background: var(--bg-card);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .code-tabs {
+    display: flex;
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex: 0 0 auto;
+  }
+  .code-tab {
+    padding: 7px 14px;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    cursor: pointer;
+    border-right: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .code-tab:hover { color: var(--fg); background: var(--bg); }
+  .code-tab.active {
+    color: var(--fg);
+    background: var(--bg-card);
+    border-bottom: 2px solid var(--accent);
+    font-weight: 600;
+  }
+  .code-content {
+    flex: 1;
+    overflow: auto;
+    background: var(--code-bg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 0;
+    padding: 6px 0;
+  }
+  .code-line {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    padding: 0 14px;
+  }
+  .code-line .ln {
+    color: var(--fg-faint);
+    text-align: right;
+    padding-right: 14px;
+    user-select: none;
+  }
+  .code-line .src { white-space: pre; }
+  .code-line.cur {
+    background: rgba(91, 108, 255, 0.10);
+    border-left: 3px solid var(--accent);
+    margin-left: -3px;
+  }
+  .code-line.cur .ln { color: var(--accent); font-weight: 700; }
+
+  /* Token highlighter classes */
+  .tok-kw     { color: #5b3e9c; font-weight: 600; }
+  .tok-type   { color: #205493; }
+  .tok-str    { color: #8a5a14; }
+  .tok-num    { color: #2b6b5e; }
+  .tok-com    { color: #8b949e; font-style: italic; }
+  .tok-fn     { color: #2f7a2f; }
+  .tok-builtin{ color: #a4332a; }
+  .tok-op     { color: #57606a; }
+
+  /* ===== State panes ===== */
+  .state-panes {
+    overflow: auto;
+    padding: 12px 16px 80px;
+    display: flex; flex-direction: column;
+    gap: 14px;
+  }
+  .state-pane {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    transition: box-shadow 200ms, border-color 200ms;
+  }
+  .state-pane.highlighted {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .state-pane h3 {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    margin: 0 0 8px;
+  }
+
+  /* Sequence cards */
+  .seq-list { display: flex; flex-direction: column; gap: 8px; }
+  .seq-card {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 10px;
+    background: var(--bg);
+    font-size: 12px;
+  }
+  .seq-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 4px;
+  }
+  .seq-id { font-family: ui-monospace, monospace; font-weight: 700; }
+  .seq-status {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--bg-soft);
+    color: var(--fg-soft);
+  }
+  .seq-status.WAITING  { background: var(--st-waiting-bg);  color: var(--st-waiting-fg); }
+  .seq-status.RUNNING  { background: var(--st-running-bg);  color: var(--st-running-fg); }
+  .seq-status.FINISHED { background: var(--st-finished-bg); color: var(--st-finished-fg); }
+  .seq-meta {
+    font-size: 11px; color: var(--fg-soft);
+    display: grid; grid-template-columns: auto 1fr; gap: 2px 8px;
+    margin-top: 4px;
+  }
+  .seq-meta .lbl { color: var(--fg-faint); }
+  .seq-tokens {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+    word-break: break-all;
+  }
+  .seq-tokens .tok-prompt { color: var(--fg); }
+  .seq-tokens .tok-cached { color: #2f7a2f; }
+  .seq-tokens .tok-completion { color: var(--accent); font-weight: 600; }
+  .block-chips {
+    display: flex; flex-wrap: wrap; gap: 3px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+  }
+  .block-chip {
+    background: var(--blk-used-bg); color: var(--blk-used-fg);
+    padding: 1px 5px; border-radius: 3px; font-weight: 600;
+  }
+
+  /* Block grid */
+  .block-grid {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .block-cell {
+    aspect-ratio: 1.2 / 1;
+    border-radius: 4px;
+    padding: 5px 6px;
+    border: 1px solid var(--border);
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    display: flex; flex-direction: column;
+    justify-content: space-between;
+    background: var(--blk-free-bg);
+    color: var(--blk-free-fg);
+    overflow: hidden;
+    transition: background 240ms, color 240ms, border-color 240ms;
+  }
+  .block-cell.used   { background: var(--blk-used-bg); color: var(--blk-used-fg); border-color: var(--blk-used-fg); }
+  .block-cell.shared { background: var(--blk-shared-bg); color: var(--blk-shared-fg); border-color: var(--blk-shared-fg); }
+  .block-cell.cached-free {
+    background: var(--blk-cached-only-bg); color: var(--blk-cached-only-fg);
+    border-style: dashed;
+  }
+  .block-cell .blk-id { font-weight: 700; font-size: 11px; }
+  .block-cell .blk-ref { font-size: 9.5px; opacity: 0.8; }
+  .block-cell .blk-tokens {
+    font-size: 9px;
+    line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .block-legend {
+    margin-top: 8px;
+    display: flex; gap: 10px;
+    font-size: 10.5px;
+    color: var(--fg-soft);
+  }
+  .block-legend .leg {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .block-legend .swatch {
+    width: 10px; height: 10px; border-radius: 2px;
+    border: 1px solid var(--border);
+  }
+
+  /* Queues */
+  .q-row {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+  }
+  .q-label {
+    color: var(--fg-faint);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    min-width: 70px;
+  }
+  .q-chip {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-weight: 600;
+  }
+  .q-empty { color: var(--fg-faint); font-style: italic; font-family: inherit; font-size: 11px; }
+
+  /* Prefix cache table */
+  .kv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .kv-table th {
+    text-align: left;
+    color: var(--fg-faint);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .kv-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--bg);
+    color: var(--fg);
+  }
+  .kv-table td.preview { color: var(--fg-soft); }
+  .kv-empty {
+    color: var(--fg-faint);
+    font-size: 11px; font-style: italic;
+  }
+
+  /* Animation: changed-this-step flash */
+  @keyframes flash-bg {
+    0%   { background-color: var(--flash); }
+    100% { background-color: transparent; }
+  }
+  .flash { animation: flash-bg 800ms ease-out; }
+
+  /* ===== Footer ===== */
+  .narration {
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    padding: 12px 22px;
+    min-height: 60px;
+    max-height: 30vh;
+    overflow-y: auto;
+  }
+  .narration-text {
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--fg);
+  }
+  .narration-text code {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .narration-text strong { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div>
+      <div class="topbar-title" id="title">Loading…</div>
+      <div class="topbar-subtitle" id="subtitle"></div>
+    </div>
+    <div class="step-bar">
+      <div class="step-line">
+        <div class="step-counter"><span id="step-idx">0</span>/<span id="step-total">0</span></div>
+        <div class="step-title" id="step-title"></div>
+        <div class="transport">
+          <button id="btn-first"  title="First (Home)">⏮</button>
+          <button id="btn-prev"   title="Prev (←)">◀</button>
+          <button id="btn-play"   title="Play/pause (Space)" class="play">▶</button>
+          <button id="btn-next"   title="Next (→)">▶</button>
+          <button id="btn-last"   title="Last (End)">⏭</button>
+          <select id="speed-sel" title="Playback speed">
+            <option value="2000">0.5×</option>
+            <option value="1000" selected>1×</option>
+            <option value="500">2×</option>
+            <option value="250">4×</option>
+          </select>
+        </div>
+      </div>
+      <div class="scrubber-row">
+        <input type="range" class="scrubber" id="scrubber" min="0" max="0" value="0">
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="code-pane">
+      <div class="code-tabs" id="code-tabs"></div>
+      <pre class="code-content" id="code-content"></pre>
+    </section>
+    <section class="state-panes">
+      <div class="state-pane" id="pane-sequences" data-pane-id="sequences">
+        <h3>Sequences</h3>
+        <div class="seq-list" id="seq-list"></div>
+      </div>
+      <div class="state-pane" id="pane-block_pool" data-pane-id="block_pool">
+        <h3>KV cache block pool</h3>
+        <div class="block-grid" id="block-grid"></div>
+        <div class="block-legend">
+          <span class="leg"><span class="swatch" style="background:var(--blk-free-bg)"></span>free</span>
+          <span class="leg"><span class="swatch" style="background:var(--blk-used-bg);border-color:var(--blk-used-fg)"></span>used (ref=1)</span>
+          <span class="leg"><span class="swatch" style="background:var(--blk-shared-bg);border-color:var(--blk-shared-fg)"></span>shared (ref&ge;2)</span>
+          <span class="leg"><span class="swatch" style="background:var(--blk-cached-only-bg);border-style:dashed"></span>cached but free</span>
+        </div>
+      </div>
+      <div class="state-pane" id="pane-scheduler" data-pane-id="scheduler">
+        <h3>Scheduler queues</h3>
+        <div class="q-row"><span class="q-label">waiting</span><span id="q-waiting"></span></div>
+        <div class="q-row"><span class="q-label">running</span><span id="q-running"></span></div>
+      </div>
+      <div class="state-pane" id="pane-prefix_cache" data-pane-id="prefix_cache">
+        <h3>Prefix cache <code style="font-weight:400">hash → block_id</code></h3>
+        <table class="kv-table" id="kv-table"></table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="narration">
+    <div class="narration-text" id="narration">…</div>
+  </footer>
+</div>
+
+<script>
+  const TRACE = {"metadata": {"title": "Inside nano-vLLM — PagedAttention & prefix cache", "subject": "github.com/GeeeekExplorer/nano-vllm", "entry_point": "LLM.generate([promptA, promptB], SamplingParams(max_tokens=2))", "config": {"block_size": 4, "num_kvcache_blocks": 16, "max_num_seqs": 4, "max_num_batched_tokens": 16}}, "narrative": {"one_liner": "Two prompts sharing an 8-token prefix demonstrate PagedAttention block management, continuous batching, and cross-request prefix caching.", "description": "Watch a query traverse nano-vLLM end-to-end. promptA = [101..108, 201..204], promptB = [101..108, 301..304] — the first 8 tokens are shared. promptA gets 3 fresh blocks; promptB hits the prefix cache and reuses 2 of them."}, "code_panes": [{"id": "engine", "file": "nanovllm/engine/llm_engine.py", "language": "python", "lines": [{"line_num": 1, "content": "import atexit"}, {"line_num": 2, "content": "from dataclasses import fields"}, {"line_num": 3, "content": "from time import perf_counter"}, {"line_num": 4, "content": "from tqdm.auto import tqdm"}, {"line_num": 5, "content": "from transformers import AutoTokenizer"}, {"line_num": 6, "content": "import torch.multiprocessing as mp"}, {"line_num": 7, "content": ""}, {"line_num": 8, "content": "from nanovllm.config import Config"}, {"line_num": 9, "content": "from nanovllm.sampling_params import SamplingParams"}, {"line_num": 10, "content": "from nanovllm.engine.sequence import Sequence"}, {"line_num": 11, "content": "from nanovllm.engine.scheduler import Scheduler"}, {"line_num": 12, "content": "from nanovllm.engine.model_runner import ModelRunner"}, {"line_num": 13, "content": ""}, {"line_num": 14, "content": ""}, {"line_num": 15, "content": "class LLMEngine:"}, {"line_num": 16, "content": ""}, {"line_num": 17, "content": "    def __init__(self, model, **kwargs):"}, {"line_num": 18, "content": "        config_fields = {field.name for field in fields(Config)}"}, {"line_num": 19, "content": "        config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}"}, {"line_num": 20, "content": "        config = Config(model, **config_kwargs)"}, {"line_num": 21, "content": "        Sequence.block_size = config.kvcache_block_size"}, {"line_num": 22, "content": "        self.ps = []"}, {"line_num": 23, "content": "        self.events = []"}, {"line_num": 24, "content": "        ctx = mp.get_context(\"spawn\")"}, {"line_num": 25, "content": "        for i in range(1, config.tensor_parallel_size):"}, {"line_num": 26, "content": "            event = ctx.Event()"}, {"line_num": 27, "content": "            process = ctx.Process(target=ModelRunner, args=(config, i, event))"}, {"line_num": 28, "content": "            process.start()"}, {"line_num": 29, "content": "            self.ps.append(process)"}, {"line_num": 30, "content": "            self.events.append(event)"}, {"line_num": 31, "content": "        self.model_runner = ModelRunner(config, 0, self.events)"}, {"line_num": 32, "content": "        self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)"}, {"line_num": 33, "content": "        config.eos = self.tokenizer.eos_token_id"}, {"line_num": 34, "content": "        self.scheduler = Scheduler(config)"}, {"line_num": 35, "content": "        atexit.register(self.exit)"}, {"line_num": 36, "content": ""}, {"line_num": 37, "content": "    def exit(self):"}, {"line_num": 38, "content": "        self.model_runner.call(\"exit\")"}, {"line_num": 39, "content": "        del self.model_runner"}, {"line_num": 40, "content": "        for p in self.ps:"}, {"line_num": 41, "content": "            p.join()"}, {"line_num": 42, "content": ""}, {"line_num": 43, "content": "    def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):"}, {"line_num": 44, "content": "        if isinstance(prompt, str):"}, {"line_num": 45, "content": "            prompt = self.tokenizer.encode(prompt)"}, {"line_num": 46, "content": "        seq = Sequence(prompt, sampling_params)"}, {"line_num": 47, "content": "        self.scheduler.add(seq)"}, {"line_num": 48, "content": ""}, {"line_num": 49, "content": "    def step(self):"}, {"line_num": 50, "content": "        seqs, is_prefill = self.scheduler.schedule()"}, {"line_num": 51, "content": "        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)"}, {"line_num": 52, "content": "        token_ids = self.model_runner.call(\"run\", seqs, is_prefill)"}, {"line_num": 53, "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)"}, {"line_num": 54, "content": "        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]"}, {"line_num": 55, "content": "        return outputs, num_tokens"}, {"line_num": 56, "content": ""}, {"line_num": 57, "content": "    def is_finished(self):"}, {"line_num": 58, "content": "        return self.scheduler.is_finished()"}, {"line_num": 59, "content": ""}, {"line_num": 60, "content": "    def generate("}, {"line_num": 61, "content": "        self,"}, {"line_num": 62, "content": "        prompts: list[str] | list[list[int]],"}, {"line_num": 63, "content": "        sampling_params: SamplingParams | list[SamplingParams],"}, {"line_num": 64, "content": "        use_tqdm: bool = True,"}, {"line_num": 65, "content": "    ) -> list[str]:"}, {"line_num": 66, "content": "        pbar = tqdm(total=len(prompts), desc=\"Generating\", dynamic_ncols=True, disable=not use_tqdm)"}, {"line_num": 67, "content": "        if not isinstance(sampling_params, list):"}, {"line_num": 68, "content": "            sampling_params = [sampling_params] * len(prompts)"}, {"line_num": 69, "content": "        for prompt, sp in zip(prompts, sampling_params):"}, {"line_num": 70, "content": "            self.add_request(prompt, sp)"}, {"line_num": 71, "content": "        outputs = {}"}, {"line_num": 72, "content": "        prefill_throughput = decode_throughput = 0."}, {"line_num": 73, "content": "        while not self.is_finished():"}, {"line_num": 74, "content": "            t = perf_counter()"}, {"line_num": 75, "content": "            output, num_tokens = self.step()"}, {"line_num": 76, "content": "            if num_tokens > 0:"}, {"line_num": 77, "content": "                prefill_throughput = num_tokens / (perf_counter() - t)"}, {"line_num": 78, "content": "            else:"}, {"line_num": 79, "content": "                decode_throughput = -num_tokens / (perf_counter() - t)"}, {"line_num": 80, "content": "            pbar.set_postfix({"}, {"line_num": 81, "content": "                \"Prefill\": f\"{int(prefill_throughput)}tok/s\","}, {"line_num": 82, "content": "                \"Decode\": f\"{int(decode_throughput)}tok/s\","}, {"line_num": 83, "content": "            })"}, {"line_num": 84, "content": "            for seq_id, token_ids in output:"}, {"line_num": 85, "content": "                outputs[seq_id] = token_ids"}, {"line_num": 86, "content": "                pbar.update(1)"}, {"line_num": 87, "content": "        pbar.close()"}, {"line_num": 88, "content": "        outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]"}, {"line_num": 89, "content": "        outputs = [{\"text\": self.tokenizer.decode(token_ids), \"token_ids\": token_ids} for token_ids in outputs]"}, {"line_num": 90, "content": "        return outputs"}]}, {"id": "scheduler", "file": "nanovllm/engine/scheduler.py", "language": "python", "lines": [{"line_num": 1, "content": "from collections import deque"}, {"line_num": 2, "content": ""}, {"line_num": 3, "content": "from nanovllm.config import Config"}, {"line_num": 4, "content": "from nanovllm.engine.sequence import Sequence, SequenceStatus"}, {"line_num": 5, "content": "from nanovllm.engine.block_manager import BlockManager"}, {"line_num": 6, "content": ""}, {"line_num": 7, "content": ""}, {"line_num": 8, "content": "class Scheduler:"}, {"line_num": 9, "content": ""}, {"line_num": 10, "content": "    def __init__(self, config: Config):"}, {"line_num": 11, "content": "        self.max_num_seqs = config.max_num_seqs"}, {"line_num": 12, "content": "        self.max_num_batched_tokens = config.max_num_batched_tokens"}, {"line_num": 13, "content": "        self.eos = config.eos"}, {"line_num": 14, "content": "        self.block_size = config.kvcache_block_size"}, {"line_num": 15, "content": "        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)"}, {"line_num": 16, "content": "        self.waiting: deque[Sequence] = deque()"}, {"line_num": 17, "content": "        self.running: deque[Sequence] = deque()"}, {"line_num": 18, "content": ""}, {"line_num": 19, "content": "    def is_finished(self):"}, {"line_num": 20, "content": "        return not self.waiting and not self.running"}, {"line_num": 21, "content": ""}, {"line_num": 22, "content": "    def add(self, seq: Sequence):"}, {"line_num": 23, "content": "        self.waiting.append(seq)"}, {"line_num": 24, "content": ""}, {"line_num": 25, "content": "    def schedule(self) -> tuple[list[Sequence], bool]:"}, {"line_num": 26, "content": "        scheduled_seqs = []"}, {"line_num": 27, "content": "        num_batched_tokens = 0"}, {"line_num": 28, "content": ""}, {"line_num": 29, "content": "        # prefill"}, {"line_num": 30, "content": "        while self.waiting and len(scheduled_seqs) < self.max_num_seqs:"}, {"line_num": 31, "content": "            seq = self.waiting[0]"}, {"line_num": 32, "content": "            remaining = self.max_num_batched_tokens - num_batched_tokens"}, {"line_num": 33, "content": "            if remaining == 0:"}, {"line_num": 34, "content": "                break"}, {"line_num": 35, "content": "            if not seq.block_table:"}, {"line_num": 36, "content": "                num_cached_blocks = self.block_manager.can_allocate(seq)"}, {"line_num": 37, "content": "                if num_cached_blocks == -1:"}, {"line_num": 38, "content": "                    break"}, {"line_num": 39, "content": "                num_tokens = seq.num_tokens - num_cached_blocks * self.block_size"}, {"line_num": 40, "content": "            else:"}, {"line_num": 41, "content": "                num_tokens = seq.num_tokens - seq.num_cached_tokens"}, {"line_num": 42, "content": "            if remaining < num_tokens and scheduled_seqs:  # only allow chunked prefill for the first seq"}, {"line_num": 43, "content": "                break"}, {"line_num": 44, "content": "            if not seq.block_table:"}, {"line_num": 45, "content": "                self.block_manager.allocate(seq, num_cached_blocks)"}, {"line_num": 46, "content": "            seq.num_scheduled_tokens = min(num_tokens, remaining)"}, {"line_num": 47, "content": "            num_batched_tokens += seq.num_scheduled_tokens"}, {"line_num": 48, "content": "            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:"}, {"line_num": 49, "content": "                seq.status = SequenceStatus.RUNNING"}, {"line_num": 50, "content": "                self.waiting.popleft()"}, {"line_num": 51, "content": "                self.running.append(seq)"}, {"line_num": 52, "content": "            scheduled_seqs.append(seq)"}, {"line_num": 53, "content": ""}, {"line_num": 54, "content": "        if scheduled_seqs:"}, {"line_num": 55, "content": "            return scheduled_seqs, True"}, {"line_num": 56, "content": ""}, {"line_num": 57, "content": "        # decode"}, {"line_num": 58, "content": "        while self.running and len(scheduled_seqs) < self.max_num_seqs:"}, {"line_num": 59, "content": "            seq = self.running.popleft()"}, {"line_num": 60, "content": "            while not self.block_manager.can_append(seq):"}, {"line_num": 61, "content": "                if self.running:"}, {"line_num": 62, "content": "                    self.preempt(self.running.pop())"}, {"line_num": 63, "content": "                else:"}, {"line_num": 64, "content": "                    self.preempt(seq)"}, {"line_num": 65, "content": "                    break"}, {"line_num": 66, "content": "            else:"}, {"line_num": 67, "content": "                seq.num_scheduled_tokens = 1"}, {"line_num": 68, "content": "                seq.is_prefill = False"}, {"line_num": 69, "content": "                self.block_manager.may_append(seq)"}, {"line_num": 70, "content": "                scheduled_seqs.append(seq)"}, {"line_num": 71, "content": "        assert scheduled_seqs"}, {"line_num": 72, "content": "        self.running.extendleft(reversed(scheduled_seqs))"}, {"line_num": 73, "content": "        return scheduled_seqs, False"}, {"line_num": 74, "content": ""}, {"line_num": 75, "content": "    def preempt(self, seq: Sequence):"}, {"line_num": 76, "content": "        seq.status = SequenceStatus.WAITING"}, {"line_num": 77, "content": "        seq.is_prefill = True"}, {"line_num": 78, "content": "        self.block_manager.deallocate(seq)"}, {"line_num": 79, "content": "        self.waiting.appendleft(seq)"}, {"line_num": 80, "content": ""}, {"line_num": 81, "content": "    def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):"}, {"line_num": 82, "content": "        for seq, token_id in zip(seqs, token_ids):"}, {"line_num": 83, "content": "            self.block_manager.hash_blocks(seq)"}, {"line_num": 84, "content": "            seq.num_cached_tokens += seq.num_scheduled_tokens"}, {"line_num": 85, "content": "            seq.num_scheduled_tokens = 0"}, {"line_num": 86, "content": "            if is_prefill and seq.num_cached_tokens < seq.num_tokens:"}, {"line_num": 87, "content": "                continue"}, {"line_num": 88, "content": "            seq.append_token(token_id)"}, {"line_num": 89, "content": "            if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:"}, {"line_num": 90, "content": "                seq.status = SequenceStatus.FINISHED"}, {"line_num": 91, "content": "                self.block_manager.deallocate(seq)"}, {"line_num": 92, "content": "                self.running.remove(seq)"}]}, {"id": "block_manager", "file": "nanovllm/engine/block_manager.py", "language": "python", "lines": [{"line_num": 1, "content": "from collections import deque"}, {"line_num": 2, "content": "import xxhash"}, {"line_num": 3, "content": "import numpy as np"}, {"line_num": 4, "content": ""}, {"line_num": 5, "content": "from nanovllm.engine.sequence import Sequence"}, {"line_num": 6, "content": ""}, {"line_num": 7, "content": ""}, {"line_num": 8, "content": "class Block:"}, {"line_num": 9, "content": ""}, {"line_num": 10, "content": "    def __init__(self, block_id):"}, {"line_num": 11, "content": "        self.block_id = block_id"}, {"line_num": 12, "content": "        self.ref_count = 0"}, {"line_num": 13, "content": "        self.hash = -1"}, {"line_num": 14, "content": "        self.token_ids = []"}, {"line_num": 15, "content": ""}, {"line_num": 16, "content": "    def update(self, hash: int, token_ids: list[int]):"}, {"line_num": 17, "content": "        self.hash = hash"}, {"line_num": 18, "content": "        self.token_ids = token_ids"}, {"line_num": 19, "content": ""}, {"line_num": 20, "content": "    def reset(self):"}, {"line_num": 21, "content": "        self.ref_count = 1"}, {"line_num": 22, "content": "        self.hash = -1"}, {"line_num": 23, "content": "        self.token_ids = []"}, {"line_num": 24, "content": ""}, {"line_num": 25, "content": ""}, {"line_num": 26, "content": "class BlockManager:"}, {"line_num": 27, "content": ""}, {"line_num": 28, "content": "    def __init__(self, num_blocks: int, block_size: int):"}, {"line_num": 29, "content": "        self.block_size = block_size"}, {"line_num": 30, "content": "        self.blocks: list[Block] = [Block(i) for i in range(num_blocks)]"}, {"line_num": 31, "content": "        self.hash_to_block_id: dict[int, int] = dict()"}, {"line_num": 32, "content": "        self.free_block_ids: deque[int] = deque(range(num_blocks))"}, {"line_num": 33, "content": "        self.used_block_ids: set[int] = set()"}, {"line_num": 34, "content": ""}, {"line_num": 35, "content": "    @classmethod"}, {"line_num": 36, "content": "    def compute_hash(cls, token_ids: list[int], prefix: int = -1):"}, {"line_num": 37, "content": "        h = xxhash.xxh64()"}, {"line_num": 38, "content": "        if prefix != -1:"}, {"line_num": 39, "content": "            h.update(prefix.to_bytes(8, \"little\"))"}, {"line_num": 40, "content": "        h.update(np.array(token_ids).tobytes())"}, {"line_num": 41, "content": "        return h.intdigest()"}, {"line_num": 42, "content": ""}, {"line_num": 43, "content": "    def _allocate_block(self) -> int:"}, {"line_num": 44, "content": "        block_id = self.free_block_ids.popleft()"}, {"line_num": 45, "content": "        block = self.blocks[block_id]"}, {"line_num": 46, "content": "        assert block.ref_count == 0"}, {"line_num": 47, "content": "        if block.hash != -1 and self.hash_to_block_id.get(block.hash) == block_id:"}, {"line_num": 48, "content": "            del self.hash_to_block_id[block.hash]"}, {"line_num": 49, "content": "        block.reset()"}, {"line_num": 50, "content": "        self.used_block_ids.add(block_id)"}, {"line_num": 51, "content": "        return block_id"}, {"line_num": 52, "content": ""}, {"line_num": 53, "content": "    def _deallocate_block(self, block_id: int):"}, {"line_num": 54, "content": "        assert self.blocks[block_id].ref_count == 0"}, {"line_num": 55, "content": "        self.used_block_ids.remove(block_id)"}, {"line_num": 56, "content": "        self.free_block_ids.append(block_id)"}, {"line_num": 57, "content": ""}, {"line_num": 58, "content": "    def can_allocate(self, seq: Sequence) -> int:"}, {"line_num": 59, "content": "        h = -1"}, {"line_num": 60, "content": "        num_cached_blocks = 0"}, {"line_num": 61, "content": "        num_new_blocks = seq.num_blocks"}, {"line_num": 62, "content": "        for i in range(seq.num_blocks - 1):"}, {"line_num": 63, "content": "            token_ids = seq.block(i)"}, {"line_num": 64, "content": "            h = self.compute_hash(token_ids, h)"}, {"line_num": 65, "content": "            block_id = self.hash_to_block_id.get(h, -1)"}, {"line_num": 66, "content": "            if block_id == -1 or self.blocks[block_id].token_ids != token_ids:"}, {"line_num": 67, "content": "                break"}, {"line_num": 68, "content": "            num_cached_blocks += 1"}, {"line_num": 69, "content": "            if block_id in self.used_block_ids:"}, {"line_num": 70, "content": "                num_new_blocks -= 1"}, {"line_num": 71, "content": "        if len(self.free_block_ids) < num_new_blocks:"}, {"line_num": 72, "content": "            return -1"}, {"line_num": 73, "content": "        return num_cached_blocks"}, {"line_num": 74, "content": ""}, {"line_num": 75, "content": "    def allocate(self, seq: Sequence, num_cached_blocks: int):"}, {"line_num": 76, "content": "        assert not seq.block_table"}, {"line_num": 77, "content": "        h = -1"}, {"line_num": 78, "content": "        for i in range(num_cached_blocks):"}, {"line_num": 79, "content": "            token_ids = seq.block(i)"}, {"line_num": 80, "content": "            h = self.compute_hash(token_ids, h)"}, {"line_num": 81, "content": "            block_id = self.hash_to_block_id[h]"}, {"line_num": 82, "content": "            block = self.blocks[block_id]"}, {"line_num": 83, "content": "            if block_id in self.used_block_ids:"}, {"line_num": 84, "content": "                block.ref_count += 1"}, {"line_num": 85, "content": "            else:"}, {"line_num": 86, "content": "                block.ref_count = 1"}, {"line_num": 87, "content": "                self.free_block_ids.remove(block_id)"}, {"line_num": 88, "content": "                self.used_block_ids.add(block_id)"}, {"line_num": 89, "content": "            seq.block_table.append(block_id)"}, {"line_num": 90, "content": "        for i in range(num_cached_blocks, seq.num_blocks):"}, {"line_num": 91, "content": "            seq.block_table.append(self._allocate_block())"}, {"line_num": 92, "content": "        seq.num_cached_tokens = num_cached_blocks * self.block_size"}, {"line_num": 93, "content": ""}, {"line_num": 94, "content": "    def deallocate(self, seq: Sequence):"}, {"line_num": 95, "content": "        for block_id in reversed(seq.block_table):"}, {"line_num": 96, "content": "            block = self.blocks[block_id]"}, {"line_num": 97, "content": "            block.ref_count -= 1"}, {"line_num": 98, "content": "            if block.ref_count == 0:"}, {"line_num": 99, "content": "                self._deallocate_block(block_id)"}, {"line_num": 100, "content": "        seq.num_cached_tokens = 0"}, {"line_num": 101, "content": "        seq.block_table.clear()"}, {"line_num": 102, "content": ""}, {"line_num": 103, "content": "    def can_append(self, seq: Sequence) -> bool:"}, {"line_num": 104, "content": "        return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)"}, {"line_num": 105, "content": ""}, {"line_num": 106, "content": "    def may_append(self, seq: Sequence):"}, {"line_num": 107, "content": "        if len(seq) % self.block_size == 1:"}, {"line_num": 108, "content": "            seq.block_table.append(self._allocate_block())"}, {"line_num": 109, "content": ""}, {"line_num": 110, "content": "    def hash_blocks(self, seq: Sequence):"}, {"line_num": 111, "content": "        start = seq.num_cached_tokens // self.block_size"}, {"line_num": 112, "content": "        end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size"}, {"line_num": 113, "content": "        if start == end: return"}, {"line_num": 114, "content": "        h = self.blocks[seq.block_table[start - 1]].hash if start > 0 else -1"}, {"line_num": 115, "content": "        for i in range(start, end):"}, {"line_num": 116, "content": "            block = self.blocks[seq.block_table[i]]"}, {"line_num": 117, "content": "            token_ids = seq.block(i)"}, {"line_num": 118, "content": "            h = self.compute_hash(token_ids, h)"}, {"line_num": 119, "content": "            block.update(h, token_ids)"}, {"line_num": 120, "content": "            self.hash_to_block_id[h] = block.block_id"}]}, {"id": "sequence", "file": "nanovllm/engine/sequence.py", "language": "python", "lines": [{"line_num": 1, "content": "from copy import copy"}, {"line_num": 2, "content": "from enum import Enum, auto"}, {"line_num": 3, "content": "from itertools import count"}, {"line_num": 4, "content": ""}, {"line_num": 5, "content": "from nanovllm.sampling_params import SamplingParams"}, {"line_num": 6, "content": ""}, {"line_num": 7, "content": ""}, {"line_num": 8, "content": "class SequenceStatus(Enum):"}, {"line_num": 9, "content": "    WAITING = auto()"}, {"line_num": 10, "content": "    RUNNING = auto()"}, {"line_num": 11, "content": "    FINISHED = auto()"}, {"line_num": 12, "content": ""}, {"line_num": 13, "content": ""}, {"line_num": 14, "content": "class Sequence:"}, {"line_num": 15, "content": "    block_size = 256"}, {"line_num": 16, "content": "    counter = count()"}, {"line_num": 17, "content": ""}, {"line_num": 18, "content": "    def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):"}, {"line_num": 19, "content": "        self.seq_id = next(Sequence.counter)"}, {"line_num": 20, "content": "        self.status = SequenceStatus.WAITING"}, {"line_num": 21, "content": "        self.token_ids = copy(token_ids)"}, {"line_num": 22, "content": "        self.last_token = token_ids[-1]"}, {"line_num": 23, "content": "        self.num_tokens = len(self.token_ids)"}, {"line_num": 24, "content": "        self.num_prompt_tokens = len(token_ids)"}, {"line_num": 25, "content": "        self.num_cached_tokens = 0"}, {"line_num": 26, "content": "        self.num_scheduled_tokens = 0"}, {"line_num": 27, "content": "        self.is_prefill = True"}, {"line_num": 28, "content": "        self.block_table = []"}, {"line_num": 29, "content": "        self.temperature = sampling_params.temperature"}, {"line_num": 30, "content": "        self.max_tokens = sampling_params.max_tokens"}, {"line_num": 31, "content": "        self.ignore_eos = sampling_params.ignore_eos"}, {"line_num": 32, "content": ""}, {"line_num": 33, "content": "    def __len__(self):"}, {"line_num": 34, "content": "        return self.num_tokens"}, {"line_num": 35, "content": ""}, {"line_num": 36, "content": "    def __getitem__(self, key):"}, {"line_num": 37, "content": "        return self.token_ids[key]"}, {"line_num": 38, "content": ""}, {"line_num": 39, "content": "    @property"}, {"line_num": 40, "content": "    def is_finished(self):"}, {"line_num": 41, "content": "        return self.status == SequenceStatus.FINISHED"}, {"line_num": 42, "content": ""}, {"line_num": 43, "content": "    @property"}, {"line_num": 44, "content": "    def num_completion_tokens(self):"}, {"line_num": 45, "content": "        return self.num_tokens - self.num_prompt_tokens"}, {"line_num": 46, "content": ""}, {"line_num": 47, "content": "    @property"}, {"line_num": 48, "content": "    def prompt_token_ids(self):"}, {"line_num": 49, "content": "        return self.token_ids[:self.num_prompt_tokens]"}, {"line_num": 50, "content": ""}, {"line_num": 51, "content": "    @property"}, {"line_num": 52, "content": "    def completion_token_ids(self):"}, {"line_num": 53, "content": "        return self.token_ids[self.num_prompt_tokens:]"}, {"line_num": 54, "content": ""}, {"line_num": 55, "content": "    @property"}, {"line_num": 56, "content": "    def num_blocks(self):"}, {"line_num": 57, "content": "        return (self.num_tokens + self.block_size - 1) // self.block_size"}, {"line_num": 58, "content": ""}, {"line_num": 59, "content": "    @property"}, {"line_num": 60, "content": "    def last_block_num_tokens(self):"}, {"line_num": 61, "content": "        return self.num_tokens - (self.num_blocks - 1) * self.block_size"}, {"line_num": 62, "content": ""}, {"line_num": 63, "content": "    def block(self, i):"}, {"line_num": 64, "content": "        assert 0 <= i < self.num_blocks"}, {"line_num": 65, "content": "        return self.token_ids[i*self.block_size: (i+1)*self.block_size]"}, {"line_num": 66, "content": ""}, {"line_num": 67, "content": "    def append_token(self, token_id: int):"}, {"line_num": 68, "content": "        self.token_ids.append(token_id)"}, {"line_num": 69, "content": "        self.last_token = token_id"}, {"line_num": 70, "content": "        self.num_tokens += 1"}, {"line_num": 71, "content": ""}, {"line_num": 72, "content": "    def __getstate__(self):"}, {"line_num": 73, "content": "        last_state = self.last_token if not self.is_prefill else self.token_ids"}, {"line_num": 74, "content": "        return (self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state)"}, {"line_num": 75, "content": ""}, {"line_num": 76, "content": "    def __setstate__(self, state):"}, {"line_num": 77, "content": "        self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state = state"}, {"line_num": 78, "content": "        if isinstance(last_state, list):"}, {"line_num": 79, "content": "            self.token_ids = last_state"}, {"line_num": 80, "content": "            self.last_token = self.token_ids[-1]"}, {"line_num": 81, "content": "        else:"}, {"line_num": 82, "content": "            self.token_ids = []"}, {"line_num": 83, "content": "            self.last_token = last_state"}]}, {"id": "example", "file": "example.py", "language": "python", "lines": [{"line_num": 1, "content": "import os"}, {"line_num": 2, "content": "from nanovllm import LLM, SamplingParams"}, {"line_num": 3, "content": "from transformers import AutoTokenizer"}, {"line_num": 4, "content": ""}, {"line_num": 5, "content": ""}, {"line_num": 6, "content": "def main():"}, {"line_num": 7, "content": "    path = os.path.expanduser(\"~/huggingface/Qwen3-0.6B/\")"}, {"line_num": 8, "content": "    tokenizer = AutoTokenizer.from_pretrained(path)"}, {"line_num": 9, "content": "    llm = LLM(path, enforce_eager=True, tensor_parallel_size=1)"}, {"line_num": 10, "content": ""}, {"line_num": 11, "content": "    sampling_params = SamplingParams(temperature=0.6, max_tokens=256)"}, {"line_num": 12, "content": "    prompts = ["}, {"line_num": 13, "content": "        \"introduce yourself\","}, {"line_num": 14, "content": "        \"list all prime numbers within 100\","}, {"line_num": 15, "content": "    ]"}, {"line_num": 16, "content": "    prompts = ["}, {"line_num": 17, "content": "        tokenizer.apply_chat_template("}, {"line_num": 18, "content": "            [{\"role\": \"user\", \"content\": prompt}],"}, {"line_num": 19, "content": "            tokenize=False,"}, {"line_num": 20, "content": "            add_generation_prompt=True,"}, {"line_num": 21, "content": "        )"}, {"line_num": 22, "content": "        for prompt in prompts"}, {"line_num": 23, "content": "    ]"}, {"line_num": 24, "content": "    outputs = llm.generate(prompts, sampling_params)"}, {"line_num": 25, "content": ""}, {"line_num": 26, "content": "    for prompt, output in zip(prompts, outputs):"}, {"line_num": 27, "content": "        print(\"\\n\")"}, {"line_num": 28, "content": "        print(f\"Prompt: {prompt!r}\")"}, {"line_num": 29, "content": "        print(f\"Completion: {output['text']!r}\")"}, {"line_num": 30, "content": ""}, {"line_num": 31, "content": ""}, {"line_num": 32, "content": "if __name__ == \"__main__\":"}, {"line_num": 33, "content": "    main()"}]}], "steps": [{"id": "S1", "title": "Initial — engine idle, all 16 blocks free", "pc": {"code_pane_id": "example", "line": 24}, "narration": "User runs `example.py`: `llm.generate([promptA, promptB], SamplingParams(max_tokens=2))`. Engine just constructed: 0 sequences, 16 free KV blocks, block_size=4 (small for visualisation; nano-vLLM defaults to 256), max_num_batched_tokens=16 (small enough that the two 12-token prompts can't both prefill in one batch — this is what surfaces the prefix-cache hit on step 2).", "highlights": [], "state": {"sequences": [], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": []}, "scheduler": {"waiting": [], "running": []}, "prefix_cache": []}}, {"id": "S2", "title": "add_request(promptA) — seq 0 enters waiting queue", "pc": {"code_pane_id": "engine", "line": 47}, "narration": "`LLMEngine.add_request` tokenises the prompt (12 token ids) and constructs a `Sequence` with `status=WAITING`. `scheduler.add(seq)` pushes it onto `waiting`. No GPU memory touched yet — the KV cache only sees a sequence after the scheduler admits it.", "highlights": ["sequences", "scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": []}, "scheduler": {"waiting": [0], "running": []}, "prefix_cache": []}}, {"id": "S3", "title": "add_request(promptB) — seq 1 enters waiting queue", "pc": {"code_pane_id": "engine", "line": 47}, "narration": "Same path for prompt B. The two prompts share their first 8 tokens (`[101..108]`) — exactly 2 blocks — but the scheduler doesn't know about prefix sharing yet; both sit in WAITING as plain rows on the queue.", "highlights": ["sequences", "scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": []}, "scheduler": {"waiting": [0, 1], "running": []}, "prefix_cache": []}}, {"id": "S4", "title": "engine.step() #1 — enter scheduler", "pc": {"code_pane_id": "engine", "line": 56}, "narration": "First `engine.step()`. The scheduler runs in two passes: **prefill** first (drain `waiting` until budget runs out), then **decode** only if no sequence was admitted for prefill. Budget per step is `max_num_batched_tokens=16` tokens of forward-pass work.", "highlights": ["scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": []}, "scheduler": {"waiting": [0, 1], "running": []}, "prefix_cache": []}}, {"id": "S5", "title": "Schedule seq 0: BlockManager.can_allocate(seq 0)", "pc": {"code_pane_id": "scheduler", "line": 29}, "narration": "Head of waiting: seq 0. The scheduler asks the block manager: how many of seq 0's blocks can be reused from the prefix cache? Walks block-by-block, computing a CHAINED hash (each block's hash includes the previous block's hash, so a hash hit means the whole prefix matches).", "highlights": ["scheduler", "prefix_cache"], "state": {"sequences": [{"seq_id": 0, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": []}, "scheduler": {"waiting": [0, 1], "running": []}, "prefix_cache": []}}, {"id": "S6", "title": "can_allocate(seq 0) → num_cached_blocks = 0", "pc": {"code_pane_id": "block_manager", "line": 51}, "narration": "Walk seq 0's logical blocks: block 0 = `[101,102,103,104]`. `hash_to_block_id` lookup → miss (prefix cache is empty — this is the first sequence ever). Loop breaks immediately. Need 3 fresh blocks; 16 free → OK. Return `0`.", "highlights": ["prefix_cache", "block_pool"], "state": {"sequences": [{"seq_id": 0, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": []}, "scheduler": {"waiting": [0, 1], "running": []}, "prefix_cache": []}}, {"id": "S7", "title": "allocate(seq 0, num_cached=0) — fresh physical blocks [0, 1, 2]", "pc": {"code_pane_id": "block_manager", "line": 67}, "narration": "No cached blocks → pop 3 fresh ones from `free_block_ids`. `seq0.block_table = [0, 1, 2]`. This list IS the PagedAttention mapping: when the CUDA kernel computes attention for token i of seq 0, it looks up logical block `i // block_size`, fetches physical block_id `block_table[…]`, then reads KV slot `i % block_size` inside it. Sequence memory becomes non-contiguous on purpose — that's how vLLM gets near-100% memory utilisation.", "highlights": ["sequences", "block_pool"], "state": {"sequences": [{"seq_id": 0, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [0, 1], "running": []}, "prefix_cache": []}}, {"id": "S8", "title": "seq 0 fully scheduled (12 tokens) → RUNNING", "pc": {"code_pane_id": "scheduler", "line": 38}, "narration": "`num_scheduled_tokens=12` (all of the prompt). `num_batched_tokens = 12 ≤ 16` → fits. All tokens scheduled, so the seq moves WAITING → RUNNING (and waiting → running queue).", "highlights": ["sequences", "scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 12, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": []}}, {"id": "S9", "title": "Try seq 1: budget remaining=4, needs 12 → defer", "pc": {"code_pane_id": "scheduler", "line": 35}, "narration": "Budget left: `16 − 12 = 4`. seq 1 needs 12. The chunked-prefill rule (`if remaining < num_tokens and scheduled_seqs: break`) says only the FIRST seq in a batch may be chunked; seq 0 already took that slot. So break — seq 1 waits for the next step.", "highlights": ["scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 12, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": []}}, {"id": "S10", "title": "ModelRunner.run([seq 0], prefill=True) — forward pass on 12 tokens", "pc": {"code_pane_id": "engine", "line": 58}, "narration": "Model runner gathers seq 0's KV slots via its `block_table`, runs a forward pass over the full 12-token prompt, and samples the next token from the final hidden state. **Sampled token: 401** (stubbed here — in real nano-vLLM this comes from the sampling kernel).", "highlights": [], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 12, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 1, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 2, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": []}}, {"id": "S11", "title": "postprocess(seq 0): hash_blocks + append token 401", "pc": {"code_pane_id": "scheduler", "line": 75}, "narration": "Prefill finished → every FULL block gets hashed and indexed in `hash_to_block_id`. Hashes are chained: `h0 = hash([101..104], -1)`, `h1 = hash([105..108], h0)`, `h2 = hash([201..204], h1)`. Now the cache has 3 entries. Append the sampled token to seq 0 — the 13th token spills out of the current block (12 = 3 × block_size); a new block will be allocated by `may_append` on the next decode step.", "highlights": ["block_pool", "prefix_cache", "sequences"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 1, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}]}}, {"id": "S12", "title": "engine.step() #2 — schedule seq 1 with cache hit", "pc": {"code_pane_id": "engine", "line": 56}, "narration": "Another step. Prefill phase: walk `waiting` again. Only seq 1 is there. This time the prefix cache is populated — watch what happens.", "highlights": ["scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 1, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}]}}, {"id": "S13", "title": "can_allocate(seq 1) — prefix cache walk", "pc": {"code_pane_id": "block_manager", "line": 51}, "narration": "Walk seq 1's blocks: block(0) = `[101..104]`, hash matches → **cache hit on block 0!** block(1) = `[105..108]`, chained hash matches → **cache hit on block 1!** Loop ends (only iterates `range(num_blocks − 1)`, i.e. up to 2, so it never checks the last block). `num_cached_blocks = 2`; `num_new_blocks` decremented twice because both cached blocks are currently in `used_block_ids` (still held by seq 0) → only 1 new block to allocate.", "highlights": ["prefix_cache", "block_pool"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 1, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 1, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}]}}, {"id": "S14", "title": "allocate(seq 1, num_cached=2) — share blocks 0,1; fresh block 3", "pc": {"code_pane_id": "block_manager", "line": 67}, "narration": "For each of the 2 cached blocks: since `block_id ∈ used_block_ids`, just bump `ref_count` (block 0: 1 → 2, block 1: 1 → 2). For the 3rd block (the divergent suffix `[301..304]`): allocate a fresh block 3. `seq1.block_table = [0, 1, 3]`. `seq1.num_cached_tokens = 8`.", "highlights": ["block_pool", "sequences"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "WAITING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 8, "num_scheduled_tokens": 0, "block_table": [0, 1, 3], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3]}, "scheduler": {"waiting": [1], "running": [0]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}]}}, {"id": "S15", "title": "seq 1 scheduled (only 4 uncached tokens) → RUNNING", "pc": {"code_pane_id": "scheduler", "line": 33}, "narration": "`num_scheduled_tokens = 12 − 8 = 4`. The forward pass only needs to compute KV for the 4 new tokens — the cached 8 tokens already have their K and V in physical blocks 0,1. This is the real win of prefix caching: across requests, common prefixes (system prompts, few-shot examples, chat history) cost zero recomputation.", "highlights": ["sequences", "scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 8, "num_scheduled_tokens": 4, "block_table": [0, 1, 3], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}]}}, {"id": "S16", "title": "ModelRunner.run([seq 1], prefill=True) — chunked prefill on 4 tokens", "pc": {"code_pane_id": "engine", "line": 58}, "narration": "Forward pass with 4 new tokens. The attention kernel queries the cached KV in blocks 0,1 too, via seq 1's `block_table = [0,1,3]`. Output: one sampled token. **Sampled: 501.**", "highlights": [], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304], "num_prompt_tokens": 12, "num_tokens": 12, "num_cached_tokens": 8, "num_scheduled_tokens": 4, "block_table": [0, 1, 3], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}]}}, {"id": "S17", "title": "postprocess(seq 1): hash block 3 + append token 501", "pc": {"code_pane_id": "scheduler", "line": 75}, "narration": "Block 3 (= `[301..304]`) is now full → hash it (chained from block 1's hash) and add to the prefix cache. Future sequences starting `[101..108, 301..304]` will reuse all 3 blocks. Append 501.", "highlights": ["block_pool", "prefix_cache", "sequences"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 3], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}, {"id": "S18", "title": "engine.step() #3 — decode phase", "pc": {"code_pane_id": "engine", "line": 56}, "narration": "No more waiting; the prefill loop is empty so the scheduler falls through to the **decode** loop: pop each running seq, ensure room for one more token via `may_append`, then forward-pass them all together in a single batched kernel call.", "highlights": ["scheduler"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 2], "is_prefill": true, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 3], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}, {"id": "S19", "title": "may_append(seq 0) — len=13, allocate block 4", "pc": {"code_pane_id": "block_manager", "line": 112}, "narration": "`len(seq 0) = 13` (12 prompt + 1 sampled). `13 mod block_size = 1` → the new token lands in a new logical block. Allocate fresh physical block 4. `seq0.block_table = [0, 1, 2, 4]`. Flip `is_prefill = False` — from now on, seq 0 produces one token per step.", "highlights": ["sequences", "block_pool"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 1, "block_table": [0, 1, 2, 4], "is_prefill": false, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 0, "block_table": [0, 1, 3], "is_prefill": true, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3, 4]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}, {"id": "S20", "title": "may_append(seq 1) — len=13, allocate block 5", "pc": {"code_pane_id": "block_manager", "line": 112}, "narration": "Same for seq 1: allocate fresh block 5. `seq1.block_table = [0, 1, 3, 5]`. Notice blocks 0 and 1 are still shared between seq 0 and seq 1 (`ref_count = 2`); blocks 2, 3, 4, 5 each have `ref_count = 1`.", "highlights": ["sequences", "block_pool"], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 1, "block_table": [0, 1, 2, 4], "is_prefill": false, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 1, "block_table": [0, 1, 3, 5], "is_prefill": false, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3, 4, 5]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}, {"id": "S21", "title": "ModelRunner.run([seq 0, seq 1], prefill=False) — batched decode", "pc": {"code_pane_id": "engine", "line": 58}, "narration": "**Continuous batching:** one forward pass produces one token per running sequence. Each sequence still attends to its OWN history via its OWN `block_table`, but the compute is fused into a single GPU kernel call. **Sampled: seq 0 → 402, seq 1 → 502.**", "highlights": [], "state": {"sequences": [{"seq_id": 0, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 1, "block_table": [0, 1, 2, 4], "is_prefill": false, "max_tokens": 2}, {"seq_id": 1, "status": "RUNNING", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501], "num_prompt_tokens": 12, "num_tokens": 13, "num_cached_tokens": 12, "num_scheduled_tokens": 1, "block_table": [0, 1, 3, 5], "is_prefill": false, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 2, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 2, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 1, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 1, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 1, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15], "used": [0, 1, 2, 3, 4, 5]}, "scheduler": {"waiting": [], "running": [0, 1]}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}, {"id": "S22", "title": "postprocess + deallocate — both sequences FINISHED", "pc": {"code_pane_id": "scheduler", "line": 81}, "narration": "Each seq appends its sampled token. `num_completion_tokens = 2 = max_tokens` → FINISHED. `deallocate` walks `block_table` in reverse, decrementing `ref_count`. Block 0 was shared (ref=2) — drops to 1 when seq 0 is deallocated (seq 1 still uses it), then 0 when seq 1 is deallocated, then it's pushed onto `free_block_ids`. **Crucially: the hash entries in the prefix cache STAY**. The blocks themselves go back to free, but their hashes still point at them — so the very next sequence with a matching prefix gets a cache hit without re-prefilling.", "highlights": ["sequences", "block_pool", "prefix_cache"], "state": {"sequences": [{"seq_id": 0, "status": "FINISHED", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401, 402], "num_prompt_tokens": 12, "num_tokens": 14, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": false, "max_tokens": 2}, {"seq_id": 1, "status": "FINISHED", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501, 502], "num_prompt_tokens": 12, "num_tokens": 14, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": false, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 0, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 0, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 0, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 4, 2, 5, 3, 1, 0], "used": []}, "scheduler": {"waiting": [], "running": []}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}, {"id": "S23", "title": "generate() returns — both completions ready", "pc": {"code_pane_id": "engine", "line": 86}, "narration": "`is_finished()` is True (waiting + running both empty). `generate()` collects the completion token_ids per seq_id, runs them through `tokenizer.decode`, and returns the text. Done.", "highlights": [], "state": {"sequences": [{"seq_id": 0, "status": "FINISHED", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 201, 202, 203, 204, 401, 402], "num_prompt_tokens": 12, "num_tokens": 14, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": false, "max_tokens": 2}, {"seq_id": 1, "status": "FINISHED", "token_ids": [101, 102, 103, 104, 105, 106, 107, 108, 301, 302, 303, 304, 501, 502], "num_prompt_tokens": 12, "num_tokens": 14, "num_cached_tokens": 0, "num_scheduled_tokens": 0, "block_table": [], "is_prefill": false, "max_tokens": 2}], "block_pool": {"blocks": [{"block_id": 0, "ref_count": 0, "hash": "8a10e835fc2d", "token_ids": [101, 102, 103, 104]}, {"block_id": 1, "ref_count": 0, "hash": "f5846e1f229e", "token_ids": [105, 106, 107, 108]}, {"block_id": 2, "ref_count": 0, "hash": "6b5719d17c05", "token_ids": [201, 202, 203, 204]}, {"block_id": 3, "ref_count": 0, "hash": "8cd33bbff848", "token_ids": [301, 302, 303, 304]}, {"block_id": 4, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 5, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 6, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 7, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 8, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 9, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 10, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 11, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 12, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 13, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 14, "ref_count": 0, "hash": null, "token_ids": []}, {"block_id": 15, "ref_count": 0, "hash": null, "token_ids": []}], "free": [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 4, 2, 5, 3, 1, 0], "used": []}, "scheduler": {"waiting": [], "running": []}, "prefix_cache": [{"hash": "8a10e835fc2d", "block_id": 0, "preview": [101, 102, 103, 104]}, {"hash": "f5846e1f229e", "block_id": 1, "preview": [105, 106, 107, 108]}, {"hash": "6b5719d17c05", "block_id": 2, "preview": [201, 202, 203, 204]}, {"hash": "8cd33bbff848", "block_id": 3, "preview": [301, 302, 303, 304]}]}}]};
+
+  const state = {
+    stepIdx: 0,
+    playing: false,
+    playTimer: null,
+    activeCodePane: null,
+  };
+
+  const STORAGE_KEY = 'crt:nano-vllm:v0.1';
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ stepIdx: state.stepIdx, activeCodePane: state.activeCodePane })); } catch (_) {}
+  }
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const v = JSON.parse(raw);
+        if (Number.isFinite(v.stepIdx) && v.stepIdx >= 0 && v.stepIdx < TRACE.steps.length) state.stepIdx = v.stepIdx;
+        if (v.activeCodePane) state.activeCodePane = v.activeCodePane;
+      }
+    } catch (_) {}
+  }
+
+  // ===== Escape =====
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // ===== Syntax highlighting (python only, single-pass) =====
+  const PY_KW = new Set('and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield'.split(' '));
+  const PY_TY = new Set('int float str bool bytes list dict tuple set frozenset None True False'.split(' '));
+  const PY_BLT= new Set('print len range open enumerate zip map filter sorted reversed sum min max abs any all isinstance type self cls'.split(' '));
+  function highlight(src) {
+    const out = [];
+    let i = 0, n = src.length;
+    while (i < n) {
+      const c = src[i];
+      if (c === '#') {
+        const j = src.indexOf('\n', i);
+        const end = j < 0 ? n : j;
+        out.push('<span class="tok-com">' + esc(src.slice(i, end)) + '</span>');
+        i = end; continue;
+      }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < n) {
+          if (src[j] === '\\') { j += 2; continue; }
+          if (src[j] === c) { j++; break; }
+          if (src[j] === '\n') break;
+          j++;
+        }
+        out.push('<span class="tok-str">' + esc(src.slice(i, j)) + '</span>');
+        i = j; continue;
+      }
+      if (/[0-9]/.test(c)) {
+        let j = i;
+        while (j < n && /[0-9._]/.test(src[j])) j++;
+        out.push('<span class="tok-num">' + esc(src.slice(i, j)) + '</span>');
+        i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const w = src.slice(i, j);
+        let cls = null;
+        if (PY_KW.has(w)) cls = 'kw';
+        else if (PY_TY.has(w)) cls = 'type';
+        else if (PY_BLT.has(w)) cls = 'builtin';
+        else {
+          let k = j;
+          while (k < n && src[k] === ' ') k++;
+          if (src[k] === '(') cls = 'fn';
+        }
+        out.push(cls ? '<span class="tok-' + cls + '">' + esc(w) + '</span>' : esc(w));
+        i = j; continue;
+      }
+      out.push(esc(c));
+      i++;
+    }
+    return out.join('');
+  }
+
+  // ===== Render: code pane =====
+  function renderCodeTabs() {
+    const tabs = document.getElementById('code-tabs');
+    tabs.innerHTML = TRACE.code_panes.map(p =>
+      `<div class="code-tab${p.id === state.activeCodePane ? ' active' : ''}" data-pane="${esc(p.id)}">${esc(p.file)}</div>`
+    ).join('');
+    tabs.querySelectorAll('.code-tab').forEach(t => {
+      t.onclick = () => { state.activeCodePane = t.dataset.pane; saveState(); renderCode(); };
+    });
+  }
+  function renderCode() {
+    const step = TRACE.steps[state.stepIdx];
+    if (!state.activeCodePane) state.activeCodePane = step.pc?.code_pane_id || TRACE.code_panes[0].id;
+    // Auto-follow PC unless user manually picked another tab in this step
+    if (step.pc?.code_pane_id) state.activeCodePane = step.pc.code_pane_id;
+    renderCodeTabs();
+    const pane = TRACE.code_panes.find(p => p.id === state.activeCodePane) || TRACE.code_panes[0];
+    const curLine = step.pc?.code_pane_id === pane.id ? step.pc.line : -1;
+    const html = pane.lines.map(l => {
+      const cls = l.line_num === curLine ? 'code-line cur' : 'code-line';
+      return `<div class="${cls}"><span class="ln">${l.line_num}</span><span class="src">${highlight(l.content)}</span></div>`;
+    }).join('');
+    const el = document.getElementById('code-content');
+    el.innerHTML = html;
+    if (curLine > 0) {
+      const target = el.querySelector('.code-line.cur');
+      if (target) target.scrollIntoView({ block: 'center', behavior: 'auto' });
+    }
+  }
+
+  // ===== Render: sequences =====
+  function renderSequences(state_, prevState) {
+    const list = document.getElementById('seq-list');
+    const seqs = state_.sequences || [];
+    if (!seqs.length) {
+      list.innerHTML = '<div class="kv-empty">(no sequences yet)</div>';
+      return;
+    }
+    const prevById = {};
+    for (const s of (prevState?.sequences || [])) prevById[s.seq_id] = s;
+    list.innerHTML = seqs.map(s => {
+      const prev = prevById[s.seq_id];
+      const justChanged = !prev || JSON.stringify(prev) !== JSON.stringify(s);
+      const promptTokens = s.token_ids.slice(0, s.num_prompt_tokens);
+      const completionTokens = s.token_ids.slice(s.num_prompt_tokens);
+      const cachedSplit = s.num_cached_tokens;
+      const tokenSpan = [];
+      promptTokens.forEach((t, idx) => {
+        const cls = idx < cachedSplit ? 'tok-cached' : 'tok-prompt';
+        tokenSpan.push(`<span class="${cls}">${t}</span>`);
+      });
+      completionTokens.forEach(t => tokenSpan.push(`<span class="tok-completion">${t}</span>`));
+      return `
+        <div class="seq-card${justChanged ? ' flash' : ''}">
+          <div class="seq-head">
+            <span class="seq-id">seq ${s.seq_id}</span>
+            <span class="seq-status ${esc(s.status)}">${esc(s.status)}</span>
+            ${s.is_prefill === false ? '<span class="seq-status" style="background:#eef0ff;color:#5b6cff">DECODE</span>' : ''}
+          </div>
+          <div class="seq-tokens">${tokenSpan.join(' ')}</div>
+          <div class="seq-meta">
+            <span class="lbl">tokens</span><span>${s.num_tokens || s.token_ids.length} = ${s.num_prompt_tokens} prompt + ${(s.token_ids.length - s.num_prompt_tokens)} completion (max ${s.max_tokens || '?'})</span>
+            <span class="lbl">cached/scheduled</span><span>${s.num_cached_tokens} / ${s.num_scheduled_tokens}</span>
+            <span class="lbl">block_table</span><span class="block-chips">${(s.block_table || []).length
+              ? s.block_table.map(b => `<span class="block-chip">${b}</span>`).join('')
+              : '<span class="q-empty">[]</span>'}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // ===== Render: block pool =====
+  function renderBlockPool(state_, prevState) {
+    const grid = document.getElementById('block-grid');
+    const pool = state_.block_pool || { blocks: [], free: [], used: [] };
+    const prev = prevState?.block_pool;
+    const freeSet = new Set(pool.free || []);
+    const usedSet = new Set(pool.used || []);
+    grid.innerHTML = pool.blocks.map(b => {
+      const prevBlk = prev?.blocks?.find(pb => pb.block_id === b.block_id);
+      const changed = !prevBlk || JSON.stringify(prevBlk) !== JSON.stringify(b);
+      let cls = 'block-cell';
+      if (usedSet.has(b.block_id)) {
+        cls += b.ref_count >= 2 ? ' shared' : ' used';
+      } else if (b.hash != null) {
+        cls += ' cached-free';
+      }
+      if (changed) cls += ' flash';
+      const tokensPreview = (b.token_ids && b.token_ids.length)
+        ? b.token_ids.slice(0, 4).join(',')
+        : '—';
+      return `
+        <div class="${cls}" title="block ${b.block_id} · ref=${b.ref_count} · ${b.hash ? 'hash=' + (typeof b.hash === 'string' ? b.hash.slice(0,8) : ('0x' + b.hash.toString(16).slice(0,8))) : 'no hash'}">
+          <div class="blk-id">#${b.block_id}<span class="blk-ref"> r${b.ref_count}</span></div>
+          <div class="blk-tokens">${esc(tokensPreview)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // ===== Render: scheduler queues =====
+  function renderQueues(state_) {
+    const sch = state_.scheduler || { waiting: [], running: [] };
+    const w = document.getElementById('q-waiting');
+    const r = document.getElementById('q-running');
+    w.innerHTML = sch.waiting.length
+      ? sch.waiting.map(id => `<span class="q-chip">seq ${id}</span>`).join(' ')
+      : '<span class="q-empty">empty</span>';
+    r.innerHTML = sch.running.length
+      ? sch.running.map(id => `<span class="q-chip">seq ${id}</span>`).join(' ')
+      : '<span class="q-empty">empty</span>';
+  }
+
+  // ===== Render: prefix cache =====
+  function renderPrefixCache(state_, prevState) {
+    const tbl = document.getElementById('kv-table');
+    const cache = state_.prefix_cache || [];
+    if (!cache.length) {
+      tbl.innerHTML = '<tr><td class="kv-empty" colspan="3">(empty)</td></tr>';
+      return;
+    }
+    const prevKeys = new Set((prevState?.prefix_cache || []).map(e => e.hash));
+    tbl.innerHTML = `
+      <tr><th>hash (first 8 hex)</th><th>block_id</th><th>tokens</th></tr>
+      ${cache.map(e => {
+        const isNew = !prevKeys.has(e.hash);
+        return `<tr class="${isNew ? 'flash' : ''}"><td>${esc(String(e.hash).slice(0,8))}…</td><td>${e.block_id}</td><td class="preview">[${(e.preview || []).join(',')}]</td></tr>`;
+      }).join('')}
+    `;
+  }
+
+  // ===== Render: narration / top bar / highlights =====
+  function renderTop() {
+    const step = TRACE.steps[state.stepIdx];
+    document.getElementById('title').textContent = TRACE.metadata?.title || 'Runtime trace';
+    const sub = [];
+    const cfg = TRACE.metadata?.config || {};
+    if (TRACE.metadata?.entry_point) sub.push('<span class="sub-chip">entry</span>' + esc(TRACE.metadata.entry_point));
+    if (Object.keys(cfg).length) sub.push('<span class="sub-chip">config</span>' + Object.entries(cfg).map(([k,v]) => `${k}=${v}`).join(' · '));
+    document.getElementById('subtitle').innerHTML = sub.join(' &nbsp; ');
+    document.getElementById('step-idx').textContent = state.stepIdx + 1;
+    document.getElementById('step-total').textContent = TRACE.steps.length;
+    document.getElementById('step-title').textContent = step.title || '';
+    document.getElementById('narration').innerHTML = renderInlineMd(step.narration || '');
+    const scr = document.getElementById('scrubber');
+    scr.value = state.stepIdx;
+    const pct = (state.stepIdx / Math.max(1, TRACE.steps.length - 1)) * 100;
+    scr.style.setProperty('--pct', pct + '%');
+    // Disable transport at edges
+    document.getElementById('btn-first').disabled = state.stepIdx === 0;
+    document.getElementById('btn-prev').disabled  = state.stepIdx === 0;
+    document.getElementById('btn-next').disabled  = state.stepIdx >= TRACE.steps.length - 1;
+    document.getElementById('btn-last').disabled  = state.stepIdx >= TRACE.steps.length - 1;
+    document.getElementById('btn-play').textContent = state.playing ? '⏸' : '▶';
+  }
+  function renderInlineMd(s) {
+    return esc(s)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+  function renderHighlights() {
+    const step = TRACE.steps[state.stepIdx];
+    const set = new Set(step.highlights || []);
+    document.querySelectorAll('.state-pane').forEach(el => {
+      el.classList.toggle('highlighted', set.has(el.dataset.paneId));
+    });
+  }
+
+  // ===== Top-level render =====
+  function render() {
+    const step = TRACE.steps[state.stepIdx];
+    const prev = state.stepIdx > 0 ? TRACE.steps[state.stepIdx - 1] : null;
+    renderTop();
+    renderCode();
+    renderSequences(step.state, prev?.state);
+    renderBlockPool(step.state, prev?.state);
+    renderQueues(step.state);
+    renderPrefixCache(step.state, prev?.state);
+    renderHighlights();
+  }
+
+  // ===== Transport =====
+  function goto(idx) {
+    state.stepIdx = Math.max(0, Math.min(TRACE.steps.length - 1, idx));
+    saveState();
+    render();
+  }
+  function step(d) { goto(state.stepIdx + d); }
+  function togglePlay() {
+    if (state.playing) {
+      state.playing = false;
+      if (state.playTimer) { clearInterval(state.playTimer); state.playTimer = null; }
+    } else {
+      if (state.stepIdx >= TRACE.steps.length - 1) state.stepIdx = 0;
+      state.playing = true;
+      const speed = parseInt(document.getElementById('speed-sel').value, 10);
+      state.playTimer = setInterval(() => {
+        if (state.stepIdx >= TRACE.steps.length - 1) {
+          state.playing = false;
+          clearInterval(state.playTimer);
+          state.playTimer = null;
+          renderTop();
+          return;
+        }
+        step(1);
+      }, speed);
+    }
+    renderTop();
+  }
+
+  function bind() {
+    document.getElementById('btn-first').onclick = () => goto(0);
+    document.getElementById('btn-prev').onclick  = () => step(-1);
+    document.getElementById('btn-play').onclick  = togglePlay;
+    document.getElementById('btn-next').onclick  = () => step(1);
+    document.getElementById('btn-last').onclick  = () => goto(TRACE.steps.length - 1);
+    document.getElementById('scrubber').oninput  = (e) => goto(parseInt(e.target.value, 10));
+    document.getElementById('speed-sel').onchange = () => {
+      if (state.playing) { togglePlay(); togglePlay(); }
+    };
+    document.addEventListener('keydown', (e) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowRight') { step(1); e.preventDefault(); }
+      else if (e.key === 'ArrowLeft')  { step(-1); e.preventDefault(); }
+      else if (e.key === 'Home')       { goto(0); e.preventDefault(); }
+      else if (e.key === 'End')        { goto(TRACE.steps.length - 1); e.preventDefault(); }
+      else if (e.key === ' ')          { togglePlay(); e.preventDefault(); }
+    });
+  }
+
+  // ===== Init =====
+  function init() {
+    if (!TRACE || !TRACE.steps?.length) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No trace data injected.</div>';
+      return;
+    }
+    document.getElementById('scrubber').max = TRACE.steps.length - 1;
+    loadState();
+    bind();
+    render();
+  }
+  init();
+</script>
+</body>
+</html>
