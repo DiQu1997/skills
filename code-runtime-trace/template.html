@@ -339,6 +339,8 @@
     line-height: 1.6;
     color: var(--fg);
     position: relative;
+    max-height: 75vh;
+    overflow-y: auto;
   }
   .pane-intro h4 {
     margin: 0 0 6px;
@@ -355,6 +357,7 @@
     font-size: 14px;
     cursor: pointer;
     padding: 2px 6px;
+    z-index: 1;
   }
   .pane-intro .close-btn:hover { color: var(--fg); }
   .pane-intro code {
@@ -365,6 +368,143 @@
     font-size: 11.5px;
   }
   .pane-intro strong { color: var(--accent); }
+
+  /* Structure detail section inside a pane intro */
+  .pane-intro details.struct {
+    margin-top: 10px;
+    background: rgba(255,255,255,0.65);
+    border: 1px solid rgba(91,108,255,0.4);
+    border-radius: 4px;
+    padding: 0;
+  }
+  .pane-intro details.struct[open] { padding-bottom: 8px; }
+  .pane-intro details.struct summary {
+    cursor: pointer;
+    padding: 6px 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    user-select: none;
+  }
+  .pane-intro details.struct summary:hover { background: var(--accent-soft); }
+  .pane-intro details.struct summary .struct-source {
+    color: var(--fg-faint);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    margin-left: 8px;
+  }
+  .pane-intro .struct-content { padding: 0 10px; }
+  .pane-intro .struct-section { margin-top: 12px; }
+  .pane-intro .struct-section h5 {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-soft);
+    margin: 0 0 6px;
+  }
+  .pane-intro pre.struct-code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px 10px;
+    margin: 0;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--fg);
+  }
+  .pane-intro table.struct-fields {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+  }
+  .pane-intro table.struct-fields td {
+    padding: 4px 6px;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    vertical-align: top;
+  }
+  .pane-intro table.struct-fields tr:first-child td { border-top: 0; }
+  .pane-intro table.struct-fields td.f-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+  .pane-intro table.struct-fields td.f-type {
+    font-family: ui-monospace, monospace;
+    color: #205493;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .pane-intro table.struct-fields td.f-body {
+    color: var(--fg-soft);
+    line-height: 1.45;
+  }
+  .pane-intro table.struct-fields td.f-body .ex {
+    display: block;
+    margin-top: 2px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+  }
+  .pane-intro table.struct-fields td.f-body .ex::before {
+    content: 'e.g. ';
+    color: var(--fg-faint);
+    font-family: inherit;
+    font-style: italic;
+  }
+  .pane-intro table.struct-fields td.f-body .why {
+    display: block;
+    margin-top: 2px;
+    font-style: italic;
+    color: #5b6cff;
+    font-size: 11px;
+  }
+  .pane-intro table.struct-fields td.f-body .why::before {
+    content: '↳ ';
+  }
+  .pane-intro .struct-rel-list,
+  .pane-intro .struct-inv-list {
+    margin: 0; padding-left: 16px;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .pane-intro .struct-rel-list li,
+  .pane-intro .struct-inv-list li { margin-bottom: 4px; }
+  .pane-intro .struct-rel-list .rel-to {
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .pane-intro .struct-rel-list .rel-via {
+    font-family: ui-monospace, monospace;
+    color: var(--fg);
+    background: rgba(255,255,255,0.6);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 11px;
+  }
+  .pane-intro .struct-design {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--fg);
+  }
+  .pane-intro .struct-design strong { color: var(--accent); }
+  .pane-intro .struct-design code {
+    background: rgba(0,0,0,0.05);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
 
   /* Sequence cards */
   .seq-list { display: flex; flex-direction: column; gap: 8px; }
@@ -870,7 +1010,7 @@
     `;
   }
 
-  // ===== Render: pane intros (ELI5 explainers) =====
+  // ===== Render: pane intros (ELI5 + structural detail) =====
   function renderPaneIntros() {
     const intros = TRACE.pane_intros || {};
     for (const paneId of Object.keys(intros)) {
@@ -883,6 +1023,7 @@
             <button class="close-btn" data-close-intro="${esc(paneId)}" title="Dismiss">✕</button>
             <h4>${esc(intro.title)}</h4>
             <div>${md(intro.body)}</div>
+            ${intro.structure ? renderStructure(intro.structure) : ''}
           </div>
         `;
         host.querySelector('[data-close-intro]').onclick = () => {
@@ -893,11 +1034,42 @@
         host.innerHTML = '';
       }
     }
-    // Update help buttons: pulse if never seen
     document.querySelectorAll('.pane-help-btn').forEach(b => {
       const id = b.dataset.helpFor;
       b.classList.toggle('unseen', !state.seenIntros[id] && state.verbosity === 'tutorial');
     });
+  }
+
+  function renderStructure(s) {
+    const fields = (s.fields || []).map(f => {
+      const ex = f.example ? `<span class="ex">${esc(f.example)}</span>` : '';
+      const why = f.why ? `<span class="why">${esc(f.why)}</span>` : '';
+      return `
+        <tr>
+          <td class="f-name">${esc(f.name)}</td>
+          <td class="f-type">${esc(f.type || '')}</td>
+          <td class="f-body">${md(f.role || '')}${ex}${why}</td>
+        </tr>
+      `;
+    }).join('');
+    const rels = (s.relationships || []).map(r => `
+      <li>→ <span class="rel-to">${esc(r.to)}</span> via <span class="rel-via">${esc(r.via)}</span>: ${md(r.kind || '')}</li>
+    `).join('');
+    const invs = (s.invariants || []).map(i => `<li>${md(i)}</li>`).join('');
+    const code = s.class_def ? `<pre class="struct-code">${highlight(s.class_def)}</pre>` : '';
+    const src = s.source ? `<span class="struct-source">${esc(s.source)}</span>` : '';
+    return `
+      <details class="struct" open>
+        <summary>Structure ${src}</summary>
+        <div class="struct-content">
+          ${code ? `<div class="struct-section"><h5>Class definition</h5>${code}</div>` : ''}
+          ${fields ? `<div class="struct-section"><h5>Fields</h5><table class="struct-fields">${fields}</table></div>` : ''}
+          ${rels ? `<div class="struct-section"><h5>Connected to</h5><ul class="struct-rel-list">${rels}</ul></div>` : ''}
+          ${invs ? `<div class="struct-section"><h5>Invariants</h5><ul class="struct-inv-list">${invs}</ul></div>` : ''}
+          ${s.design_notes ? `<div class="struct-section"><h5>Why this design</h5><div class="struct-design">${md(s.design_notes)}</div></div>` : ''}
+        </div>
+      </details>
+    `;
   }
 
   // ===== Render: top bar / ribbon / highlights / narration =====

@@ -742,7 +742,7 @@ def build_trace() -> dict:
         highlights=[],
     )
 
-    # ---------- Pane intros (ELI5 explainers) ----------
+    # ---------- Pane intros (ELI5 + structural detail) ----------
     pane_intros = {
         "sequences": {
             "title": "Sequences",
@@ -754,7 +754,83 @@ def build_trace() -> dict:
                 "• `num_scheduled_tokens` — how many tokens *this step's* forward pass will compute KV for.\n"
                 "• `block_table` — the heart of PagedAttention. A list of physical block IDs; logical block `i` lives at "
                 "`block_table[i]`. The attention kernel reads block_table at every forward pass to find each token's KV slot."
-            )
+            ),
+            "structure": {
+                "source": "nanovllm/engine/sequence.py",
+                "class_def": (
+                    "class Sequence:\n"
+                    "    block_size = 256          # class attr — same for every seq\n"
+                    "    counter = count()         # auto-increments seq_id globally\n"
+                    "\n"
+                    "    def __init__(self, token_ids, sampling_params):\n"
+                    "        self.seq_id              = next(Sequence.counter)\n"
+                    "        self.status              = SequenceStatus.WAITING\n"
+                    "        self.token_ids           = copy(token_ids)\n"
+                    "        self.last_token          = token_ids[-1]\n"
+                    "        self.num_tokens          = len(self.token_ids)\n"
+                    "        self.num_prompt_tokens   = len(token_ids)\n"
+                    "        self.num_cached_tokens   = 0\n"
+                    "        self.num_scheduled_tokens= 0\n"
+                    "        self.is_prefill          = True\n"
+                    "        self.block_table         = []\n"
+                    "        self.temperature, self.max_tokens, self.ignore_eos = (\n"
+                    "            sampling_params.temperature,\n"
+                    "            sampling_params.max_tokens,\n"
+                    "            sampling_params.ignore_eos,\n"
+                    "        )"
+                ),
+                "fields": [
+                    {"name": "seq_id", "type": "int",
+                     "role": "Globally unique, auto-incremented identifier",
+                     "example": "0, 1, 2…",
+                     "why": "Used as a key in `Scheduler.waiting/running`, outputs dict, and live-mode followups."},
+                    {"name": "status", "type": "SequenceStatus",
+                     "role": "Lifecycle flag",
+                     "example": "WAITING → RUNNING → FINISHED",
+                     "why": "Drives which queue a seq lives in; postprocess sets FINISHED when EOS or max_tokens hit."},
+                    {"name": "token_ids", "type": "list[int]",
+                     "role": "Prompt tokens followed by completion tokens; grows during decode",
+                     "example": "[101, 102, …, 401, 402]"},
+                    {"name": "num_prompt_tokens", "type": "int",
+                     "role": "Fixed at construction; `token_ids[:num_prompt_tokens]` is always the prompt slice"},
+                    {"name": "num_cached_tokens", "type": "int",
+                     "role": "Tokens (counted from start) whose KV already lives in physical blocks",
+                     "example": "0 → 8 (on prefix cache hit) → 12 → 13 → 14",
+                     "why": "The high-water mark of computed KV. Lets prefix-cache hits skip recomputation; lets chunked prefill resume."},
+                    {"name": "num_scheduled_tokens", "type": "int",
+                     "role": "How many tokens THIS step's forward pass will compute KV for",
+                     "example": "12 (full prompt prefill) → 4 (chunked) → 1 (decode)",
+                     "why": "Set by `Scheduler.schedule()` each tick; zeroed in postprocess."},
+                    {"name": "is_prefill", "type": "bool",
+                     "role": "True before first decode token, False after",
+                     "why": "Used by `postprocess` to decide whether to skip `append_token` (chunked prefill not yet done)."},
+                    {"name": "block_table", "type": "list[int]",
+                     "role": "Logical → physical block mapping. Logical block `i` lives at `block_table[i]`",
+                     "example": "[] → [0, 1, 2] → [0, 1, 2, 4] (decode appended block 4)",
+                     "why": "The heart of PagedAttention. The CUDA attention kernel uses this every forward pass."},
+                ],
+                "relationships": [
+                    {"to": "block_pool",   "via": "block_table[i]",       "kind": "Each entry is a `block_id` indexing `BlockManager.blocks`. Two seqs can share the same id (prefix cache)."},
+                    {"to": "scheduler",    "via": "status + queue membership", "kind": "`WAITING ⇔ in scheduler.waiting`; `RUNNING ⇔ in scheduler.running`."},
+                    {"to": "prefix_cache", "via": "block_table → block.hash", "kind": "When a block fills, its hash is added to `hash_to_block_id` — that's how future seqs find it."},
+                ],
+                "invariants": [
+                    "`len(token_ids) == num_tokens`",
+                    "`len(block_table) == ceil(num_tokens / block_size)` while RUNNING",
+                    "`num_cached_tokens + num_scheduled_tokens ≤ num_tokens`",
+                    "`status == WAITING ⇒ block_table == []`",
+                    "`status == FINISHED ⇒ block_table == []` (post-deallocate)",
+                ],
+                "design_notes": (
+                    "**Why a separate `num_cached_tokens` field?** It decouples *what's already computed* from "
+                    "*how big the sequence is* — that's exactly what prefix-cache hits need (8 of 12 tokens already "
+                    "have KV, only compute the last 4). It also enables chunked prefill: split a huge prompt across "
+                    "multiple steps without losing track of progress.\n\n"
+                    "**Why a class-level `counter`?** Sequence IDs are globally unique across all sequences ever "
+                    "created in the process — never recycled. Live-mode follow-up storage and output dicts can use "
+                    "`seq_id` as a stable key."
+                ),
+            },
         },
         "block_pool": {
             "title": "KV cache block pool",
@@ -767,7 +843,80 @@ def build_trace() -> dict:
                 "• A peek of the token ids it holds (once filled).\n\n"
                 "Colours: **pale** = free, **blue** = used by one seq, **purple** = shared (ref ≥ 2), **dashed** = "
                 "cached-but-free (hash still in the prefix cache so it can be reclaimed by a matching prefix)."
-            )
+            ),
+            "structure": {
+                "source": "nanovllm/engine/block_manager.py",
+                "class_def": (
+                    "class Block:\n"
+                    "    def __init__(self, block_id):\n"
+                    "        self.block_id   = block_id   # slot index, never changes\n"
+                    "        self.ref_count  = 0          # how many seqs point here\n"
+                    "        self.hash       = -1         # chained hash; -1 = unset\n"
+                    "        self.token_ids  = []         # block_size tokens once filled\n"
+                    "\n"
+                    "class BlockManager:\n"
+                    "    def __init__(self, num_blocks, block_size):\n"
+                    "        self.block_size       = block_size\n"
+                    "        self.blocks           = [Block(i) for i in range(num_blocks)]\n"
+                    "        self.hash_to_block_id = {}                          # prefix cache\n"
+                    "        self.free_block_ids   = deque(range(num_blocks))    # FIFO\n"
+                    "        self.used_block_ids   = set()"
+                ),
+                "fields": [
+                    {"name": "blocks", "type": "list[Block]",
+                     "role": "Fixed-size array, index = physical block id",
+                     "example": "16 Block(0)..Block(15)",
+                     "why": "Block IDs are stable slot indices — `Sequence.block_table` references them by id, not by Python identity."},
+                    {"name": "Block.block_id", "type": "int",
+                     "role": "Slot index in `blocks[]`; identity",
+                     "example": "0..15"},
+                    {"name": "Block.ref_count", "type": "int",
+                     "role": "How many `Sequence.block_table` entries currently point at this block",
+                     "example": "0 (free) → 1 (one owner) → 2 (shared via prefix cache) → 0 (freed)",
+                     "why": "Sharing means multiple decrements before a block can be freed."},
+                    {"name": "Block.hash", "type": "int (xxhash) or -1",
+                     "role": "Chained hash of this block's content; -1 means not hashed yet",
+                     "example": "-1 → 0xabc123 (after postprocess hashes it)"},
+                    {"name": "Block.token_ids", "type": "list[int]",
+                     "role": "The `block_size` token ids this block holds (cached after `hash_blocks`)",
+                     "why": "Stored so `can_allocate` can do a safety check `blocks[id].token_ids == seq_tokens` after a hash hit — defends against hash collisions."},
+                    {"name": "hash_to_block_id", "type": "dict[int, int]",
+                     "role": "Prefix cache. Maps chained-hash → block_id",
+                     "example": "{0xabc…: 0, 0xdef…: 1, 0xfaa…: 2}",
+                     "why": "Dict gives O(1) prefix-cache lookup."},
+                    {"name": "free_block_ids", "type": "deque[int]",
+                     "role": "FIFO of unused block ids",
+                     "example": "deque([5, 6, 7, …, 15])",
+                     "why": "FIFO not LIFO: freshly-freed blocks are NOT immediately re-claimed; they sit at the tail of the queue, giving the prefix cache a chance to revive them."},
+                    {"name": "used_block_ids", "type": "set[int]",
+                     "role": "Currently-referenced block ids",
+                     "why": "`set` gives O(1) `block_id in used_block_ids` check (used in `can_allocate` to decide whether a cached block needs to come from free_block_ids or just refcount-bump)."},
+                ],
+                "relationships": [
+                    {"to": "sequences",    "via": "Block.ref_count", "kind": "Σ(block.ref_count over all blocks) = Σ(len(seq.block_table) over all sequences)."},
+                    {"to": "prefix_cache", "via": "hash_to_block_id", "kind": "The prefix-cache pane visualises this very dict. Block.hash is what gets indexed."},
+                    {"to": "scheduler",    "via": "BlockManager owned by Scheduler", "kind": "Only the scheduler calls `allocate / deallocate / may_append / hash_blocks`."},
+                ],
+                "invariants": [
+                    "`len(blocks) == num_blocks` (fixed at construction)",
+                    "`len(free_block_ids) + len(used_block_ids) == num_blocks`",
+                    "`free_block_ids ∩ used_block_ids == ∅`",
+                    "`blocks[id].ref_count == 0  ⟺  id ∈ free_block_ids`",
+                    "Every `block_id` in any seq's `block_table` is in `used_block_ids`",
+                    "Σ(block.ref_count) == Σ(len(seq.block_table))",
+                ],
+                "design_notes": (
+                    "**Why split into `blocks[]` + two id-collections instead of just one list?** "
+                    "Different operations want different access patterns: `allocate` wants a quick free pool "
+                    "(deque popleft); `can_allocate` wants fast 'is this id used?' (set); the kernel wants stable "
+                    "indexing by id (list).\n\n"
+                    "**Why a deque (not list) for free?** Both ends in O(1): popleft for allocation, append for "
+                    "free. List would be O(n) on popleft.\n\n"
+                    "**Why keep stale hash entries?** Even after a block is freed, if nothing has overwritten it, "
+                    "its KV content is still valid — a future cache hit can revive it for free. Hashes only get "
+                    "removed in `_allocate_fresh` when the slot is actually about to be overwritten."
+                ),
+            },
         },
         "scheduler": {
             "title": "Scheduler queues",
@@ -778,7 +927,68 @@ def build_trace() -> dict:
                 "Each engine step does a **prefill pass first** (drain waiting until the per-step token budget runs out), "
                 "and only if no seq was admitted for prefill does it fall through to a **decode pass** (one new token "
                 "per running seq, all in one fused kernel call)."
-            )
+            ),
+            "structure": {
+                "source": "nanovllm/engine/scheduler.py",
+                "class_def": (
+                    "class Scheduler:\n"
+                    "    def __init__(self, config):\n"
+                    "        self.max_num_seqs           = config.max_num_seqs\n"
+                    "        self.max_num_batched_tokens = config.max_num_batched_tokens\n"
+                    "        self.eos                    = config.eos\n"
+                    "        self.block_size             = config.kvcache_block_size\n"
+                    "        self.block_manager          = BlockManager(\n"
+                    "            config.num_kvcache_blocks, config.kvcache_block_size,\n"
+                    "        )\n"
+                    "        self.waiting: deque[Sequence] = deque()\n"
+                    "        self.running: deque[Sequence] = deque()"
+                ),
+                "fields": [
+                    {"name": "max_num_seqs", "type": "int",
+                     "role": "Cap on how many sequences the scheduler can pick per batch",
+                     "example": "256 (default), 4 (this demo)",
+                     "why": "Prevents a single batch from blowing up kernel launch overhead."},
+                    {"name": "max_num_batched_tokens", "type": "int",
+                     "role": "Cap on total tokens of forward-pass work per batch",
+                     "example": "32k (default), 16 (this demo)",
+                     "why": "Bounds per-step latency; in production this is tuned for the GPU's compute/memory roof."},
+                    {"name": "eos", "type": "int",
+                     "role": "Token id that signals end-of-sequence",
+                     "why": "Used in `postprocess` to decide if a seq finished (alongside `max_tokens` check)."},
+                    {"name": "block_manager", "type": "BlockManager",
+                     "role": "Owns the KV cache pool; scheduler is the only caller of allocate/deallocate",
+                     "why": "Composition: scheduler is the policy, block_manager is the mechanism."},
+                    {"name": "waiting", "type": "deque[Sequence]",
+                     "role": "FIFO of sequences added via `add_request` but not yet started",
+                     "example": "deque([seq0, seq1]) → deque([seq1]) → deque([])",
+                     "why": "deque: O(1) `popleft` for fairness (oldest first) + `appendleft` (for preempt)."},
+                    {"name": "running", "type": "deque[Sequence]",
+                     "role": "Sequences that have been prefilled and are now decoding one token per step",
+                     "example": "deque([]) → deque([seq0]) → deque([seq0, seq1])",
+                     "why": "deque: O(1) pop/append in decode loop; also `extendleft(reversed(...))` to preserve order after batched scheduling."},
+                ],
+                "relationships": [
+                    {"to": "sequences",  "via": "queue membership", "kind": "`seq.status` ↔ which queue it lives in: WAITING↔waiting, RUNNING↔running, FINISHED↔neither."},
+                    {"to": "block_pool", "via": "self.block_manager", "kind": "Composes BlockManager. `allocate/deallocate/may_append/hash_blocks` flow through scheduler."},
+                ],
+                "invariants": [
+                    "`seq.status == WAITING  ⟺  seq ∈ waiting`",
+                    "`seq.status == RUNNING  ⟺  seq ∈ running`",
+                    "`seq.status == FINISHED ⟺  seq ∉ waiting and seq ∉ running`",
+                    "`is_finished()  ⟺  waiting and running are both empty`",
+                ],
+                "design_notes": (
+                    "**Two queues, not one with a status filter** — O(1) inspection of 'any prefills to do?' "
+                    "vs 'any decodes to do?'. Also lets the prefill and decode passes be cleanly separated.\n\n"
+                    "**Why prefill-first, decode-fallback?** Avoids prefill starvation: if running sequences "
+                    "always blocked new ones, a busy server would never admit new requests. It also means each "
+                    "batch is HOMOGENEOUS — either all prefill or all decode — which matters because the GPU "
+                    "kernels for the two phases are different.\n\n"
+                    "**Chunked-prefill rule** (`if remaining < num_tokens and scheduled_seqs: break`): permit the "
+                    "first sequence in a batch to be partial-prefilled (use whatever budget remains), but if some "
+                    "other seq already took budget, don't try to partial-prefill the next one. Keeps batches clean."
+                ),
+            },
         },
         "prefix_cache": {
             "title": "Prefix cache (hash → block_id)",
@@ -789,7 +999,61 @@ def build_trace() -> dict:
                 "hash hit means the entire prefix matches — pull the existing block, don't recompute.\n\n"
                 "Hash entries persist even after blocks are deallocated: the next sequence with a matching prefix can "
                 "revive the cached KV for free."
-            )
+            ),
+            "structure": {
+                "source": "nanovllm/engine/block_manager.py (compute_hash, hash_blocks)",
+                "class_def": (
+                    "# It's just a dict on BlockManager — no dedicated class.\n"
+                    "self.hash_to_block_id: dict[int, int] = {}\n"
+                    "\n"
+                    "@classmethod\n"
+                    "def compute_hash(cls, token_ids, prefix=-1):\n"
+                    "    h = xxhash.xxh64()\n"
+                    "    if prefix != -1:\n"
+                    "        h.update(prefix.to_bytes(8, 'little'))   # chain previous hash\n"
+                    "    h.update(np.array(token_ids).tobytes())      # this block's tokens\n"
+                    "    return h.intdigest()\n"
+                    "\n"
+                    "def hash_blocks(self, seq):\n"
+                    "    start = seq.num_cached_tokens // block_size\n"
+                    "    end   = (seq.num_cached_tokens + seq.num_scheduled_tokens) // block_size\n"
+                    "    h = self.blocks[seq.block_table[start - 1]].hash if start > 0 else -1\n"
+                    "    for i in range(start, end):                  # only FULL blocks\n"
+                    "        token_ids = seq.block(i)\n"
+                    "        h = self.compute_hash(token_ids, h)\n"
+                    "        self.blocks[seq.block_table[i]].update(h, token_ids)\n"
+                    "        self.hash_to_block_id[h] = seq.block_table[i]"
+                ),
+                "fields": [
+                    {"name": "hash (key)", "type": "int (xxhash64)",
+                     "role": "Chained hash uniquely identifying a prefix",
+                     "example": "0xabc123 (= hash([101,102,103,104], -1))",
+                     "why": "xxh64 is fast and collision-resistant for typical token-id payloads."},
+                    {"name": "block_id (value)", "type": "int",
+                     "role": "Physical block where the hashed content lives",
+                     "example": "0, 1, 2, …"},
+                ],
+                "relationships": [
+                    {"to": "block_pool", "via": "Block.hash + Block.token_ids", "kind": "Lookup returns a block_id; `can_allocate` then double-checks `blocks[id].token_ids == prefix` as a safety net against hash collisions."},
+                    {"to": "sequences",  "via": "can_allocate walks seq's logical blocks", "kind": "Hash chain is computed by walking the new seq's blocks; first miss terminates the walk."},
+                ],
+                "invariants": [
+                    "Hash chains are **prefix-only**: `hash_to_block_id[h]` is registered ONLY after a full block is finalised in postprocess.",
+                    "The mapping may point at a freed (ref_count=0) block — that's intentional, so freed blocks can be revived.",
+                    "When `_allocate_fresh` overwrites a block, its old hash entry is removed: `del hash_to_block_id[old_hash]`.",
+                ],
+                "design_notes": (
+                    "**Why chain?** A single block's content can be identical across two different prefixes (e.g. "
+                    "the punctuation `[' ', ' ', ' ', ' ']` block). Without chaining, a hash hit on that block "
+                    "would falsely claim 'whole prefix matches'. With chaining, the hash means 'exactly this "
+                    "prefix in this order' — unambiguous.\n\n"
+                    "**Why dict, not LRU/etc.?** Hash entries are tiny (int → int); unbounded growth is fine. "
+                    "What's actually bounded is the BLOCKS — and entries die naturally when the block they point "
+                    "at gets reused (the slot's hash is deleted in `_allocate_fresh`).\n\n"
+                    "**Why only full blocks?** Partial blocks are still being written to (decode tokens trickling "
+                    "in); their hash isn't stable until the block fills."
+                ),
+            },
         },
     }
 
