@@ -106,6 +106,25 @@
     font-weight: 600;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* Δ row: one-line state-change summary directly under the title */
+  .step-diff-row {
+    display: flex; align-items: center; gap: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: var(--fg-soft);
+    padding-left: 4px;
+    overflow: hidden;
+    min-height: 16px;
+  }
+  .step-diff-row .delta-marker {
+    color: var(--accent);
+    font-weight: 700;
+    font-family: inherit;
+    flex-shrink: 0;
+  }
+  .step-diff-row .delta-body {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .transport { display: flex; align-items: center; gap: 4px; }
   .transport button {
     border: 1px solid var(--border);
@@ -735,6 +754,10 @@
           </div>
         </div>
       </div>
+      <div class="step-diff-row" id="step-diff-row" style="display:none">
+        <span class="delta-marker">Δ</span>
+        <span class="delta-body" id="step-diff"></span>
+      </div>
       <div class="ribbon" id="ribbon"></div>
       <div class="scrubber-row">
         <input type="range" class="scrubber" id="scrubber" min="0" max="0" value="0">
@@ -1059,7 +1082,7 @@
     const code = s.class_def ? `<pre class="struct-code">${highlight(s.class_def)}</pre>` : '';
     const src = s.source ? `<span class="struct-source">${esc(s.source)}</span>` : '';
     return `
-      <details class="struct" open>
+      <details class="struct">
         <summary>Structure ${src}</summary>
         <div class="struct-content">
           ${code ? `<div class="struct-section"><h5>Class definition</h5>${code}</div>` : ''}
@@ -1084,6 +1107,13 @@
     document.getElementById('step-idx').textContent = state.stepIdx + 1;
     document.getElementById('step-total').textContent = TRACE.steps.length;
     document.getElementById('step-title').textContent = step.title || '';
+    const diffRow = document.getElementById('step-diff-row');
+    if (step.state_diff) {
+      document.getElementById('step-diff').textContent = step.state_diff;
+      diffRow.style.display = '';
+    } else {
+      diffRow.style.display = 'none';
+    }
     document.getElementById('narration').innerHTML = md(step.narration || '');
 
     // Primer (tutorial mode only)

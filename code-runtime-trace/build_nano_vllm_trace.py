@@ -266,7 +266,7 @@ class Trace:
             "prefix_cache": self.bm.prefix_cache_state(),
         }
 
-    def add(self, title, pc_dict, narration, *, primer=None, highlights=None):
+    def add(self, title, pc_dict, narration, *, primer=None, highlights=None, state_diff=None):
         sid = f"S{len(self.steps) + 1}"
         step = {
             "id": sid,
@@ -279,6 +279,8 @@ class Trace:
         }
         if primer:
             step["primer"] = primer
+        if state_diff:
+            step["state_diff"] = state_diff
         self.steps.append(step)
         if self._cur_st:
             self._cur_st["step_ids"].append(sid)
@@ -297,50 +299,36 @@ def build_trace() -> dict:
     }
 
     # ============================================
-    # ST1 — Request arrives
+    # ST1 — Request arrives  (5 steps)
     # ============================================
     tr.storyline(
         "ST1", "1. Request arrives",
-        "Two prompts enter the engine via add_request and queue up. The KV cache is untouched until the scheduler admits them."
+        "Two prompts enter via add_request and queue up. KV cache is untouched until the scheduler admits them."
     )
 
     tr.add(
-        title="User code: llm.generate(prompts, sampling_params)",
+        title="User code: llm.generate(prompts, max_tokens=2)",
         pc_dict=pc("user_call_generate"),
         narration=(
-            "`example.py:main()` builds two prompts and a `SamplingParams(temperature=0.6, max_tokens=2)`, "
-            "then calls `llm.generate(prompts, sp)`. Engine starts idle: 0 sequences, all 16 KV blocks free. "
-            "**Demo config note:** `block_size=4` and `max_num_batched_tokens=16` are made small for visualisation "
-            "(nano-vLLM defaults are 256 and much larger); the small batch budget forces the two prompts into "
-            "separate prefill steps, which is what surfaces the prefix-cache hit later."
+            "`example.py:main()` builds two prompts and calls `llm.generate(prompts, sp)`. "
+            "Engine idle: 0 sequences, 16 free blocks."
         ),
         primer=(
-            "**What is vLLM?** An LLM inference server: you send a prompt and get a completion. "
-            "The challenge is that the keys/values each token attends to (the KV cache) grow linearly with sequence "
-            "length, and naively giving each request a contiguous KV region either over-allocates or stalls under load. "
-            "**vLLM's idea (PagedAttention):** chop the KV cache into fixed-size *physical blocks*, like virtual memory "
-            "pages. Each sequence holds a `block_table` mapping its logical blocks → physical block IDs, and the "
-            "attention kernel gathers K/V via that mapping. **Bonus:** two sequences with a shared prompt prefix can "
-            "literally point at the same physical blocks — that's prefix caching."
+            "**vLLM:** an LLM inference server. The challenge: each token's K/V tensors must live in GPU memory, "
+            "and naively giving each request a contiguous KV region either over-allocates or refuses requests "
+            "under load. **vLLM's idea:** chop the KV cache into fixed-size *physical blocks* — like virtual "
+            "memory pages — and let each sequence track its blocks via a `block_table`. The whole trace shows "
+            "how this plays out."
         ),
         highlights=[],
     )
 
     tr.add(
-        title="Inside generate() — enqueue prompts via add_request",
+        title="Inside generate() — for-loop enqueues prompts",
         pc_dict=pc("generate_for_loop"),
         narration=(
-            "We step INTO `generate()`. Its body has two parts. First: a `for prompt, sp in zip(prompts, sampling_params): "
-            "self.add_request(prompt, sp)` loop that pushes every prompt onto the scheduler's `waiting` queue. "
-            "Second: a `while not self.is_finished(): self.step()` loop that pumps the engine until done. "
-            "Right now we're on the for-loop; let's step into the first `add_request` call."
-        ),
-        primer=(
-            "**Reading roadmap.** `generate()` is a thin wrapper, not where the work happens. The interesting "
-            "state changes — block allocation, prefix-cache hits, sampling — all live inside `step()`. "
-            "What `generate()` provides is the **framing**: enqueue every prompt up front, then loop "
-            "`step() → step() → step() …` until both queues are empty. Each `step()` is one scheduler decision plus "
-            "one forward pass."
+            "`generate()` is a thin wrapper. Body: a `for prompt: self.add_request(...)` enqueue loop, "
+            "then a `while not is_finished(): self.step()` pump."
         ),
         highlights=[],
     )
@@ -352,16 +340,15 @@ def build_trace() -> dict:
         title="add_request(promptA) — seq 0 created, queued",
         pc_dict=pc("add_request_body"),
         narration=(
-            "Inside `add_request` (called by `generate()` for promptA). Tokenises the string (here: 12 token ids), "
-            "constructs a `Sequence` object (`status=WAITING`), and calls `scheduler.add(seq)` which just "
-            "`waiting.append(seq)` — a plain deque push. No GPU memory touched yet; the KV cache doesn't see "
-            "this sequence until the scheduler admits it on a future `step()`."
+            "Tokenize prompt → 12 token ids. Build `Sequence(status=WAITING)`. `scheduler.add(seq)` pushes onto "
+            "the `waiting` deque. No GPU memory touched."
         ),
+        state_diff="+ seq 0 (WAITING, 12 prompt tokens) · waiting: [] → [0]",
         primer=(
-            "**Sequence — the engine's view of one request.** Fields that matter: `token_ids` (prompt + completion-so-far), "
-            "`status` (WAITING → RUNNING → FINISHED), `num_cached_tokens` (tokens whose KV is already stored in blocks), "
-            "`num_scheduled_tokens` (tokens THIS step's forward pass will compute KV for), and `block_table` (the list "
-            "of physical block IDs holding this seq's KV — empty until the scheduler runs)."
+            "**Sequence — the engine's view of one request.** Key fields: `token_ids` (prompt + completion), "
+            "`status` (WAITING/RUNNING/FINISHED), `num_cached_tokens` (tokens whose KV already lives in blocks), "
+            "`num_scheduled_tokens` (tokens this step's forward pass will compute), `block_table` "
+            "(list of physical block IDs — the seq's only link to KV memory)."
         ),
         highlights=["sequences", "scheduler"],
     )
@@ -373,75 +360,60 @@ def build_trace() -> dict:
         title="add_request(promptB) — seq 1 created, queued",
         pc_dict=pc("add_request_body"),
         narration=(
-            "Second iteration of `generate()`'s for-loop, this time for promptB. Same path: tokenise, build Sequence, "
-            "push to `waiting`. The two prompts share their first 8 tokens (`[101..108]`) — exactly 2 blocks — "
-            "but the scheduler doesn't notice prefix sharing yet; both just sit in WAITING as plain rows on the queue."
+            "Same for promptB. Both prompts share their first 8 tokens; the scheduler doesn't notice yet."
         ),
+        state_diff="+ seq 1 (WAITING, 12 prompt tokens) · waiting: [0] → [0, 1]",
         highlights=["sequences", "scheduler"],
     )
 
     tr.add(
-        title="Back in generate() — enter the engine pump (while not is_finished)",
+        title="Back in generate() — enter the engine pump",
         pc_dict=pc("generate_while_loop"),
         narration=(
-            "The for-loop exits. Both sequences are queued. `generate()` now enters its main pump: "
-            "`while not self.is_finished(): output, num_tokens = self.step()`. Every iteration runs `step()` once. "
-            "We exit when `is_finished()` returns True — i.e. both `waiting` and `running` queues are empty. "
-            "Let's step into the first `step()` call."
+            "For-loop exits. `while not self.is_finished(): output, num = self.step()` begins. "
+            "Step into the first `step()`."
         ),
         primer=(
-            "**engine.step() is the heartbeat.** Each call does **exactly one** scheduler decision and **exactly one** "
-            "forward pass through the model. It's pure synchronous orchestration; the GPU work happens inside "
-            "`ModelRunner.call(\"run\", …)` on line 52. The scheduler picks between two phases: *prefill* (admit a new "
-            "prompt, do its first big forward pass) or *decode* (advance each running seq by one token)."
+            "**engine.step() is the heartbeat.** Each call: exactly one scheduler decision + exactly one "
+            "forward pass. The scheduler picks between *prefill* (admit a new prompt, large forward pass) "
+            "and *decode* (advance each running seq by one token). Synchronous orchestration; the GPU work "
+            "lives in `ModelRunner.call(\"run\", ...)`."
         ),
         highlights=["scheduler"],
     )
 
     # ============================================
-    # ST2 — First prefill: cold cache
+    # ST2 — First prefill: cold cache  (6 steps)
     # ============================================
     tr.storyline(
         "ST2", "2. First prefill — cold cache",
-        "Scheduler admits seq 0, the block manager allocates 3 fresh blocks for the prompt, the model runs a prefill forward pass, and the resulting full blocks are hashed into the prefix cache."
+        "Scheduler admits seq 0, allocates 3 fresh blocks, the model runs prefill, the resulting full blocks are hashed into the prefix cache."
     )
 
     tr.add(
-        title="step() #1 — first line: scheduler.schedule()",
-        pc_dict=pc("step_call_schedule"),
+        title="step() → schedule() — try prefill on seq 0",
+        pc_dict=pc("schedule_can_allocate"),
         narration=(
-            "We're inside `step()`. First line: `seqs, is_prefill = self.scheduler.schedule()` — ask the scheduler "
-            "which sequences will run this tick. Step into `schedule()`."
+            "Inside `step()` at L50: `seqs, is_prefill = self.scheduler.schedule()`. "
+            "Schedule's prefill loop, head of waiting = seq 0, budget = 16. "
+            "Call `block_manager.can_allocate(seq)`."
         ),
         highlights=["scheduler"],
     )
 
     tr.add(
-        title="Inside scheduler.schedule() — try prefill on head of waiting",
-        pc_dict=pc("schedule_can_allocate"),
-        narration=(
-            "`schedule()` runs in two passes: **prefill** first (drain `waiting` while there's batch budget), then "
-            "**decode** only if no seq was admitted for prefill. Budget = `max_num_batched_tokens=16` tokens of "
-            "forward-pass work. Head of waiting is seq 0. We're about to call `block_manager.can_allocate(seq)` to "
-            "see how many of seq 0's blocks can be reused from the prefix cache."
-        ),
-        primer=(
-            "**Logical vs physical blocks.** A sequence sees its tokens grouped into *logical blocks* of `block_size` "
-            "tokens — logical block 0 holds tokens 0..3, block 1 holds 4..7, etc. Each logical block is backed by some "
-            "*physical block* in the pool, looked up via `block_table[logical_idx] = physical_id`. The scheduler "
-            "decides WHICH physical blocks to give to this seq before running the forward pass."
-        ),
-        highlights=["scheduler", "prefix_cache"],
-    )
-
-    tr.add(
-        title="can_allocate(seq 0) — walk prefix, miss on block 0 → num_cached=0",
+        title="can_allocate(seq 0) — cache miss → num_cached=0",
         pc_dict=pc("can_allocate_loop"),
         narration=(
-            "Step into `can_allocate`. It loops `for i in range(seq.num_blocks - 1)`: i=0, take `seq.block(0) = [101..104]`, "
-            "compute its chained hash, look it up in `hash_to_block_id` — MISS (prefix cache is still empty; this is "
-            "the very first sequence). Break immediately. `num_cached_blocks = 0`, `num_new_blocks = 3`. "
-            "`len(free_block_ids) = 16 ≥ 3` → return `0`. Control returns to `schedule()`."
+            "Walk `range(seq.num_blocks - 1)`. i=0: hash(`[101..104]`) → miss (cache empty). Break. "
+            "Need 3 fresh, 16 free → return `0`."
+        ),
+        primer=(
+            "**Logical vs physical blocks.** A sequence groups its tokens into *logical blocks* of `block_size` "
+            "tokens each. Each logical block is backed by some *physical block* in the pool, looked up via "
+            "`block_table[logical_idx] = physical_id`. **The block_table IS the PagedAttention mapping** — "
+            "the CUDA attention kernel reads it every forward pass to find each token's KV slot. Two sequences "
+            "can point at the same physical block; that's how prefix sharing works without copying any K/V data."
         ),
         highlights=["prefix_cache", "block_pool"],
     )
@@ -450,21 +422,13 @@ def build_trace() -> dict:
     assert n == 0
     tr.bm.allocate(seq_a, n)
     tr.add(
-        title="block_manager.allocate(seq 0, num_cached=0) — pop 3 fresh blocks",
+        title="allocate(seq 0) — pop 3 fresh blocks → [0, 1, 2]",
         pc_dict=pc("allocate_loop"),
         narration=(
-            "Back in `schedule()`, next call: `block_manager.allocate(seq, 0)`. No cached blocks → skip the cache-reuse "
-            "loop, just pop 3 fresh blocks from `free_block_ids`. **`seq0.block_table = [0, 1, 2]`**. "
-            "This list IS PagedAttention's mapping: when the CUDA kernel attends for token `i` of seq 0, it looks up "
-            "logical block `i // 4`, fetches `block_table[…]`, then reads KV slot `i % 4` inside that physical block."
+            "Pop blocks 0, 1, 2 from `free_block_ids` (FIFO). `seq0.block_table = [0, 1, 2]`. "
+            "`num_cached_tokens = 0` (nothing cached this round)."
         ),
-        primer=(
-            "**The core of PagedAttention.** Instead of one big contiguous KV region per sequence (forces over-allocation), "
-            "vLLM gives each seq a `block_table`: a list of physical block IDs. Logical block i lives at "
-            "`block_table[i]`. Two sequences can point at the SAME physical block — that's how prefix sharing works "
-            "without copying any K/V data. The CUDA attention kernel reads the block_table to gather slots from "
-            "non-contiguous memory."
-        ),
+        state_diff="seq 0.block_table: [] → [0, 1, 2] · free 16→13 · blocks 0,1,2 ref→1",
         highlights=["sequences", "block_pool"],
     )
 
@@ -473,36 +437,24 @@ def build_trace() -> dict:
     tr.waiting_q.remove(seq_a.seq_id)
     tr.running_q.append(seq_a.seq_id)
     tr.add(
-        title="seq 0 fully scheduled (12 tokens) → status RUNNING",
+        title="seq 0 → RUNNING; seq 1 deferred (budget=4 < 12)",
         pc_dict=pc("schedule_running"),
         narration=(
-            "Back in `schedule()` after `allocate` returns. `seq.num_scheduled_tokens = 12` (the whole prompt). "
-            "`num_batched_tokens` goes 0 → 12, still under the 16-token budget. All prompt tokens scheduled, so "
-            "`seq.status = RUNNING`, `self.waiting.popleft()`, `self.running.append(seq)`. Loop iteration done."
+            "`num_scheduled_tokens = 12`, batch takes 12 of 16 budget. Status WAITING → RUNNING. "
+            "Try seq 1: budget=4 < 12, chunked-prefill rule → break."
         ),
+        state_diff="seq 0: WAITING → RUNNING · scheduled_tokens 0→12 · waiting [0,1]→[1] · running []→[0]",
         highlights=["sequences", "scheduler"],
     )
 
     tr.add(
-        title="Try seq 1: budget remaining=4 < 12 → chunked-prefill defer",
-        pc_dict=pc("schedule_chunked_defer"),
-        narration=(
-            "Next iteration of `schedule()`'s prefill loop: head of waiting is seq 1. Budget left: `16 − 12 = 4`; "
-            "seq 1 needs 12. The rule `if remaining < num_tokens and scheduled_seqs: break` says only the FIRST seq "
-            "in a batch may be chunked; seq 0 already took that slot. Break — seq 1 waits for the next step()."
-        ),
-        highlights=["scheduler"],
-    )
-
-    tr.add(
-        title="schedule() returns ([seq 0], is_prefill=True) — back in step()",
+        title="ModelRunner.run([seq 0], prefill) — sample 401",
         pc_dict=pc("step_call_modelrunner"),
         narration=(
-            "`schedule()` exits its prefill loop and returns. Control back in `step()` body, next line is "
-            "`token_ids = self.model_runner.call(\"run\", seqs, is_prefill)`. The model runner gathers seq 0's KV "
-            "slots via its `block_table`, runs a forward pass over all 12 prompt tokens (prefill), and samples the "
-            "first decode token. **Sampled: 401** (stubbed here — real nano-vLLM uses the sampling kernel)."
+            "Back in step() body. Forward pass on 12 prompt tokens via seq 0's `block_table`. "
+            "Samples first decode token."
         ),
+        state_diff="sampled token: 401",
         highlights=[],
     )
 
@@ -511,60 +463,53 @@ def build_trace() -> dict:
     seq_a.num_scheduled_tokens = 0
     seq_a.append_token(SAMPLED[(0, "prefill")])
     tr.add(
-        title="step() calls scheduler.postprocess — hash_blocks + append token",
+        title="postprocess(seq 0) — hash 3 blocks, append 401",
         pc_dict=pc("postprocess_hash"),
         narration=(
-            "Next line of `step()`: `self.scheduler.postprocess(seqs, token_ids, is_prefill)`. Step into postprocess. "
-            "First line of its loop body: `self.block_manager.hash_blocks(seq)`. With prefill done, every FULL block "
-            "gets hashed and indexed in `hash_to_block_id`. Hashes chain: `h0 = hash([101..104], -1)`, "
-            "`h1 = hash([105..108], h0)`, `h2 = hash([201..204], h1)`. Then `seq.append_token(401)` adds the sampled "
-            "token; the 13th token will spill out of the current block on the next decode (12 = 3 × block_size)."
+            "step()'s next call: `scheduler.postprocess`. Inside: `hash_blocks(seq)` chains h0→h1→h2 and writes "
+            "to `hash_to_block_id`. Then `seq.append_token(401)`."
         ),
+        state_diff="+ prefix_cache {h0→0, h1→1, h2→2} · blocks 0,1,2 .hash set · seq 0 num_cached 0→12 · seq 0.tokens += [401]",
         primer=(
-            "**The prefix cache lives in `hash_to_block_id`.** Each filled block's content is hashed and the mapping "
-            "`hash → block_id` is recorded. Hashes CHAIN: block i's hash depends on (a) its tokens and (b) block "
-            "i-1's hash. So a hash hit on block N tells you the entire prefix of N+1 blocks matches what's already in "
-            "some physical block — just point at it instead of recomputing."
+            "**Prefix cache via chained hashes.** When a block fills, hash its content and register `hash → block_id`. "
+            "Hashes CHAIN: block i's hash includes block i-1's hash, so a hit identifies the entire prefix up to and "
+            "including that block. Future seqs with matching prefixes reuse the blocks — no recomputation. "
+            "Crucially, hash entries persist even after blocks deallocate, so freed blocks can be revived if their "
+            "content hasn't yet been overwritten."
         ),
         highlights=["block_pool", "prefix_cache", "sequences"],
     )
 
     # ============================================
-    # ST3 — Second prefill: prefix-cache hit
+    # ST3 — Second prefill: prefix-cache hit  (6 steps)
     # ============================================
     tr.storyline(
         "ST3", "3. Second prefill — prefix-cache hit",
-        "step()'s next iteration of the while loop. The block manager finds 2 of seq 1's blocks already in the prefix cache → only 1 new block is allocated; the prefill forward pass shrinks from 12 tokens to 4."
+        "step() #2. seq 1 gets 2 cached blocks from seq 0; the prefill forward pass shrinks from 12 to 4 tokens."
     )
 
     tr.add(
-        title="step() returns; generate()'s while loop runs another iteration → step() #2",
-        pc_dict=pc("generate_call_step"),
+        title="step() #2 → schedule(seq 1) — cache is populated now",
+        pc_dict=pc("schedule_can_allocate"),
         narration=(
-            "Back in `generate()`. `step()` #1 returned. `is_finished()` is False (seq 0 still running, seq 1 still "
-            "waiting), so the `while` loop calls `self.step()` again. Step into the second step() call. Prefill phase "
-            "first — walk `waiting` again. Only seq 1 is there. **This time the prefix cache is populated.**"
+            "generate's while loop iterates. step() #2 → schedule() tries prefill on head of waiting = seq 1. "
+            "Calls `can_allocate`."
         ),
         highlights=["scheduler"],
     )
 
     tr.add(
-        title="can_allocate(seq 1) — chained hash matches blocks 0,1!",
+        title="can_allocate(seq 1) — chained hash matches → num_cached=2",
         pc_dict=pc("can_allocate_loop"),
         narration=(
-            "Walk seq 1's blocks: i=0, `block(0) = [101..104]`, chained hash matches → **cache hit on block 0**, "
-            "`num_cached_blocks=1`. i=1, `block(1) = [105..108]`, chained hash matches → **cache hit on block 1**, "
-            "`num_cached_blocks=2`. Loop range is `range(seq.num_blocks - 1) = range(2)`, so it stops here (never "
-            "checks the last block, which would prevent the running seq from racing the allocator). "
-            "`num_new_blocks` decremented twice because both cached blocks are currently in `used_block_ids` "
-            "(still held by seq 0) → only 1 new block to allocate. Return `2`."
+            "i=0: hash(`[101..104]`) → hit (block 0). i=1: hash(`[105..108]`, chained) → hit (block 1). "
+            "Both currently used → `num_new_blocks: 3 → 1`. Return `2`."
         ),
         primer=(
-            "**Why prefix sharing matters in production:** the same prefix appears in many real workloads — "
-            "system prompts shared across users (\"You are a helpful assistant…\"), few-shot examples shared across "
-            "queries, conversation history shared across follow-ups. With a populated prefix cache, the second-and-later "
-            "sequences only need forward passes for the *divergent suffix*. Savings scale linearly with how long the "
-            "shared prefix is — for a long system prompt, that's huge."
+            "**Why prefix sharing wins in production:** the same prefix appears across many requests — system "
+            "prompts (\"You are a helpful assistant…\"), few-shot examples, chat history. Each shared block "
+            "saves one `block_size` of compute on the prefill. Long shared prefixes compound; savings scale "
+            "linearly with their length."
         ),
         highlights=["prefix_cache", "block_pool"],
     )
@@ -573,14 +518,13 @@ def build_trace() -> dict:
     assert n == 2
     tr.bm.allocate(seq_b, n)
     tr.add(
-        title="allocate(seq 1, num_cached=2) — share blocks 0,1; fresh block 3",
+        title="allocate(seq 1, num_cached=2) — share 0, 1; fresh 3",
         pc_dict=pc("allocate_loop"),
         narration=(
-            "The cache-reuse half of `allocate` runs: for each of the 2 cached blocks, since `block_id ∈ used_block_ids`, "
-            "just bump `ref_count` (block 0: 1 → 2, block 1: 1 → 2). For the 3rd block (the divergent suffix "
-            "`[301..304]`): pop a fresh block 3 from `free_block_ids`. **`seq1.block_table = [0, 1, 3]`. "
-            "`seq1.num_cached_tokens = 8`** — those 8 tokens already have their KV stored in blocks 0,1."
+            "For cached blocks: refcount++ (blocks 0, 1: 1 → 2). For the 3rd: pop fresh block 3. "
+            "`seq1.block_table = [0, 1, 3]`. `num_cached_tokens = 8`."
         ),
+        state_diff="seq 1.block_table: [] → [0, 1, 3] · blocks 0,1 ref 1→2 · block 3 ref→1 · free 13→12",
         highlights=["block_pool", "sequences"],
     )
 
@@ -589,24 +533,24 @@ def build_trace() -> dict:
     tr.waiting_q.remove(seq_b.seq_id)
     tr.running_q.append(seq_b.seq_id)
     tr.add(
-        title="seq 1 scheduled — only 4 uncached tokens this prefill",
+        title="seq 1 → RUNNING — only 4 tokens to forward",
         pc_dict=pc("schedule_running"),
         narration=(
-            "Back in `schedule()` body: `seq.num_scheduled_tokens = min(num_tokens, remaining) = min(4, 16) = 4`. "
-            "Only 4 tokens need the forward pass; the cached 8 already have K and V in blocks 0,1. "
-            "`seq.status = RUNNING`, move from waiting to running."
+            "`num_scheduled_tokens = 12 − 8 = 4`. Only the divergent suffix needs forward pass; cached 8 already "
+            "in blocks 0, 1."
         ),
+        state_diff="seq 1: WAITING → RUNNING · scheduled_tokens 0→4 · waiting [1]→[] · running [0]→[0,1]",
         highlights=["sequences", "scheduler"],
     )
 
     tr.add(
-        title="ModelRunner.run([seq 1], prefill=True) — chunked prefill on 4 tokens",
+        title="ModelRunner.run([seq 1], prefill) — chunked, 4 tokens, sample 501",
         pc_dict=pc("step_call_modelrunner"),
         narration=(
-            "Back in `step()` body. Forward pass with only 4 new tokens, but the attention queries can read the "
-            "cached KV in blocks 0,1 via seq 1's `block_table = [0,1,3]`. **The big win of prefix caching:** "
-            "4 token-forwards instead of 12. **Sampled: 501.**"
+            "Back in step(). Forward pass on 4 NEW tokens; attention reads cached KV from blocks 0, 1, 3 via "
+            "block_table. **4 tok-forwards instead of 12.** Sample 501."
         ),
+        state_diff="sampled token: 501",
         highlights=[],
     )
 
@@ -618,36 +562,32 @@ def build_trace() -> dict:
         title="postprocess(seq 1) — hash block 3, append 501",
         pc_dict=pc("postprocess_hash"),
         narration=(
-            "`step()` calls `postprocess` again. Block 3 (= `[301..304]`) is now full → hash it (chained from block 1's "
-            "hash) and add to the prefix cache. Future sequences starting `[101..108, 301..304]` will reuse all 3 blocks. "
-            "Append 501 to seq 1."
+            "Block 3 (= `[301..304]`) is now full → hash it, add to prefix cache. `append_token(501)`."
         ),
+        state_diff="+ prefix_cache {h3→3} · block 3 .hash set · seq 1 num_cached 8→12 · seq 1.tokens += [501]",
         highlights=["block_pool", "prefix_cache", "sequences"],
     )
 
     # ============================================
-    # ST4 — Decode: continuous batching
+    # ST4 — Decode: continuous batching  (4 steps)
     # ============================================
     tr.storyline(
         "ST4", "4. Decode — continuous batching",
-        "step() #3. Waiting is empty so the scheduler goes to its decode pass. Both running sequences advance by one token in a single fused forward pass."
+        "step() #3. Both sequences advance by one token in a single fused forward pass; each attends via its own block_table."
     )
 
     tr.add(
         title="step() #3 — schedule()'s decode pass",
         pc_dict=pc("schedule_decode"),
         narration=(
-            "Back in `generate()`, third iteration of the while loop, so a third `step()` call. Inside `schedule()`, "
-            "the prefill while-loop runs zero iterations (waiting is empty); fall through to the **decode** loop. "
-            "Pop each running seq, ensure room for one more token via `may_append`, then forward-pass them all "
-            "together in one fused kernel call."
+            "Waiting is empty → prefill loop runs zero iterations → fall through to decode. Pop each running seq, "
+            "call `may_append`, then batched forward."
         ),
         primer=(
-            "**Decode = per-token loop.** Once a sequence has been prefilled, each subsequent forward pass generates "
-            "ONE new token. The trick is that the scheduler batches the decode passes of ALL currently-running "
-            "sequences into ONE fused kernel call. Sequence A and Sequence B may be at different lengths and have "
-            "different attention queries, but they share the forward pass — that's **continuous batching**. "
-            "The kernel handles per-seq differences via the `block_table` lookups."
+            "**Decode = per-token loop.** After prefill, each forward pass generates ONE new token per seq. "
+            "The scheduler batches ALL running seqs into ONE fused kernel call — *continuous batching*. "
+            "Each seq still attends to its own history via its own `block_table`; the kernel handles per-seq "
+            "differences via those lookups."
         ),
         highlights=["scheduler"],
     )
@@ -659,10 +599,10 @@ def build_trace() -> dict:
         title="may_append(seq 0) — len=13, allocate block 4",
         pc_dict=pc("may_append_check"),
         narration=(
-            "`schedule()`'s decode loop calls `block_manager.may_append(seq)`. `len(seq 0) = 13` (12 prompt + 1 sampled). "
-            "`13 mod block_size = 1` → the new token lands in a fresh logical block. Pop physical block 4 from "
-            "free_block_ids. `seq0.block_table = [0, 1, 2, 4]`. Flip `is_prefill = False` — seq 0 is in decode mode now."
+            "`len(seq 0) = 13`, `13 mod 4 = 1` → need a new logical block. Pop block 4. "
+            "`seq0.block_table = [0, 1, 2, 4]`. Flip `is_prefill = False`."
         ),
+        state_diff="seq 0.block_table: [0,1,2] → [0,1,2,4] · block 4 ref→1 · free 12→11 · seq 0.is_prefill T→F",
         highlights=["sequences", "block_pool"],
     )
 
@@ -673,30 +613,29 @@ def build_trace() -> dict:
         title="may_append(seq 1) — len=13, allocate block 5",
         pc_dict=pc("may_append_check"),
         narration=(
-            "Same logic for seq 1: allocate fresh block 5. `seq1.block_table = [0, 1, 3, 5]`. "
-            "Blocks 0 and 1 are still shared between seq 0 and seq 1 (`ref_count = 2`); blocks 2, 3, 4, 5 each have "
-            "`ref_count = 1`."
+            "Same for seq 1: pop block 5. `seq1.block_table = [0, 1, 3, 5]`."
         ),
+        state_diff="seq 1.block_table: [0,1,3] → [0,1,3,5] · block 5 ref→1 · free 11→10 · seq 1.is_prefill T→F",
         highlights=["sequences", "block_pool"],
     )
 
     tr.add(
-        title="ModelRunner.run([seq 0, seq 1], prefill=False) — batched decode",
+        title="ModelRunner.run([seq 0, seq 1], decode) — batched, sample 402 + 502",
         pc_dict=pc("step_call_modelrunner"),
         narration=(
-            "Back in `step()`. **Continuous batching in action:** one forward pass produces one new token per running "
-            "sequence. Each seq still attends to its OWN history via its OWN `block_table`, but the compute is fused "
-            "into a single GPU kernel call. **Sampled: seq 0 → 402, seq 1 → 502.**"
+            "One fused forward pass produces one new token per seq. Each attends via its own block_table. "
+            "Sample seq 0 → 402, seq 1 → 502."
         ),
+        state_diff="sampled tokens: 402, 502",
         highlights=[],
     )
 
     # ============================================
-    # ST5 — Teardown: refs unwind
+    # ST5 — Teardown  (2 steps)
     # ============================================
     tr.storyline(
         "ST5", "5. Teardown — refs unwind",
-        "Both sequences hit max_tokens=2 in postprocess and finish. deallocate walks block_tables in reverse, decrementing ref_counts. Shared blocks survive one decref; the second frees them. Hash entries stay in the prefix cache for future hits. generate() returns."
+        "Both reach max_tokens=2, status FINISHED, blocks deallocate (ref_count drops, shared blocks survive once). Hash entries stay in the prefix cache. generate() returns."
     )
 
     for seq, tok in [(seq_a, SAMPLED[(0, "decode1")]), (seq_b, SAMPLED[(1, "decode1")])]:
@@ -708,41 +647,34 @@ def build_trace() -> dict:
         tr.running_q.remove(seq.seq_id)
 
     tr.add(
-        title="postprocess — both reach max_tokens → FINISHED, deallocate",
+        title="postprocess — both FINISH, deallocate cascades",
         pc_dict=pc("postprocess_finish"),
         narration=(
-            "Back in `postprocess`'s loop. Each seq appends its decode token (402 / 502). "
-            "`num_completion_tokens = 2 == max_tokens` → `seq.status = FINISHED`, `block_manager.deallocate(seq)`, "
-            "`self.running.remove(seq)`. **`deallocate` walks `block_table` in reverse, decrementing `ref_count`.** "
-            "Block 0 was shared (ref=2) — goes to 1 when seq 0's dealloc fires (seq 1 still uses it), then to 0 when "
-            "seq 1's dealloc fires, then it's pushed onto `free_block_ids`. **Crucially: hash entries in the prefix "
-            "cache STAY** — the blocks go free but their hashes still point at them, so the next sequence with a "
-            "matching prefix gets a cache hit without recomputation."
+            "Append decode tokens. Both `num_completion = 2 = max_tokens` → FINISHED. "
+            "`deallocate` walks block_table in reverse; `ref_count--`, freed when 0. Block 0 was shared (ref=2) → "
+            "seq 0 drops it to 1, then seq 1 drops it to 0 → freed."
         ),
+        state_diff="seq 0,1: RUNNING → FINISHED · blocks 0,1: ref 2→1→0 (freed) · blocks 2,3,4,5: ref 1→0 (freed) · free 10→16 · running [0,1]→[] · prefix_cache unchanged",
         primer=(
-            "**Reference counting: how shared blocks are freed safely.** Each physical block has a `ref_count` — the "
-            "number of sequences currently using it. `allocate` increments, `deallocate` decrements. A block returns "
-            "to the free pool ONLY when ref_count hits 0. So a shared block survives the first sequence finishing if "
-            "another still references it. Even after a block is freed, its content (the cached KV) and its hash "
-            "mapping are still readable until something else claims and resets it — that's why prefix cache hits can "
-            "still revive it for free."
+            "**Reference counting for safe sharing.** Each block tracks `ref_count` = number of seqs pointing at "
+            "it. `allocate` increments, `deallocate` decrements. A block returns to the free pool only when ref=0. "
+            "Shared blocks survive one finish, freed on the next. Crucially: **hash entries STAY in the prefix "
+            "cache** — a freed block whose content isn't yet overwritten can still serve a cache hit."
         ),
         highlights=["sequences", "block_pool", "prefix_cache"],
     )
 
     tr.add(
-        title="Back in generate() — is_finished() True → loop exits → return",
+        title="generate() returns — done",
         pc_dict=pc("generate_return"),
         narration=(
-            "`step()` returns. Back in `generate()`'s while loop. `is_finished()` now returns True (both queues empty). "
-            "Loop exits. The tail of `generate()`: collect each seq's completion `token_ids`, run them through "
-            "`tokenizer.decode`, and return a list of `{text, token_ids}` dicts. Done — the user's "
-            "`llm.generate(prompts, sp)` call finally returns."
+            "`is_finished()` = True. Loop exits. Collect each seq's completion `token_ids`, run through "
+            "`tokenizer.decode`, return text."
         ),
         highlights=[],
     )
 
-    # ---------- Pane intros (ELI5 + structural detail) ----------
+        # ---------- Pane intros (ELI5 + structural detail) ----------
     pane_intros = {
         "sequences": {
             "title": "Sequences",
