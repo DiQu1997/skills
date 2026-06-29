@@ -50,7 +50,13 @@ def file_view(rel: str, lo: int, hi: int, language: str = "python") -> dict:
 
 def block(id_, phase, title, line_range, one_liner, fv,
           what_it_does, why_its_here, touches=None, failure_mode=None,
-          invariants=None, key_data_structures=None) -> dict:
+          invariants=None, key_data_structures=None,
+          inputs=None, outputs=None, state_effects=None) -> dict:
+    """v0.5-reading block + v4-mock additions for diagram view.
+
+    inputs / outputs / state_effects are OPTIONAL: required only when the
+    block is rendered in the diagram view (data_structures + read/write arrows).
+    The swimlane view ignores them."""
     b = {
         "id": id_,
         "phase": phase,
@@ -69,7 +75,63 @@ def block(id_, phase, title, line_range, one_liner, fv,
         b["right_panel"]["invariants"] = invariants
     if key_data_structures:
         b["right_panel"]["key_data_structures"] = key_data_structures
+    if inputs:
+        b["inputs"] = inputs
+    if outputs:
+        b["outputs"] = outputs
+    if state_effects:
+        b["state_effects"] = state_effects
     return b
+
+
+# ============================================================
+# Data structures (used by the diagram view)
+# ============================================================
+# Per storyline.diagram.data_structures schema:
+#   { id, name, type, role, schema_pieces?, ops_r?, ops_w? }
+# Blocks reference them via state_effects: [{ds_id, op, kind}].
+
+DS_WAITING = {
+    "id": "waiting",
+    "name": "scheduler.waiting",
+    "type": "deque[Sequence]",
+    "role": "FIFO of unstarted requests",
+    "schema_pieces": ["head → … Sequence … ← tail"],
+    "ops_r": ["peek[0]", "len", "truthy"],
+    "ops_w": ["popleft", "append"],
+}
+DS_RUNNING = {
+    "id": "running",
+    "name": "scheduler.running",
+    "type": "deque[Sequence]",
+    "role": "Currently-decoding sequences",
+    "schema_pieces": ["head → … Sequence … ← tail"],
+    "ops_r": ["len", "iterate"],
+    "ops_w": ["append", "remove", "extendleft"],
+}
+DS_POOL = {
+    "id": "pool",
+    "name": "block_manager",
+    "type": "BlockManager",
+    "role": "Physical KV cache + free deque + used set",
+    "schema_pieces": [
+        "blocks: list[Block(N)]",
+        "free_block_ids: deque[int]",
+        "used_block_ids: set[int]",
+        "block_size: int",
+    ],
+    "ops_r": ["can_allocate(seq)", "blocks[i].token_ids", "free_block_ids", "Block.ref_count"],
+    "ops_w": ["allocate(seq, n)", "deallocate(seq)", "free_block_ids.popleft", "used_block_ids.add", "Block.ref_count ±"],
+}
+DS_CACHE = {
+    "id": "cache",
+    "name": "hash_to_block_id",
+    "type": "dict[int, int]",
+    "role": "Prefix cache (chained-hash → block_id)",
+    "schema_pieces": ["populated by hash_blocks(seq) in postprocess; consumed by can_allocate"],
+    "ops_r": ["get(h)"],
+    "ops_w": ["[h] = block_id", "del [h]"],
+}
 
 
 # ============================================================
@@ -104,6 +166,9 @@ s1_col_generate = {
                 {"label": "scheduler.waiting","kind": "variable", "block": None},
             ],
             failure_mode=["No failure path: the loop body is pure bookkeeping — a tokenizer crash would surface from add_request, not from generate()'s loop."],
+            inputs=[["prompts", "list[str | list[int]]"], ["sp", "SamplingParams | list"]],
+            outputs=[["Δ waiting", "append × len(prompts)"]],
+            state_effects=[{"ds_id": "waiting", "op": "append × N", "kind": "write"}],
         ),
         block(
             "S1G2", "main", "PUMP UNTIL DONE", "L73–75",
@@ -116,6 +181,12 @@ s1_col_generate = {
                 {"label": "self.is_finished", "kind": "function", "block": None},
             ],
             failure_mode=["A bug that leaves a seq in WAITING/RUNNING without progress is the canonical livelock here — is_finished() never returns True. Defensive: scheduler.preempt() exists to evict stuck seqs back to waiting under memory pressure."],
+            inputs=[["waiting", "deque[Sequence]"], ["running", "deque[Sequence]"]],
+            outputs=[["outputs", "dict[seq_id, token_ids]"]],
+            state_effects=[
+                {"ds_id": "waiting", "op": "is_finished?", "kind": "read"},
+                {"ds_id": "running", "op": "is_finished?", "kind": "read"},
+            ],
         ),
     ],
 }
@@ -132,11 +203,14 @@ s1_col_step = {
             file_view(REL_ENGINE, 50, 50),
             what_it_does="Calls `self.scheduler.schedule()`. Returns `(scheduled_seqs, is_prefill)` — a list of Sequence references and a boolean phase tag. The scheduler tries prefill first; only if no waiting seq can be admitted does it fall through to decode.",
             why_its_here="Separating scheduling from execution lets the engine's per-tick contract stay simple: schedule decides intent, execute realizes it, postprocess records the result. The is_prefill flag tells the forward kernel which code path to use.",
-            touches=[
-                {"label": "scheduler.schedule", "kind": "function", "block": None},
-            ],
-            failure_mode=[
-                "If no waiting/running seq can be scheduled (memory pressure on first prefill + no running to preempt), the call asserts via `assert scheduled_seqs` in the decode branch — fail-loud, no silent stalls.",
+            touches=[{"label": "scheduler.schedule", "kind": "function", "block": None}],
+            failure_mode=["If no waiting/running seq can be scheduled (memory pressure on first prefill + no running to preempt), the call asserts via `assert scheduled_seqs` in the decode branch — fail-loud, no silent stalls."],
+            inputs=[["self.scheduler", "Scheduler"]],
+            outputs=[["seqs", "list[Sequence]"], ["is_prefill", "bool"]],
+            state_effects=[
+                {"ds_id": "waiting", "op": "may popleft (via schedule)", "kind": "rw"},
+                {"ds_id": "running", "op": "may append (via schedule)", "kind": "rw"},
+                {"ds_id": "pool",    "op": "may allocate (via schedule)", "kind": "rw"},
             ],
         ),
         block(
@@ -149,8 +223,11 @@ s1_col_step = {
                 {"label": "model_runner.call",   "kind": "function", "block": None},
                 {"label": "Sequence.block_table","kind": "variable", "block": None},
             ],
-            failure_mode=[
-                "OOM during prefill should not happen here: the scheduler already promised the blocks exist via allocate(). If it does, this is a logic bug in can_allocate, not a runtime fault.",
+            failure_mode=["OOM during prefill should not happen here: the scheduler already promised the blocks exist via allocate(). If it does, this is a logic bug in can_allocate, not a runtime fault."],
+            inputs=[["seqs", "list[Sequence]"], ["is_prefill", "bool"]],
+            outputs=[["token_ids", "list[int] (1 per seq)"]],
+            state_effects=[
+                {"ds_id": "pool", "op": "read KV via block_table", "kind": "read"},
             ],
         ),
         block(
@@ -164,11 +241,16 @@ s1_col_step = {
                 {"label": "block_manager.hash_blocks","kind": "function", "block": None},
                 {"label": "Sequence.append_token",  "kind": "function", "block": None},
             ],
-            failure_mode=[
-                "If the seq hit FINISHED, deallocate fires; refcount mistakes would cause use-after-free of shared blocks. Mitigated by atomic refcount decrement + free-on-zero in block_manager.deallocate.",
-            ],
+            failure_mode=["If the seq hit FINISHED, deallocate fires; refcount mistakes would cause use-after-free of shared blocks. Mitigated by atomic refcount decrement + free-on-zero in block_manager.deallocate."],
             key_data_structures=[
                 {"name": "hash_to_block_id", "shape": "dict[int, int]", "role": "prefix cache: chained hash → physical block_id; populated here, consumed by can_allocate next tick"},
+            ],
+            inputs=[["seqs", "list[Sequence]"], ["token_ids", "list[int]"], ["is_prefill", "bool"]],
+            outputs=[["Δ cache", "+ entries for newly-full blocks"], ["Δ pool", "deallocate finished seqs"]],
+            state_effects=[
+                {"ds_id": "cache", "op": "[h] = bid (hash_blocks)", "kind": "write"},
+                {"ds_id": "pool",  "op": "ref_count -- (on finish)", "kind": "write"},
+                {"ds_id": "running", "op": "remove (on finish)", "kind": "write"},
             ],
         ),
     ],
@@ -209,6 +291,7 @@ storyline_1 = {
         "edges": [
             {"from": "S1G2", "to": "S1S1", "label": "CALL",  "style": "solid",  "color": None},
         ],
+        "data_structures": [DS_WAITING, DS_RUNNING, DS_POOL, DS_CACHE],
     },
 }
 
@@ -429,8 +512,85 @@ storyline_2 = {
             {"from": "S2H3", "to": "S2A1", "label": "CALL", "style": "solid", "color": None},
             {"from": "S2H5", "to": "S2B1", "label": "CALL", "style": "solid", "color": None},
         ],
+        "data_structures": [DS_WAITING, DS_RUNNING, DS_POOL, DS_CACHE],
     },
 }
+
+# ---------- Tack on state_effects + ports to every block in S2 ----------
+# (Done after-construction so the block() helper calls above stay readable.)
+
+def _annotate(b, **kw): b.update(kw); return b
+
+# S2 schedule blocks
+_S2_ANNOTATIONS = {
+    "S2H1": dict(  # BATCH GATE
+        inputs=[["self.waiting", "deque"], ["scheduled_seqs", "list"], ["max_num_seqs", "int"]],
+        outputs=[["(control)", "enter body / fall out"]],
+        state_effects=[{"ds_id": "waiting", "op": "len + truthy", "kind": "read"}],
+    ),
+    "S2H2": dict(  # PEEK + BUDGET
+        inputs=[["self.waiting", "deque"], ["num_batched_tokens", "int"]],
+        outputs=[["seq", "Sequence"], ["remaining", "int"]],
+        state_effects=[{"ds_id": "waiting", "op": "peek[0]", "kind": "read"}],
+    ),
+    "S2H3": dict(  # PROBE CACHE
+        inputs=[["seq", "Sequence"], ["block_manager", "BlockManager"]],
+        outputs=[["num_cached_blocks", "int (≥0 or -1)"], ["num_tokens", "int"]],
+        state_effects=[
+            {"ds_id": "cache", "op": "get(chained_hash)", "kind": "read"},
+            {"ds_id": "pool",  "op": "blocks[i].token_ids + capacity", "kind": "read"},
+        ],
+    ),
+    "S2H4": dict(  # CHUNKED-PREFILL GATE
+        inputs=[["remaining", "int"], ["num_tokens", "int"], ["scheduled_seqs", "list"]],
+        outputs=[["(control)", "continue or break"]],
+        state_effects=[],
+    ),
+    "S2H5": dict(  # COMMIT ALLOCATION
+        inputs=[["seq", "Sequence"], ["num_cached_blocks", "int"]],
+        outputs=[["Δ seq.block_table", "extended"], ["Δ free", "↓"], ["Δ ref", "↑"]],
+        state_effects=[
+            {"ds_id": "pool", "op": "allocate(seq, n)", "kind": "write"},
+        ],
+    ),
+    "S2H6": dict(  # SCHEDULE TOKENS
+        inputs=[["num_tokens", "int"], ["remaining", "int"]],
+        outputs=[["Δ seq.num_scheduled_tokens", "min(num_tokens, remaining)"]],
+        state_effects=[],
+    ),
+    "S2H7": dict(  # PROMOTE OR LEAVE
+        inputs=[["seq", "Sequence"]],
+        outputs=[["Δ seq.status", "WAITING → RUNNING (if fully scheduled)"], ["Δ waiting", "popleft"], ["Δ running", "append"]],
+        state_effects=[
+            {"ds_id": "waiting", "op": "popleft (if fully scheduled)", "kind": "write"},
+            {"ds_id": "running", "op": "append (if fully scheduled)", "kind": "write"},
+        ],
+    ),
+    "S2H8": dict(  # APPEND TO BATCH
+        inputs=[["seq", "Sequence"]],
+        outputs=[["Δ scheduled_seqs", "append"]],
+        state_effects=[],
+    ),
+    "S2A1": dict(  # CHAINED HASH WALK
+        inputs=[["seq", "Sequence"]],
+        outputs=[["num_cached_blocks", "int"], ["return", "-1 if pool full"]],
+        state_effects=[
+            {"ds_id": "cache", "op": "get(h)", "kind": "read"},
+            {"ds_id": "pool",  "op": "blocks[i].token_ids + free_block_ids len", "kind": "read"},
+        ],
+    ),
+    "S2B1": dict(  # INSTALL BLOCK_TABLE
+        inputs=[["seq", "Sequence"], ["num_cached_blocks", "int"]],
+        outputs=[["seq.block_table", "list[int] installed"]],
+        state_effects=[
+            {"ds_id": "pool", "op": "popleft fresh + ref_count++", "kind": "write"},
+        ],
+    ),
+}
+for col in storyline_2["diagram"]["cols"]:
+    for b in col["blocks"]:
+        if b["id"] in _S2_ANNOTATIONS:
+            _annotate(b, **_S2_ANNOTATIONS[b["id"]])
 
 
 # ============================================================
