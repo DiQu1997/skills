@@ -163,12 +163,42 @@ Just `id`, `title`, `kind`, `depth`, `importance_scores`, `summary`,
 - `importance_scores.total` equals sum of four sub-scores
 
 ### Phase 11: Render to HTML
+
 ```bash
-python3 render.py walkthrough.json output.html
+# Default = swimlane view (the flow inspector described above):
+python3 render.py walkthrough.json output.html --source-root /path/to/repo
+
+# Alternate = diagram view (data-structures-as-canvas-entities; see below):
+python3 render.py walkthrough.json output.html --view diagram --source-root /path/to/repo
 ```
+
 The renderer finds the `/*WALKTHROUGH_DATA_PLACEHOLDER*/` in
-`template/walkthrough.html`, injects the JSON via `json.dumps()` with
-`</` → `<\/` escaping, and writes the output.
+`template/walkthrough.html` (or `template/walkthrough_diagram.html` for
+diagram view), injects the JSON via `json.dumps()` with `</` → `<\/`
+escaping, and writes the output.
+
+**`--source-root <PATH>`** (recommended): the renderer diffs every
+`code_view.lines[].content` against the actual source file at the cited
+line numbers. Mismatches abort the render with a per-block report —
+catches paraphrased / from-memory / off-by-one code transcriptions
+before they ship. The path is the repo root the `code_view.file` paths
+are relative to (e.g. if `code_view.file == "nanovllm/engine/scheduler.py"`,
+pass `--source-root /tmp/nano-vllm`). Bypass with `--no-source-check`
+ONLY when intentionally rendering hand-edited illustration data.
+
+**`--view diagram`** picks the alternate template. Same JSON, different
+visualization: data structures sit at the top of the canvas as
+persistent entities (queues drawn as queues, sets as `{T}`, dicts as
+`key→value`, composites as schema tables), and each block draws SVG
+arrows down to the DSes it reads/writes. Use when the storyline is
+state-centric and seeing "which state does each block touch" matters
+more than "what's the control flow." To populate the diagram view, the
+JSON must include the optional `diagram.data_structures[]`,
+`block.inputs[]`, `block.outputs[]`, `block.state_effects[]` fields —
+see Phase 8B in `prompts/analyze_code.md` and the `### data_structures`
++ `### inputs / outputs / state_effects` sections in `prompts/schema.md`.
+The swimlane (default) template IGNORES those fields, so a JSON without
+them still renders cleanly under either template.
 
 ### Phase 12: Open in live mode (default behavior)
 
