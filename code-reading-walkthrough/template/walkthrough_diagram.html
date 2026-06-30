@@ -341,6 +341,30 @@
   }
   .shape-composite-table td.shape-cell { width: auto; }
 
+  /* Function header — anchors a swimlane with "what does this function do?" */
+  .col-header {
+    margin-top: 14px;
+    padding: 8px 12px 9px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+  }
+  .col-header:first-child { margin-top: 4px; }
+  .col-sig {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    margin-bottom: 3px;
+  }
+  .col-sig .col-kw { color: var(--tok-kw); font-weight: 600; margin-right: 5px; }
+  .col-sig .col-fn { color: var(--fg); font-weight: 700; }
+  .col-sig .col-paren { color: var(--fg-faint); }
+  .col-desc {
+    font-size: 12px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+
   /* Logic blocks — code-walkthrough flavour */
   .blocks-area {
     display: flex;
@@ -354,8 +378,8 @@
     border: 1.5px solid var(--blk-border);
     border-radius: 8px;
     padding: 0;
-    min-width: 230px;
-    max-width: 260px;
+    min-width: 280px;
+    max-width: 320px;
     flex-shrink: 0;
     cursor: pointer;
     transition: transform 120ms, box-shadow 120ms;
@@ -415,13 +439,19 @@
     background: var(--code-bg);
     border: 1px solid var(--border);
     border-radius: 4px;
-    padding: 5px 8px;
+    padding: 6px 9px;
     font-family: ui-monospace, monospace;
     font-size: 10.5px;
-    line-height: 1.45;
-    white-space: pre;
-    overflow-x: auto;
+    line-height: 1.5;
+    /* Wrap long lines instead of silently clipping them. Python indentation
+       is preserved via white-space: pre-wrap; continuation lines hang from
+       a small left indent so the wrap is visible but not jarring. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
     color: var(--fg);
+    max-height: 200px;
+    overflow-y: auto;
   }
   .code-block .tok-kw { color: var(--tok-kw); font-weight: 600; }
   .code-block .tok-type { color: var(--tok-type); }
@@ -430,11 +460,17 @@
   .code-block .tok-fn { color: var(--tok-fn); }
 
   .blk-says {
-    font-size: 11px;
-    color: var(--fg-soft);
-    line-height: 1.45;
-    border-left: 2px solid var(--border);
-    padding-left: 7px;
+    font-size: 12px;
+    color: var(--fg);
+    line-height: 1.5;
+    font-weight: 500;
+  }
+  .blk-code-label {
+    font-family: ui-monospace, monospace;
+    font-size: 8.5px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-faint);
+    margin-bottom: -2px;
   }
 
   .port-section {
@@ -779,11 +815,17 @@
 
     view.cols.forEach((col, ci) => {
       const colHeader = document.createElement('div');
-      colHeader.style.cssText = 'font-family: ui-monospace, monospace; font-size: 11px; color: var(--fg-soft); padding: 4px 0; border-top: 1px dashed var(--border); margin-top: 8px;';
-      colHeader.innerHTML = '<span style="color: var(--tok-kw); font-weight: 600;">def</span> ' +
-        esc(col.function || col.label || col.id) +
-        ' <span style="color: var(--fg-faint); font-style: italic;">— ' + esc(col.description || '') + '</span>';
-      if (ci === 0) colHeader.style.borderTop = 'none';
+      colHeader.className = 'col-header';
+      const sigHtml =
+        '<div class="col-sig">' +
+          '<span class="col-kw">def</span> ' +
+          '<span class="col-fn">' + esc(col.function || col.label || col.id) + '</span>' +
+          '<span class="col-paren">(…)</span>' +
+        '</div>';
+      const descHtml = col.description
+        ? '<div class="col-desc">' + esc(col.description) + '</div>'
+        : '';
+      colHeader.innerHTML = sigHtml + descHtml;
       area.appendChild(colHeader);
 
       const row = document.createElement('div');
@@ -832,11 +874,10 @@
         '<div class="blk-name">' + esc(b.title || b.name || b.id) + '</div>' +
       '</div>' +
       '<div class="blk-body">' +
-        (codeHtml ? '<pre class="code-block">' + codeHtml + '</pre>' : '') +
         (b.one_liner ? '<div class="blk-says">' + esc(b.one_liner) + '</div>' : '') +
         (inputsHtml ? '<div class="port-section in"><div class="port-label">▸ in</div>' + inputsHtml + '</div>' : '') +
         (outputsHtml ? '<div class="port-section out"><div class="port-label">out ▸</div>' + outputsHtml + '</div>' : '') +
-        (b._col ? '<div class="blk-source">' + esc(b._col.function || b._col.id) + '</div>' : '') +
+        (codeHtml ? '<div class="blk-code-label">code</div><pre class="code-block">' + codeHtml + '</pre>' : '') +
       '</div>';
     blk.onclick = () => { STATE.activeBlockId = b.id; renderCanvas(); renderSidePanel(); };
     return blk;
