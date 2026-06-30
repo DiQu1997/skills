@@ -96,7 +96,7 @@ DS_WAITING = {
     "name": "scheduler.waiting",
     "type": "deque[Sequence]",
     "role": "FIFO of unstarted requests",
-    "schema_pieces": ["head → … Sequence … ← tail"],
+    "shape": {"kind": "deque", "item_type": "Sequence", "slots": 6},
     "ops_r": ["peek[0]", "len", "truthy"],
     "ops_w": ["popleft", "append"],
 }
@@ -105,7 +105,7 @@ DS_RUNNING = {
     "name": "scheduler.running",
     "type": "deque[Sequence]",
     "role": "Currently-decoding sequences",
-    "schema_pieces": ["head → … Sequence … ← tail"],
+    "shape": {"kind": "deque", "item_type": "Sequence", "slots": 6},
     "ops_r": ["len", "iterate"],
     "ops_w": ["append", "remove", "extendleft"],
 }
@@ -114,12 +114,12 @@ DS_POOL = {
     "name": "block_manager",
     "type": "BlockManager",
     "role": "Physical KV cache + free deque + used set",
-    "schema_pieces": [
-        "blocks: list[Block(N)]",
-        "free_block_ids: deque[int]",
-        "used_block_ids: set[int]",
-        "block_size: int",
-    ],
+    "shape": {"kind": "composite", "pieces": [
+        {"name": "blocks", "kind": "grid", "capacity": 16, "item_type": "Block"},
+        {"name": "free_block_ids", "kind": "deque", "item_type": "int (block_id)", "slots": 6},
+        {"name": "used_block_ids", "kind": "set", "item_type": "int (block_id)"},
+        {"name": "block_size", "kind": "scalar", "value_type": "int"},
+    ]},
     "ops_r": ["can_allocate(seq)", "blocks[i].token_ids", "free_block_ids", "Block.ref_count"],
     "ops_w": ["allocate(seq, n)", "deallocate(seq)", "free_block_ids.popleft", "used_block_ids.add", "Block.ref_count ±"],
 }
@@ -128,7 +128,7 @@ DS_CACHE = {
     "name": "hash_to_block_id",
     "type": "dict[int, int]",
     "role": "Prefix cache (chained-hash → block_id)",
-    "schema_pieces": ["populated by hash_blocks(seq) in postprocess; consumed by can_allocate"],
+    "shape": {"kind": "dict", "key_label": "chained hash", "value_label": "block_id"},
     "ops_r": ["get(h)"],
     "ops_w": ["[h] = block_id", "del [h]"],
 }

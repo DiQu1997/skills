@@ -228,6 +228,165 @@
     font-size: 10.5px;
   }
 
+  /* ---------- Per-kind shape visualizations ---------- */
+  .shape-line {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-family: ui-monospace, monospace; font-size: 10px;
+    margin-top: 6px;
+  }
+  .shape-endpoint {
+    color: var(--fg-faint); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 700; white-space: nowrap;
+  }
+  .shape-endpoint .arrow { color: var(--fg-soft); margin: 0 4px; }
+
+  /* deque visual: row of slot rectangles with PUSH/POP arrows at ends */
+  .shape-deque {
+    display: flex; align-items: center; gap: 4px;
+  }
+  .shape-deque .slot {
+    width: 30px; height: 30px;
+    border: 1.5px dashed rgba(0,0,0,0.22);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.4);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-faint); font-size: 9px;
+    flex-shrink: 0;
+  }
+  .shape-deque .slot.first, .shape-deque .slot.last {
+    border-style: solid;
+    border-color: rgba(0,0,0,0.32);
+  }
+  .shape-deque .ellipsis { color: var(--fg-faint); font-size: 11px; padding: 0 2px; }
+
+  /* grid visual: rows×cols of small cells */
+  .shape-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 30px);
+    gap: 3px;
+    margin-top: 4px;
+  }
+  .shape-grid .cell {
+    aspect-ratio: 1/1;
+    border: 1.5px solid rgba(0,0,0,0.22);
+    border-radius: 3px;
+    background: rgba(255,255,255,0.5);
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-size: 9px;
+    color: var(--fg-soft);
+  }
+
+  /* set visual: bag of chips, unordered */
+  .shape-set {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.35);
+    border: 1.5px dashed rgba(0,0,0,0.22);
+    border-radius: 16px;
+    margin-top: 4px;
+  }
+  .shape-set::before {
+    content: '{';
+    font-family: ui-monospace, monospace;
+    font-size: 16px; font-weight: 700; color: var(--fg-faint);
+  }
+  .shape-set::after {
+    content: '}';
+    font-family: ui-monospace, monospace;
+    font-size: 16px; font-weight: 700; color: var(--fg-faint);
+  }
+  .shape-set .placeholder {
+    color: var(--fg-faint); font-style: italic; font-size: 10px;
+    font-family: ui-monospace, monospace;
+  }
+  .shape-set .item-type {
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--fg-soft); padding: 2px 6px;
+    background: rgba(255,255,255,0.6);
+    border-radius: 10px;
+  }
+
+  /* dict visual: 2-col mini table */
+  .shape-dict {
+    display: inline-grid;
+    grid-template-columns: 1fr auto 1fr;
+    background: rgba(255,255,255,0.5);
+    border: 1.5px solid rgba(0,0,0,0.18);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+  }
+  .shape-dict .col-head {
+    background: rgba(0,0,0,0.05);
+    padding: 3px 10px;
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-faint);
+    text-align: center;
+  }
+  .shape-dict .arrow {
+    background: rgba(0,0,0,0.05);
+    padding: 3px 6px;
+    font-weight: 700;
+    color: var(--fg-faint);
+    border-left: 1px solid rgba(0,0,0,0.1);
+    border-right: 1px solid rgba(0,0,0,0.1);
+    text-align: center;
+  }
+  .shape-dict .row-key, .shape-dict .row-val {
+    padding: 3px 10px;
+    background: rgba(255,255,255,0.5);
+    color: var(--fg);
+    text-align: center;
+    border-top: 1px solid rgba(0,0,0,0.1);
+  }
+  .shape-dict .row-key { font-style: italic; color: var(--fg-soft); }
+  .shape-dict .row-arrow {
+    background: rgba(255,255,255,0.5);
+    border-top: 1px solid rgba(0,0,0,0.1);
+    border-left: 1px solid rgba(0,0,0,0.1);
+    border-right: 1px solid rgba(0,0,0,0.1);
+    padding: 3px 6px;
+    color: var(--fg-faint); font-weight: 700; text-align: center;
+  }
+
+  /* scalar: just a typed label */
+  .shape-scalar {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 4px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+  }
+  .shape-scalar .equals { color: var(--fg-faint); }
+  .shape-scalar .placeholder {
+    color: var(--fg-soft); font-style: italic;
+    padding: 1px 6px;
+    background: rgba(255,255,255,0.5);
+    border: 1px dashed rgba(0,0,0,0.18);
+    border-radius: 3px;
+  }
+
+  /* composite: stacked sub-pieces inside one DS box */
+  .shape-composite { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .shape-composite .piece {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 5px 8px;
+    background: rgba(255,255,255,0.3);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 4px;
+  }
+  .shape-composite .piece-label {
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--fg-soft); font-weight: 700;
+    min-width: 110px;
+    padding-top: 4px;
+  }
+  .shape-composite .piece-label .type {
+    color: var(--tok-type); font-weight: 400; display: block; font-size: 9px;
+  }
+  .shape-composite .piece-viz { flex: 1; min-width: 0; }
+
   /* Logic blocks — code-walkthrough flavour */
   .blocks-area {
     display: flex;
@@ -517,16 +676,24 @@
       box.id = 'ds-' + ds.id;
       const opsR = (ds.ops_r || []).map(o => '<span class="op-chip r">' + esc(o) + '</span>').join('');
       const opsW = (ds.ops_w || []).map(o => '<span class="op-chip w">' + esc(o) + '</span>').join('');
-      const schemaPieces = (ds.schema_pieces && ds.schema_pieces.length)
-        ? ds.schema_pieces.map(p => '<span class="schema-piece">' + esc(p) + '</span>').join('')
-        : '<span class="placeholder">' + esc(ds.shape || '…') + '</span>';
+      // Shape visual: prefer structured `shape` field over legacy schema_pieces
+      let shapeHtml;
+      if (ds.shape && typeof ds.shape === 'object') {
+        shapeHtml = renderShape(ds.shape);
+      } else if (ds.schema_pieces && ds.schema_pieces.length) {
+        shapeHtml = '<div class="ds-shape">' +
+          ds.schema_pieces.map(p => '<span class="schema-piece">' + esc(p) + '</span>').join('') +
+          '</div>';
+      } else {
+        shapeHtml = '<div class="ds-shape"><span class="placeholder">…</span></div>';
+      }
       box.innerHTML =
         '<div class="ds-head">' +
           '<span class="ds-name">' + esc(ds.name) + '</span>' +
           (ds.type ? '<span class="ds-type">: ' + esc(ds.type) + '</span>' : '') +
           (ds.role ? '<span class="ds-role">' + esc(ds.role) + '</span>' : '') +
         '</div>' +
-        '<div class="ds-shape">' + schemaPieces + '</div>' +
+        shapeHtml +
         ((opsR || opsW) ? '<div class="ds-ops">' + opsR + opsW + '</div>' : '');
       grid.appendChild(box);
     });
@@ -719,6 +886,78 @@
     } else {
       f('focus-code').textContent = '';
     }
+  }
+
+  // ---------- Shape renderers ----------
+  // Each kind gets a visual matching its data structure semantics.
+  function renderShape(shape) {
+    if (!shape || !shape.kind) return '<div class="ds-shape"><span class="placeholder">…</span></div>';
+    switch (shape.kind) {
+      case 'deque':     return renderDequeShape(shape);
+      case 'grid':      return renderGridShape(shape);
+      case 'set':       return renderSetShape(shape);
+      case 'dict':      return renderDictShape(shape);
+      case 'scalar':    return renderScalarShape(shape);
+      case 'composite': return renderCompositeShape(shape);
+      default:          return '<div class="ds-shape"><span class="placeholder">' + esc(shape.kind) + '</span></div>';
+    }
+  }
+  function renderDequeShape(s) {
+    const n = s.slots || 6;
+    const slots = [];
+    for (let i = 0; i < n; i++) {
+      const cls = i === 0 ? 'slot first' : (i === n - 1 ? 'slot last' : 'slot');
+      slots.push('<div class="' + cls + '">' + (i === 0 ? '◆' : '') + '</div>');
+    }
+    return '<div class="shape-line">' +
+      '<span class="shape-endpoint">popleft<span class="arrow">←</span>HEAD</span>' +
+      '<div class="shape-deque">' + slots.join('<span class="ellipsis">·</span>') + '</div>' +
+      '<span class="shape-endpoint">TAIL<span class="arrow">→</span>append</span>' +
+      (s.item_type ? '<span style="color: var(--tok-type); font-family: ui-monospace, monospace; font-size: 10px;">items: ' + esc(s.item_type) + '</span>' : '') +
+      '</div>';
+  }
+  function renderGridShape(s) {
+    const n = s.capacity || 16;
+    const cells = [];
+    for (let i = 0; i < n; i++) cells.push('<div class="cell">#' + i + '</div>');
+    return '<div class="shape-grid">' + cells.join('') + '</div>' +
+      (s.item_type ? '<div class="shape-line"><span style="color: var(--tok-type); font-family: ui-monospace, monospace; font-size: 10px;">cell: ' + esc(s.item_type) + '</span></div>' : '');
+  }
+  function renderSetShape(s) {
+    return '<div class="shape-set">' +
+      '<span class="item-type">' + esc(s.item_type || 'item') + '</span>' +
+      '<span class="placeholder">… unordered, no duplicates …</span>' +
+      '</div>';
+  }
+  function renderDictShape(s) {
+    return '<div class="shape-dict">' +
+      '<div class="col-head">key</div>' +
+      '<div class="col-head">→</div>' +
+      '<div class="col-head">value</div>' +
+      '<div class="row-key">' + esc(s.key_label || s.key_type || 'k') + '</div>' +
+      '<div class="row-arrow">→</div>' +
+      '<div class="row-val">' + esc(s.value_label || s.value_type || 'v') + '</div>' +
+      '</div>';
+  }
+  function renderScalarShape(s) {
+    return '<div class="shape-scalar">' +
+      '<span style="color: var(--tok-type);">' + esc(s.value_type || 'value') + '</span>' +
+      '<span class="equals">=</span>' +
+      '<span class="placeholder">' + esc(s.value || '…') + '</span>' +
+      '</div>';
+  }
+  function renderCompositeShape(s) {
+    const parts = (s.pieces || []).map(p => {
+      const inner = renderShape(p);
+      return '<div class="piece">' +
+        '<div class="piece-label">' + esc(p.name) +
+          (p.item_type ? '<span class="type">' + esc(p.item_type) + '</span>' :
+           p.value_type ? '<span class="type">' + esc(p.value_type) + '</span>' : '') +
+        '</div>' +
+        '<div class="piece-viz">' + inner + '</div>' +
+        '</div>';
+    });
+    return '<div class="shape-composite">' + parts.join('') + '</div>';
   }
 
   function setStoryline(id) {
