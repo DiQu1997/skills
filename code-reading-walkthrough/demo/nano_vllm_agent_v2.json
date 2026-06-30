@@ -1,0 +1,1228 @@
+{
+  "schema_version": "0.5-reading",
+  "metadata": {
+    "repo": "nano-vllm",
+    "commit": "HEAD",
+    "target": "How does nano-vllm admit a new request and schedule its prefill?",
+    "title": "nano-vllm: request admission & prefill scheduling",
+    "generated_at": "2026-06-30T00:00:00Z"
+  },
+  "summary": {
+    "one_line": "How a prompt travels from `add_request` to a scheduled prefill batch, with prefix-cache lookup and KV-block allocation along the way.",
+    "description": "This walkthrough traces the path a new generation request takes through nano-vllm: it is wrapped in a Sequence, enqueued onto the scheduler's waiting deque, then admitted into a prefill batch only if the BlockManager can find (or carve out) the KV-cache blocks it needs. It covers the engine's outer pump, the scheduler's prefill loop, the prefix-cache probe in `can_allocate`, the actual block reservation in `allocate`, and a short summary of how decode and teardown fit in. Intended for readers who already understand transformer KV caching at a high level and want to see how nano-vllm's lean ~400-line engine glues admission + paging + scheduling together."
+  },
+  "scope": {
+    "mode": "topic",
+    "input": "How does nano-vllm admit a new request and schedule its prefill?",
+    "discovered_scope": [
+      {
+        "path": "nanovllm/engine/llm_engine.py",
+        "reason": "entry-point",
+        "note": "Public LLMEngine: add_request enqueues, generate pumps the step loop, step calls scheduler+model_runner+postprocess."
+      },
+      {
+        "path": "nanovllm/engine/scheduler.py",
+        "reason": "core-flow",
+        "note": "Scheduler.schedule() is the prefill admission loop the question is about; preempt and postprocess sit alongside it."
+      },
+      {
+        "path": "nanovllm/engine/block_manager.py",
+        "reason": "core-flow",
+        "note": "can_allocate / allocate decide whether a waiting sequence can be admitted; prefix-cache lookup lives here."
+      },
+      {
+        "path": "nanovllm/engine/sequence.py",
+        "reason": "type-def",
+        "note": "Sequence carries block_table, num_cached_tokens, num_scheduled_tokens — the per-request state the scheduler manipulates."
+      }
+    ],
+    "excluded": [
+      {
+        "path": "nanovllm/engine/model_runner.py",
+        "reason": "Out of scope for the admission/prefill question — the runner just executes whatever the scheduler produced."
+      },
+      {
+        "path": "nanovllm/config.py",
+        "reason": "Pure configuration object; field names referenced inline as needed."
+      },
+      {
+        "path": "nanovllm/sampling_params.py",
+        "reason": "Trivial dataclass; only its three fields (temperature, max_tokens, ignore_eos) are touched by Sequence.__init__."
+      }
+    ],
+    "importance_criteria": "The topic is a control-flow question (admission + prefill scheduling), so we weight entry_point and centrality highest. The engine pump and the prefill scheduling loop are both load-bearing storylines (full depth). Decode + teardown is in-bounds because it shares the same Scheduler.schedule() function but is conceptually a separate path; it gets a summary card so readers can see how the lifecycle closes without losing focus on the asked-about prefill path."
+  },
+  "storylines": [
+    {
+      "id": "S1",
+      "title": "Engine pump: add_request -> generate -> step",
+      "kind": "entry_point",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 2,
+        "entry_point": 3,
+        "novelty": 2,
+        "total": 10,
+        "rationale": "Public API surface; every request goes through these three methods, and generate's pump loop is the only driver of step()."
+      },
+      "summary": "The LLMEngine wraps a prompt in a Sequence and hands it to the scheduler; generate then loops, calling step() until every queued sequence finishes.",
+      "files_touched": [
+        "nanovllm/engine/llm_engine.py",
+        "nanovllm/engine/sequence.py"
+      ],
+      "mental_model_anchor": "Think of LLMEngine as a producer/consumer wrapper around the scheduler. `add_request` pushes a Sequence onto the back of a queue; `generate` is a tight while-loop that asks the scheduler 'who's runnable?' on every tick, hands that batch to the model runner, lets the scheduler post-process the new tokens, and collects finished sequences as they fall out. Nothing in this file knows about KV cache or paging — that's all delegated to Scheduler.",
+      "purpose": {
+        "stated": null,
+        "evident": "Provide the public surface for batched LLM inference: ingest prompts, drive a step loop that interleaves prefill and decode, and return decoded outputs once every sequence has finished.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "Top-level engine facade; the only object a user constructs directly. Owns the tokenizer, model runner workers, and the scheduler.",
+        "involved_modules": [
+          { "module": "nanovllm.engine.llm_engine", "role_in_storyline": "Defines LLMEngine; orchestrates the per-step round-trip." },
+          { "module": "nanovllm.engine.sequence", "role_in_storyline": "Sequence wraps the prompt and carries per-request state (block_table, num_*_tokens, status) that downstream stages mutate." },
+          { "module": "nanovllm.engine.scheduler", "role_in_storyline": "Receives sequences via .add and decides per .schedule() what runs each step." },
+          { "module": "nanovllm.engine.model_runner", "role_in_storyline": "Executed via .call('run', seqs, is_prefill); produces next-token ids the scheduler then post-processes." }
+        ],
+        "data_flow": "prompt (str | list[int]) -> tokenize if needed -> Sequence -> scheduler.waiting deque. Each step: scheduler.schedule() yields a batch + is_prefill flag -> model_runner.call returns token_ids -> scheduler.postprocess updates Sequence state -> finished sequences emit (seq_id, completion_token_ids) tuples back to generate."
+      },
+      "change_overview": "The engine class is intentionally thin. `__init__` builds the worker processes (one per extra tensor-parallel rank), the tokenizer, and a single Scheduler; that Scheduler in turn owns the BlockManager. After that, the runtime API is just three methods: `add_request`, `step`, `generate` (plus `is_finished` and `exit`).\n\n`add_request` is a single-purpose adapter: if the caller hands in a string it tokenizes, otherwise it trusts the token-id list. It then wraps the tokens in a Sequence and pushes onto `scheduler.waiting`. No allocation, no scheduling decision happens here.\n\n`step` is the per-tick driver. It calls `scheduler.schedule()` to get a batch and an `is_prefill` flag, computes a signed `num_tokens` (positive for prefill, negative for decode — generate uses the sign to decide which throughput counter to update), hands the batch off to the model runner, then calls `scheduler.postprocess` to fold the new token ids back into the sequences. The return is a list of (seq_id, completion_token_ids) for any sequence that finished this step.\n\n`generate` is the user-facing batch loop. It accepts prompts + sampling params, registers each as a request, then loops `step()` until `is_finished()` is true. It tracks throughput per phase using the `num_tokens` sign trick and collects outputs into a dict keyed by seq_id (so it can reorder back to caller order at the end)."
+      ,
+      "diagram": {
+        "file_badge": "llm_engine.py",
+        "subtitle": "three methods, one pump",
+        "phases": [
+          { "id": "setup",   "label": "Setup",   "color": "setup" },
+          { "id": "main",    "label": "Main",    "color": "main" },
+          { "id": "handoff", "label": "Hand-off","color": "handoff" },
+          { "id": "emit",    "label": "Emit",    "color": "emit" }
+        ],
+        "data_structures": [
+          {
+            "id": "ds_waiting",
+            "name": "scheduler.waiting",
+            "type": "deque[Sequence]",
+            "role": "FIFO of unstarted requests awaiting prefill admission",
+            "shape": { "kind": "deque", "item_type": "Sequence" },
+            "ops_r": ["peek[0]", "len/bool"],
+            "ops_w": ["append (add_request)", "appendleft (preempt)", "popleft (admit)"]
+          },
+          {
+            "id": "ds_running",
+            "name": "scheduler.running",
+            "type": "deque[Sequence]",
+            "role": "Sequences currently in decode (already prefilled, KV blocks held)",
+            "shape": { "kind": "deque", "item_type": "Sequence" },
+            "ops_r": ["len/bool", "iterate (for finished)"],
+            "ops_w": ["append (admit)", "popleft (schedule decode)", "pop (preempt victim)", "extendleft (re-queue)", "remove (finish)"]
+          },
+          {
+            "id": "ds_outputs",
+            "name": "generate.outputs",
+            "type": "dict[int seq_id, list[int] token_ids]",
+            "role": "Caller-side accumulator for finished sequences; later reordered by seq_id for return",
+            "shape": { "kind": "dict", "key_label": "seq_id", "value_label": "completion_token_ids" },
+            "ops_r": ["keys (final sort)"],
+            "ops_w": ["outputs[seq_id] = token_ids"]
+          }
+        ],
+        "cols": [
+          {
+            "id": "col_add",
+            "function": "add_request",
+            "label": "add_request",
+            "description": "Adapter: turn a prompt (string or token-id list) into a Sequence and push it onto the scheduler's waiting deque. No allocation or scheduling happens here.",
+            "blocks": [
+              {
+                "id": "B_add_1",
+                "phase": "setup",
+                "title": "TOKENIZE IF NEEDED",
+                "line_range": "L44–45",
+                "one_liner": "Accepts either a raw string or a pre-tokenized id list; the string branch routes through the engine's own tokenizer so callers don't have to know which model is loaded.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 43,
+                  "context_end_line": 47,
+                  "lines": [
+                    { "line_num": 43, "content": "    def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):", "change": "unchanged" },
+                    { "line_num": 44, "content": "        if isinstance(prompt, str):", "change": "unchanged" },
+                    { "line_num": 45, "content": "            prompt = self.tokenizer.encode(prompt)", "change": "unchanged" },
+                    { "line_num": 46, "content": "        seq = Sequence(prompt, sampling_params)", "change": "unchanged" },
+                    { "line_num": 47, "content": "        self.scheduler.add(seq)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Type-dispatches on the prompt argument: a `str` is encoded via the engine's bundled tokenizer (`AutoTokenizer.from_pretrained` in __init__), while an already-tokenized `list[int]` falls through untouched. After this block, `prompt` is unconditionally a list of token ids.",
+                  "why_its_here": "Lets the public API accept both ergonomic strings and pre-tokenized lists (useful for benchmarks and for callers who tokenized once and want to issue many requests). Doing the dispatch at the engine boundary means nothing downstream has to special-case strings.",
+                  "touches": [
+                    { "label": "self.tokenizer.encode", "kind": "external", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["prompt", "str | list[int]"],
+                  ["self.tokenizer", "PreTrainedTokenizerFast"]
+                ],
+                "outputs": [
+                  ["prompt", "list[int] (normalized)"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_add_2",
+                "phase": "main",
+                "title": "WRAP & ENQUEUE",
+                "line_range": "L46–47",
+                "one_liner": "Wrap the token-id list in a Sequence (which assigns a fresh seq_id and seeds per-request state) and append it to the scheduler's waiting deque — the only side-effect of admission.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 44,
+                  "context_end_line": 47,
+                  "lines": [
+                    { "line_num": 44, "content": "        if isinstance(prompt, str):", "change": "unchanged" },
+                    { "line_num": 45, "content": "            prompt = self.tokenizer.encode(prompt)", "change": "unchanged" },
+                    { "line_num": 46, "content": "        seq = Sequence(prompt, sampling_params)", "change": "unchanged" },
+                    { "line_num": 47, "content": "        self.scheduler.add(seq)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Constructs a `Sequence` with the token ids and sampling parameters; the Sequence ctor pulls the next seq_id from a module-level counter and zeroes the scheduling counters (`num_cached_tokens`, `num_scheduled_tokens`, empty `block_table`). Then forwards to `scheduler.add(seq)`, which just appends to `self.waiting`.",
+                  "why_its_here": "Admission is deliberately cheap: no KV-cache decision is made here. The scheduler's prefill loop will decide on a later `.schedule()` call whether this sequence can actually run, based on free-block availability at that moment. This decouples 'request received' from 'request runnable'.",
+                  "touches": [
+                    { "label": "Sequence.__init__", "kind": "type", "block": null },
+                    { "label": "Scheduler.add", "kind": "function", "block": null }
+                  ],
+                  "failure_mode": [
+                    "No backpressure on .waiting — callers can enqueue arbitrarily many requests; the scheduler will simply hold them until KV blocks are free."
+                  ]
+                },
+                "inputs": [
+                  ["prompt", "list[int]"],
+                  ["sampling_params", "SamplingParams"]
+                ],
+                "outputs": [
+                  ["seq", "Sequence (status=WAITING, block_table=[])"],
+                  ["Δ scheduler.waiting", "↑ append seq at tail"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_waiting", "op": "append", "kind": "write" }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "col_generate",
+            "function": "generate",
+            "label": "generate",
+            "description": "User-facing batch driver: register every (prompt, sampling_params) pair as a request, then spin the step pump until every sequence has finished. Tracks per-phase throughput and reorders outputs back to caller order.",
+            "blocks": [
+              {
+                "id": "B_gen_1",
+                "phase": "setup",
+                "title": "REGISTER ALL",
+                "line_range": "L66–70",
+                "one_liner": "Normalize a single SamplingParams to a per-prompt list, then funnel every (prompt, sp) pair through `add_request` so the scheduler sees the full batch before the first step.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 65,
+                  "context_end_line": 71,
+                  "lines": [
+                    { "line_num": 65, "content": "    ) -> list[str]:", "change": "unchanged" },
+                    { "line_num": 66, "content": "        pbar = tqdm(total=len(prompts), desc=\"Generating\", dynamic_ncols=True, disable=not use_tqdm)", "change": "unchanged" },
+                    { "line_num": 67, "content": "        if not isinstance(sampling_params, list):", "change": "unchanged" },
+                    { "line_num": 68, "content": "            sampling_params = [sampling_params] * len(prompts)", "change": "unchanged" },
+                    { "line_num": 69, "content": "        for prompt, sp in zip(prompts, sampling_params):", "change": "unchanged" },
+                    { "line_num": 70, "content": "            self.add_request(prompt, sp)", "change": "unchanged" },
+                    { "line_num": 71, "content": "        outputs = {}", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Builds a tqdm progress bar sized to the prompt batch, broadcasts a scalar SamplingParams across all prompts if needed, and calls `self.add_request(prompt, sp)` per pair. Every request lands on `scheduler.waiting` before the step loop begins.",
+                  "why_its_here": "Front-loading admission gives the scheduler the full batch on the very first .schedule() call, so it can pack multiple sequences into the same prefill batch (subject to max_num_batched_tokens). If we instead added requests one-per-step we'd serialize prefill unnecessarily.",
+                  "touches": [
+                    { "label": "self.add_request", "kind": "function", "block": "B_add_1" }
+                  ],
+                  "failure_mode": [
+                    "len(sampling_params) must equal len(prompts) when a list is passed — zip silently truncates otherwise."
+                  ]
+                },
+                "inputs": [
+                  ["prompts", "list[str] | list[list[int]]"],
+                  ["sampling_params", "SamplingParams | list[SamplingParams]"]
+                ],
+                "outputs": [
+                  ["Δ scheduler.waiting", "↑ extended by len(prompts)"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_waiting", "op": "append × N", "kind": "write" }
+                ]
+              },
+              {
+                "id": "B_gen_2",
+                "phase": "main",
+                "title": "PUMP UNTIL FINISHED",
+                "line_range": "L72–79",
+                "one_liner": "Spin step() in a tight loop, using the sign of num_tokens to attribute the elapsed time to either prefill throughput (num_tokens > 0) or decode throughput (num_tokens < 0).",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 71,
+                  "context_end_line": 83,
+                  "lines": [
+                    { "line_num": 71, "content": "        outputs = {}", "change": "unchanged" },
+                    { "line_num": 72, "content": "        prefill_throughput = decode_throughput = 0.", "change": "unchanged" },
+                    { "line_num": 73, "content": "        while not self.is_finished():", "change": "unchanged" },
+                    { "line_num": 74, "content": "            t = perf_counter()", "change": "unchanged" },
+                    { "line_num": 75, "content": "            output, num_tokens = self.step()", "change": "unchanged" },
+                    { "line_num": 76, "content": "            if num_tokens > 0:", "change": "unchanged" },
+                    { "line_num": 77, "content": "                prefill_throughput = num_tokens / (perf_counter() - t)", "change": "unchanged" },
+                    { "line_num": 78, "content": "            else:", "change": "unchanged" },
+                    { "line_num": 79, "content": "                decode_throughput = -num_tokens / (perf_counter() - t)", "change": "unchanged" },
+                    { "line_num": 80, "content": "            pbar.set_postfix({", "change": "unchanged" },
+                    { "line_num": 81, "content": "                \"Prefill\": f\"{int(prefill_throughput)}tok/s\",", "change": "unchanged" },
+                    { "line_num": 82, "content": "                \"Decode\": f\"{int(decode_throughput)}tok/s\",", "change": "unchanged" },
+                    { "line_num": 83, "content": "            })", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Outer loop condition is `not scheduler.is_finished()` (i.e., both deques empty). Each iteration: time `step()`, then attribute its wall time to the prefill or decode counter based on the sign of `num_tokens` returned by step (positive == prefill total batched tokens; negative == decode batch size).",
+                  "why_its_here": "Encoding the phase in the sign of `num_tokens` removes the need for a second return value or a tagged tuple — step() can stay narrowly typed. The throughput display is purely cosmetic but uses the same signal, so there is no source-of-truth duplication.",
+                  "touches": [
+                    { "label": "self.step", "kind": "function", "block": "B_step_1" },
+                    { "label": "self.is_finished", "kind": "function", "block": null }
+                  ],
+                  "failure_mode": [
+                    "perf_counter delta could be zero on very fast steps — would divide-by-zero; nano-vllm assumes step is never that fast."
+                  ]
+                },
+                "inputs": [
+                  ["scheduler.is_finished", "bool"]
+                ],
+                "outputs": [
+                  ["output", "list[(seq_id, list[int])]"],
+                  ["num_tokens", "int (>0 prefill, <0 decode)"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_gen_3",
+                "phase": "emit",
+                "title": "COLLECT FINISHED",
+                "line_range": "L84–86",
+                "one_liner": "Each finished (seq_id, token_ids) tuple drops into the outputs dict and advances the progress bar by one; iteration order doesn't matter because the dict is keyed by seq_id.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 83,
+                  "context_end_line": 87,
+                  "lines": [
+                    { "line_num": 83, "content": "            })", "change": "unchanged" },
+                    { "line_num": 84, "content": "            for seq_id, token_ids in output:", "change": "unchanged" },
+                    { "line_num": 85, "content": "                outputs[seq_id] = token_ids", "change": "unchanged" },
+                    { "line_num": 86, "content": "                pbar.update(1)", "change": "unchanged" },
+                    { "line_num": 87, "content": "        pbar.close()", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Walks the (possibly empty) `output` list returned by step. For each finished sequence, stores its completion_token_ids under its seq_id in the local `outputs` dict and ticks the progress bar.",
+                  "why_its_here": "Sequences can finish out of caller order (because of length differences and preemption), so the engine accumulates by seq_id and reorders at the very end. This keeps the per-step path simple — no maintaining of a parallel ordered list.",
+                  "touches": [
+                    { "label": "outputs (local dict)", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["output", "list[(seq_id, list[int])]"]
+                ],
+                "outputs": [
+                  ["Δ outputs", "↑ outputs[seq_id] = token_ids per finished seq"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_outputs", "op": "outputs[seq_id] = token_ids", "kind": "write" }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "col_step",
+            "function": "step",
+            "label": "step",
+            "description": "Per-tick driver: ask the scheduler for a runnable batch, run it through the model, post-process the new tokens back into the sequences, and report any finished sequences plus a signed token count for throughput accounting.",
+            "blocks": [
+              {
+                "id": "B_step_1",
+                "phase": "handoff",
+                "title": "ASK SCHEDULER",
+                "line_range": "L50–51",
+                "one_liner": "Delegates the entire admission/eviction decision to scheduler.schedule(); receives back a batch and an is_prefill flag, then encodes the phase in the sign of num_tokens for the outer loop's throughput tracker.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 49,
+                  "context_end_line": 53,
+                  "lines": [
+                    { "line_num": 49, "content": "    def step(self):", "change": "unchanged" },
+                    { "line_num": 50, "content": "        seqs, is_prefill = self.scheduler.schedule()", "change": "unchanged" },
+                    { "line_num": 51, "content": "        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)", "change": "unchanged" },
+                    { "line_num": 52, "content": "        token_ids = self.model_runner.call(\"run\", seqs, is_prefill)", "change": "unchanged" },
+                    { "line_num": 53, "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls `scheduler.schedule()`, which returns `(list[Sequence], bool is_prefill)`. For prefill batches num_tokens is the sum of per-sequence num_scheduled_tokens; for decode it is `-len(seqs)` because each decode-step sequence contributes exactly one token.",
+                  "why_its_here": "Centralizes all batching policy in the scheduler. step() doesn't decide which sequences run together; it just trusts whatever schedule() hands back. The sign trick on num_tokens is the only piece of phase-awareness the engine itself keeps.",
+                  "touches": [
+                    { "label": "Scheduler.schedule", "kind": "function", "block": null }
+                  ],
+                  "failure_mode": [
+                    "schedule() asserts `scheduled_seqs` is non-empty on the decode branch — if both deques are empty step shouldn't be called (generate's while-loop guards this)."
+                  ]
+                },
+                "inputs": [
+                  ["scheduler", "Scheduler"]
+                ],
+                "outputs": [
+                  ["seqs", "list[Sequence]"],
+                  ["is_prefill", "bool"],
+                  ["num_tokens", "int (signed: +prefill tokens, -decode batch size)"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_step_2",
+                "phase": "handoff",
+                "title": "RUN MODEL",
+                "line_range": "L52",
+                "one_liner": "Hand the scheduled batch to the worker pool via model_runner.call('run', ...); the runner returns the next-token id for each sequence (one per seq, even in prefill).",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 51,
+                  "context_end_line": 53,
+                  "lines": [
+                    { "line_num": 51, "content": "        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)", "change": "unchanged" },
+                    { "line_num": 52, "content": "        token_ids = self.model_runner.call(\"run\", seqs, is_prefill)", "change": "unchanged" },
+                    { "line_num": 53, "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Issues a remote-style 'run' call into ModelRunner with the scheduled sequences and the prefill flag. The runner pickles sequences (via Sequence.__getstate__), runs the forward pass across tensor-parallel workers, and returns a list of next-token ids aligned with `seqs`.",
+                  "why_its_here": "Keeping the model call behind .call() means tensor-parallel coordination (worker events, broadcast) stays in ModelRunner — the engine itself doesn't need to know how many workers there are.",
+                  "touches": [
+                    { "label": "ModelRunner.call", "kind": "external", "block": null }
+                  ],
+                  "failure_mode": [
+                    "Any worker crash propagates here; nano-vllm relies on atexit + the workers' Event to unwind."
+                  ]
+                },
+                "inputs": [
+                  ["seqs", "list[Sequence]"],
+                  ["is_prefill", "bool"]
+                ],
+                "outputs": [
+                  ["token_ids", "list[int] (next-token per seq)"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_step_3",
+                "phase": "main",
+                "title": "POSTPROCESS",
+                "line_range": "L53",
+                "one_liner": "Fold the new token ids back into the sequences (and finish any that hit EOS or max_tokens) via scheduler.postprocess; the scheduler is the only owner of per-sequence state mutation.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 52,
+                  "context_end_line": 55,
+                  "lines": [
+                    { "line_num": 52, "content": "        token_ids = self.model_runner.call(\"run\", seqs, is_prefill)", "change": "unchanged" },
+                    { "line_num": 53, "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)", "change": "unchanged" },
+                    { "line_num": 54, "content": "        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]", "change": "unchanged" },
+                    { "line_num": 55, "content": "        return outputs, num_tokens", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls `scheduler.postprocess(seqs, token_ids, is_prefill)`, which hashes any newly-filled blocks via BlockManager.hash_blocks, advances each sequence's `num_cached_tokens`, appends the new token (decode case), and marks EOS/max_tokens sequences FINISHED (deallocating their blocks).",
+                  "why_its_here": "Postprocess is on the scheduler (not the engine) because it both mutates Sequence state AND mutates the running deque (removing finished seqs) AND touches the BlockManager (hashing + deallocating). Concentrating those three responsibilities in one method keeps the per-step state machine cohesive.",
+                  "touches": [
+                    { "label": "Scheduler.postprocess", "kind": "function", "block": null },
+                    { "label": "BlockManager.hash_blocks", "kind": "function", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["seqs", "list[Sequence]"],
+                  ["token_ids", "list[int]"],
+                  ["is_prefill", "bool"]
+                ],
+                "outputs": [
+                  ["Δ seq.num_cached_tokens", "↑ by num_scheduled_tokens (per seq)"],
+                  ["Δ seq.status", "→ FINISHED if EOS/max_tokens"],
+                  ["Δ scheduler.running", "remove FINISHED seqs"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_running", "op": "remove finished", "kind": "write" }
+                ]
+              },
+              {
+                "id": "B_step_4",
+                "phase": "emit",
+                "title": "EMIT FINISHED",
+                "line_range": "L54–55",
+                "one_liner": "List-comprehension over the batch picks out any sequence that postprocess just marked FINISHED and returns (seq_id, completion_token_ids) tuples plus the signed num_tokens for throughput accounting.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 53,
+                  "context_end_line": 55,
+                  "lines": [
+                    { "line_num": 53, "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)", "change": "unchanged" },
+                    { "line_num": 54, "content": "        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]", "change": "unchanged" },
+                    { "line_num": 55, "content": "        return outputs, num_tokens", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Builds a list of (seq_id, completion_token_ids) for sequences whose `is_finished` flipped during postprocess. `completion_token_ids` is the property that slices `token_ids[num_prompt_tokens:]` — only the generated suffix. Returns the list alongside the signed num_tokens.",
+                  "why_its_here": "Returning finished sequences here (rather than letting generate poll for them) means generate stays oblivious to Sequence state — it just consumes whatever step hands back. The signed num_tokens piggy-backs because generate needs both pieces every iteration anyway.",
+                  "touches": [
+                    { "label": "Sequence.is_finished", "kind": "variable", "block": null },
+                    { "label": "Sequence.completion_token_ids", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["seqs (post-mutation)", "list[Sequence]"],
+                  ["num_tokens", "int"]
+                ],
+                "outputs": [
+                  ["outputs", "list[(seq_id, completion_token_ids)]"],
+                  ["num_tokens", "int (passthrough)"]
+                ],
+                "state_effects": []
+              }
+            ]
+          }
+        ],
+        "edges": [
+          { "from": "B_gen_1", "to": "B_add_1", "label": "CALL", "style": "solid", "color": null },
+          { "from": "B_gen_2", "to": "B_step_1", "label": "CALL (per tick)", "style": "solid", "color": null },
+          { "from": "B_step_4", "to": "B_gen_3", "label": "RETURNS", "style": "dashed", "color": null }
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "title": "Schedule prefill: admission + KV-block allocation",
+      "kind": "core_flow",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 3,
+        "entry_point": 2,
+        "novelty": 3,
+        "total": 11,
+        "rationale": "The asked-about path. Conceptually loaded: prefix-cache probe, free-block accounting, chunked-prefill rule, and ref_count manipulation all live here."
+      },
+      "summary": "Scheduler.schedule() walks the waiting deque, asks BlockManager whether each sequence's KV blocks can be backed (with prefix-cache hits if possible), and admits as many as fit under max_num_seqs / max_num_batched_tokens — possibly with a chunked first sequence.",
+      "files_touched": [
+        "nanovllm/engine/scheduler.py",
+        "nanovllm/engine/block_manager.py",
+        "nanovllm/engine/sequence.py"
+      ],
+      "mental_model_anchor": "Picture a host at a restaurant door (Scheduler.schedule's prefill loop) walking down the waiting line. For each party, they ask the table manager (BlockManager.can_allocate) two questions: 'is any of this party already seated next door?' (prefix-cache probe) and 'do you have enough free tables for what's left?'. If yes, the manager bumps ref-counts on the cached tables and carves out free ones (.allocate). The first party may be partially seated (chunked prefill); subsequent parties are admitted whole or not at all.",
+      "purpose": {
+        "stated": null,
+        "evident": "Decide which waiting sequences can run on the next prefill step, respecting batch-size and token-budget caps and the availability of KV-cache blocks; reserve those blocks (with prefix-cache reuse) before returning.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "The scheduling brain. Sits between the engine's step() driver and the block-paging layer; it's the only thing that decides what runs on a given tick.",
+        "involved_modules": [
+          { "module": "nanovllm.engine.scheduler", "role_in_storyline": "Owns waiting/running deques; schedule() is the prefill loop; calls into BlockManager for admission feasibility + reservation." },
+          { "module": "nanovllm.engine.block_manager", "role_in_storyline": "Owns the free/used block pools and the prefix-cache (hash_to_block_id). can_allocate probes the cache; allocate carves out blocks and bumps ref-counts." },
+          { "module": "nanovllm.engine.sequence", "role_in_storyline": "Provides .num_blocks, .block(i), .block_table; the scheduler reads/writes these to track per-request prefill progress." }
+        ],
+        "data_flow": "waiting deque -> (peek seq[0]) -> can_allocate(seq) probes prefix cache + free-pool size -> returns num_cached_blocks or -1 -> if admittable, allocate(seq, num_cached_blocks) bumps ref-counts on cached blocks + popleft()s free blocks for the rest, populating seq.block_table -> seq's num_scheduled_tokens set; if fully covered the seq moves waiting->running."
+      },
+      "change_overview": "The prefill loop is short but dense. Each iteration peeks at `waiting[0]` (never `pop` until the sequence is fully admitted), figures out how many tokens it needs to schedule THIS step, and respects three caps simultaneously: max_num_seqs (a hard cap on batch parallelism), max_num_batched_tokens (a soft cap that gates chunked-prefill behavior), and the BlockManager's free-block pool.\n\nThe `can_allocate` probe is the cleverest piece. It walks every block of the sequence except the last (the last is by definition still in-progress and can't be cache-hit) and rolls a chained hash forward across blocks. For each chained hash it looks up `hash_to_block_id`; if a hit is found AND the candidate block's stored token ids match, that block is a prefix-cache hit. The walk stops at the first miss — prefix caching is contiguous-prefix only. The return value is either `-1` ('not enough free blocks even after caching') or the number of cached prefix blocks the eventual `allocate` call should reuse.\n\n`allocate` then does the reservation. For the cached prefix blocks it bumps ref_count (or, if a block had been on the free list, removes it from `free_block_ids` and adds it to `used_block_ids`); for the remaining tail blocks it `_allocate_block` (popleft from free, reset, register in used). The sequence's `block_table` is populated in order and its `num_cached_tokens` is set to `num_cached_blocks * block_size`.\n\nBack in the prefill loop, the scheduler decides whether to admit the sequence whole or chunked. The rule: chunked prefill is allowed only for the FIRST sequence in the batch. If the remaining token budget can't cover this sequence and we've already admitted at least one, we stop. If we go ahead, num_scheduled_tokens is clamped to the remaining budget; if that clamp leaves the sequence still partially uncovered, it stays in waiting and will be picked up next step (this is the chunked-prefill case)."
+      ,
+      "diagram": {
+        "file_badge": "scheduler.py + block_manager.py",
+        "subtitle": "one loop, one probe, one reservation",
+        "phases": [
+          { "id": "guard",   "label": "Guard",   "color": "guard" },
+          { "id": "main",    "label": "Main",    "color": "main" },
+          { "id": "handoff", "label": "Hand-off","color": "handoff" },
+          { "id": "persist", "label": "Persist", "color": "persist" }
+        ],
+        "data_structures": [
+          {
+            "id": "ds_waiting",
+            "name": "scheduler.waiting",
+            "type": "deque[Sequence]",
+            "role": "FIFO of unstarted requests awaiting prefill admission",
+            "shape": { "kind": "deque", "item_type": "Sequence" },
+            "ops_r": ["peek[0]", "len/bool"],
+            "ops_w": ["popleft (admit)", "appendleft (preempt)"]
+          },
+          {
+            "id": "ds_running",
+            "name": "scheduler.running",
+            "type": "deque[Sequence]",
+            "role": "Sequences currently in decode (already prefilled, KV blocks held)",
+            "shape": { "kind": "deque", "item_type": "Sequence" },
+            "ops_r": [],
+            "ops_w": ["append (admit fully-prefilled seq)"]
+          },
+          {
+            "id": "ds_bm",
+            "name": "block_manager",
+            "type": "BlockManager",
+            "role": "Owns the KV-cache page pool and the prefix-cache hash index",
+            "shape": {
+              "kind": "composite",
+              "pieces": [
+                { "name": "blocks", "kind": "list", "item_type": "Block", "access": "indexed by block_id" },
+                { "name": "hash_to_block_id", "kind": "dict", "key_label": "chained xxhash64", "value_label": "block_id" },
+                { "name": "free_block_ids", "kind": "deque", "item_type": "int (block_id)" },
+                { "name": "used_block_ids", "kind": "set", "item_type": "int (block_id)" }
+              ]
+            },
+            "ops_r": ["can_allocate (probe prefix cache + free-pool size)", "can_append"],
+            "ops_w": [
+              "allocate (popleft free / bump ref_count / register in used)",
+              "_allocate_block (popleft + reset + move to used)",
+              "deallocate (decrement ref_count, return blocks to free)",
+              "hash_blocks (register chained hash -> block_id)"
+            ]
+          }
+        ],
+        "cols": [
+          {
+            "id": "col_sched",
+            "function": "schedule (prefill loop)",
+            "label": "schedule (prefill)",
+            "description": "The prefill admission loop. Peeks at waiting[0], asks BlockManager whether it fits, applies max_num_seqs / max_num_batched_tokens caps, and decides whole-vs-chunked admission. Returns the prefill batch.",
+            "blocks": [
+              {
+                "id": "B_sched_1",
+                "phase": "guard",
+                "title": "LOOP GUARD",
+                "line_range": "L30–34",
+                "one_liner": "Enter the loop only while waiting is non-empty and we're under max_num_seqs; bail immediately if the remaining token budget has been fully consumed.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 29,
+                  "context_end_line": 36,
+                  "lines": [
+                    { "line_num": 29, "content": "        # prefill", "change": "unchanged" },
+                    { "line_num": 30, "content": "        while self.waiting and len(scheduled_seqs) < self.max_num_seqs:", "change": "unchanged" },
+                    { "line_num": 31, "content": "            seq = self.waiting[0]", "change": "unchanged" },
+                    { "line_num": 32, "content": "            remaining = self.max_num_batched_tokens - num_batched_tokens", "change": "unchanged" },
+                    { "line_num": 33, "content": "            if remaining == 0:", "change": "unchanged" },
+                    { "line_num": 34, "content": "                break", "change": "unchanged" },
+                    { "line_num": 35, "content": "            if not seq.block_table:", "change": "unchanged" },
+                    { "line_num": 36, "content": "                num_cached_blocks = self.block_manager.can_allocate(seq)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Reads `waiting[0]` (peek, no pop yet — admission may still be denied below) and computes the per-iteration remaining token budget. Two caps: max_num_seqs limits batch parallelism; max_num_batched_tokens limits prefill tokens-per-step (with chunked-prefill as the safety valve).",
+                  "why_its_here": "Peeking instead of popping is essential: if can_allocate fails the sequence must stay at the head of the queue for the next .schedule() call. Bailing on remaining==0 means we don't even probe the BlockManager when there's nothing left we could schedule anyway.",
+                  "touches": [
+                    { "label": "self.waiting", "kind": "variable", "block": null },
+                    { "label": "self.max_num_seqs", "kind": "variable", "block": null },
+                    { "label": "self.max_num_batched_tokens", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["self.waiting", "deque[Sequence]"],
+                  ["self.max_num_seqs", "int"],
+                  ["self.max_num_batched_tokens", "int"],
+                  ["num_batched_tokens", "int (loop accumulator)"]
+                ],
+                "outputs": [
+                  ["seq", "Sequence (waiting head, not yet popped)"],
+                  ["remaining", "int (= max_num_batched_tokens - num_batched_tokens)"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_waiting", "op": "peek[0]", "kind": "read" }
+                ]
+              },
+              {
+                "id": "B_sched_2",
+                "phase": "handoff",
+                "title": "PROBE ALLOCATE",
+                "line_range": "L35–41",
+                "one_liner": "First-time sequences (empty block_table) probe BlockManager.can_allocate for prefix-cache hits and free-block availability; already-partially-prefilled sequences just compute how many tokens remain.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 34,
+                  "context_end_line": 43,
+                  "lines": [
+                    { "line_num": 34, "content": "                break", "change": "unchanged" },
+                    { "line_num": 35, "content": "            if not seq.block_table:", "change": "unchanged" },
+                    { "line_num": 36, "content": "                num_cached_blocks = self.block_manager.can_allocate(seq)", "change": "unchanged" },
+                    { "line_num": 37, "content": "                if num_cached_blocks == -1:", "change": "unchanged" },
+                    { "line_num": 38, "content": "                    break", "change": "unchanged" },
+                    { "line_num": 39, "content": "                num_tokens = seq.num_tokens - num_cached_blocks * self.block_size", "change": "unchanged" },
+                    { "line_num": 40, "content": "            else:", "change": "unchanged" },
+                    { "line_num": 41, "content": "                num_tokens = seq.num_tokens - seq.num_cached_tokens", "change": "unchanged" },
+                    { "line_num": 42, "content": "            if remaining < num_tokens and scheduled_seqs:  # only allow chunked prefill for the first seq", "change": "unchanged" },
+                    { "line_num": 43, "content": "                break", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Two branches: (a) empty block_table -> first time we've seen this sequence; call can_allocate, which returns either `-1` (insufficient free blocks even after prefix-cache hits) or the count of prefix-cache hits. (b) non-empty block_table -> this sequence is in the middle of a chunked prefill from a prior step; num_tokens is just whatever hasn't been processed yet.",
+                  "why_its_here": "Splitting on `not seq.block_table` is how the scheduler distinguishes 'never-admitted' from 'chunked-prefill-resume' without storing a separate flag. The -1 return from can_allocate is what makes the loop honest about block-pool exhaustion — if THIS seq can't fit, no later seq in the queue can either (head-of-line blocking), so we break.",
+                  "touches": [
+                    { "label": "BlockManager.can_allocate", "kind": "function", "block": "B_can_1" },
+                    { "label": "seq.block_table", "kind": "variable", "block": null },
+                    { "label": "seq.num_cached_tokens", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "Head-of-line blocking: if waiting[0] cannot fit, nothing behind it gets a chance this tick."
+                  ]
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["seq.block_table", "list[int]"],
+                  ["self.block_size", "int"]
+                ],
+                "outputs": [
+                  ["num_cached_blocks", "int | -1 (only on first admission)"],
+                  ["num_tokens", "int (tokens still to prefill)"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "can_allocate", "kind": "read" }
+                ]
+              },
+              {
+                "id": "B_sched_3",
+                "phase": "guard",
+                "title": "CHUNKED-PREFILL RULE",
+                "line_range": "L42–43",
+                "one_liner": "If this sequence doesn't fit in the remaining budget and we've already admitted at least one sequence, stop — only the first sequence in a batch is allowed to be chunked.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 41,
+                  "context_end_line": 45,
+                  "lines": [
+                    { "line_num": 41, "content": "                num_tokens = seq.num_tokens - seq.num_cached_tokens", "change": "unchanged" },
+                    { "line_num": 42, "content": "            if remaining < num_tokens and scheduled_seqs:  # only allow chunked prefill for the first seq", "change": "unchanged" },
+                    { "line_num": 43, "content": "                break", "change": "unchanged" },
+                    { "line_num": 44, "content": "            if not seq.block_table:", "change": "unchanged" },
+                    { "line_num": 45, "content": "                self.block_manager.allocate(seq, num_cached_blocks)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "If the per-step token budget (`remaining`) is smaller than this sequence's required `num_tokens` AND `scheduled_seqs` is non-empty, exit the prefill loop. The inline comment makes the rule explicit: chunked prefill is allowed only for the FIRST sequence in a batch.",
+                  "why_its_here": "Chunked prefill cuts a long prompt into multiple steps so it doesn't monopolize compute; but mixing chunked + non-chunked sequences in one batch complicates kernel-launch shapes. The compromise is 'at most one chunked sequence per step, and it must be first' — simple to reason about and good enough.",
+                  "touches": [
+                    { "label": "scheduled_seqs", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["remaining", "int"],
+                  ["num_tokens", "int"],
+                  ["scheduled_seqs", "list[Sequence] (loop accumulator)"]
+                ],
+                "outputs": [
+                  ["control", "break (drop out of loop) | continue"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_sched_4",
+                "phase": "persist",
+                "title": "RESERVE BLOCKS",
+                "line_range": "L44–47",
+                "one_liner": "First-time sequences get their KV blocks reserved via BlockManager.allocate (which bumps ref-counts on cached prefix blocks and carves out fresh blocks for the rest); num_scheduled_tokens is clamped to the remaining budget.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 43,
+                  "context_end_line": 48,
+                  "lines": [
+                    { "line_num": 43, "content": "                break", "change": "unchanged" },
+                    { "line_num": 44, "content": "            if not seq.block_table:", "change": "unchanged" },
+                    { "line_num": 45, "content": "                self.block_manager.allocate(seq, num_cached_blocks)", "change": "unchanged" },
+                    { "line_num": 46, "content": "            seq.num_scheduled_tokens = min(num_tokens, remaining)", "change": "unchanged" },
+                    { "line_num": 47, "content": "            num_batched_tokens += seq.num_scheduled_tokens", "change": "unchanged" },
+                    { "line_num": 48, "content": "            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "If this is a fresh admission, calls `block_manager.allocate(seq, num_cached_blocks)` which mutates BlockManager.free_block_ids / used_block_ids / hash_to_block_id and populates `seq.block_table`. Then sets `seq.num_scheduled_tokens` to `min(num_tokens, remaining)` — the clamp is what implements chunked prefill for the head sequence — and accumulates into `num_batched_tokens`.",
+                  "why_its_here": "Allocation only happens AFTER the chunked-prefill guard passes, so we don't reserve blocks for a sequence we then can't admit. The min() clamp does double duty: for whole admission it's a no-op; for chunked it leaves the sequence partially uncovered, so the very next check (B_sched_5) will leave it in waiting.",
+                  "touches": [
+                    { "label": "BlockManager.allocate", "kind": "function", "block": "B_alloc_1" },
+                    { "label": "seq.num_scheduled_tokens", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "allocate asserts `not seq.block_table`; the surrounding `if not seq.block_table` guarantees this."
+                  ]
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["num_cached_blocks", "int"],
+                  ["num_tokens", "int"],
+                  ["remaining", "int"]
+                ],
+                "outputs": [
+                  ["Δ seq.block_table", "populated (length = seq.num_blocks)"],
+                  ["Δ seq.num_cached_tokens", "= num_cached_blocks * block_size (in allocate)"],
+                  ["Δ seq.num_scheduled_tokens", "= min(num_tokens, remaining)"],
+                  ["Δ num_batched_tokens", "↑ by seq.num_scheduled_tokens"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "allocate", "kind": "write" }
+                ]
+              },
+              {
+                "id": "B_sched_5",
+                "phase": "main",
+                "title": "PROMOTE OR HOLD",
+                "line_range": "L48–52",
+                "one_liner": "Only if the sequence is now fully covered (cached + scheduled == total) does it leave waiting and join running; partial (chunked) sequences stay at the head of waiting for the next step.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 47,
+                  "context_end_line": 53,
+                  "lines": [
+                    { "line_num": 47, "content": "            num_batched_tokens += seq.num_scheduled_tokens", "change": "unchanged" },
+                    { "line_num": 48, "content": "            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:", "change": "unchanged" },
+                    { "line_num": 49, "content": "                seq.status = SequenceStatus.RUNNING", "change": "unchanged" },
+                    { "line_num": 50, "content": "                self.waiting.popleft()", "change": "unchanged" },
+                    { "line_num": 51, "content": "                self.running.append(seq)", "change": "unchanged" },
+                    { "line_num": 52, "content": "            scheduled_seqs.append(seq)", "change": "unchanged" },
+                    { "line_num": 53, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Checks whether all prefill tokens for this sequence are now scheduled. If so: flip status to RUNNING, popleft from waiting, append to running. If not (chunked-prefill case): the sequence stays at waiting[0] and will be re-probed next .schedule() call with its now-populated block_table.",
+                  "why_its_here": "This is the only place a sequence transitions WAITING -> RUNNING in nano-vllm. Doing it inside the loop (instead of after) means the popleft happens before the next iteration peeks at waiting[0], so the loop naturally advances. Holding a chunked sequence at the head guarantees it gets priority next tick (no starvation).",
+                  "touches": [
+                    { "label": "self.waiting", "kind": "variable", "block": null },
+                    { "label": "self.running", "kind": "variable", "block": null },
+                    { "label": "SequenceStatus.RUNNING", "kind": "type", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["seq.num_cached_tokens", "int"],
+                  ["seq.num_scheduled_tokens", "int"],
+                  ["seq.num_tokens", "int"]
+                ],
+                "outputs": [
+                  ["Δ seq.status", "→ RUNNING (only if fully covered)"],
+                  ["Δ scheduler.waiting", "popleft (only if fully covered)"],
+                  ["Δ scheduler.running", "append (only if fully covered)"],
+                  ["scheduled_seqs", "extended by seq either way"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_waiting", "op": "popleft (if fully covered)", "kind": "write" },
+                  { "ds_id": "ds_running", "op": "append (if fully covered)", "kind": "write" }
+                ]
+              },
+              {
+                "id": "B_sched_6",
+                "phase": "main",
+                "title": "RETURN PREFILL",
+                "line_range": "L54–55",
+                "one_liner": "If we admitted anything, return the prefill batch and is_prefill=True; if not, fall through to the decode branch (out of scope for this storyline).",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 52,
+                  "context_end_line": 57,
+                  "lines": [
+                    { "line_num": 52, "content": "            scheduled_seqs.append(seq)", "change": "unchanged" },
+                    { "line_num": 53, "content": "", "change": "unchanged" },
+                    { "line_num": 54, "content": "        if scheduled_seqs:", "change": "unchanged" },
+                    { "line_num": 55, "content": "            return scheduled_seqs, True", "change": "unchanged" },
+                    { "line_num": 56, "content": "", "change": "unchanged" },
+                    { "line_num": 57, "content": "        # decode", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Post-loop: if `scheduled_seqs` is non-empty, return it as a prefill batch (True flag). Otherwise control proceeds to the decode loop further down in schedule(), which is summarized in storyline S3.",
+                  "why_its_here": "Prefill is strictly preferred over decode: any newly-admitted sequence runs as prefill before any decode-step happens this tick. This bias keeps the queue draining and means prefix-cache benefits are realized as soon as possible (cached blocks become useful immediately rather than after a decode round-trip).",
+                  "touches": [],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["scheduled_seqs", "list[Sequence]"]
+                ],
+                "outputs": [
+                  ["return", "(scheduled_seqs, True) | fall-through to decode"]
+                ],
+                "state_effects": []
+              }
+            ]
+          },
+          {
+            "id": "col_can",
+            "function": "BlockManager.can_allocate",
+            "label": "can_allocate",
+            "description": "Prefix-cache probe: walk seq.num_blocks - 1 candidate blocks, chained-hash them, and look each hash up in hash_to_block_id. Stop at first miss. Returns -1 if free-block pool can't cover the uncached tail, else num_cached_blocks.",
+            "blocks": [
+              {
+                "id": "B_can_1",
+                "phase": "main",
+                "title": "INIT WALK",
+                "line_range": "L59–62",
+                "one_liner": "Seed the chained-hash walk with h=-1 (sentinel meaning 'no prefix') and the candidate count num_new_blocks = seq.num_blocks, which we'll decrement for any in-pool prefix-cache hit.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 58,
+                  "context_end_line": 64,
+                  "lines": [
+                    { "line_num": 58, "content": "    def can_allocate(self, seq: Sequence) -> int:", "change": "unchanged" },
+                    { "line_num": 59, "content": "        h = -1", "change": "unchanged" },
+                    { "line_num": 60, "content": "        num_cached_blocks = 0", "change": "unchanged" },
+                    { "line_num": 61, "content": "        num_new_blocks = seq.num_blocks", "change": "unchanged" },
+                    { "line_num": 62, "content": "        for i in range(seq.num_blocks - 1):", "change": "unchanged" },
+                    { "line_num": 63, "content": "            token_ids = seq.block(i)", "change": "unchanged" },
+                    { "line_num": 64, "content": "            h = self.compute_hash(token_ids, h)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Initializes the rolling chained hash `h = -1` (sentinel for 'no prefix'), the prefix-hit counter `num_cached_blocks = 0`, and the count of blocks that would need fresh allocation `num_new_blocks = seq.num_blocks`. The loop excludes the final block: the last block is by definition partially-filled and cannot be cache-hit.",
+                  "why_its_here": "The sentinel `-1` lets compute_hash skip the prefix-update step on the first iteration (see B_can_2). Initializing num_new_blocks to the full block count and decrementing per pool-hit (rather than incrementing per miss) makes the final 'do we have enough free?' check trivial.",
+                  "touches": [
+                    { "label": "seq.num_blocks", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["seq.num_blocks", "int"]
+                ],
+                "outputs": [
+                  ["h", "int (sentinel -1)"],
+                  ["num_cached_blocks", "int (0)"],
+                  ["num_new_blocks", "int (= seq.num_blocks)"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_can_2",
+                "phase": "main",
+                "title": "CHAIN HASH & PROBE",
+                "line_range": "L62–67",
+                "one_liner": "For each non-final block: extend the chained hash with this block's tokens, look up the result in hash_to_block_id, and verify the stored block's tokens match exactly (defending against hash collisions).",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 61,
+                  "context_end_line": 68,
+                  "lines": [
+                    { "line_num": 61, "content": "        num_new_blocks = seq.num_blocks", "change": "unchanged" },
+                    { "line_num": 62, "content": "        for i in range(seq.num_blocks - 1):", "change": "unchanged" },
+                    { "line_num": 63, "content": "            token_ids = seq.block(i)", "change": "unchanged" },
+                    { "line_num": 64, "content": "            h = self.compute_hash(token_ids, h)", "change": "unchanged" },
+                    { "line_num": 65, "content": "            block_id = self.hash_to_block_id.get(h, -1)", "change": "unchanged" },
+                    { "line_num": 66, "content": "            if block_id == -1 or self.blocks[block_id].token_ids != token_ids:", "change": "unchanged" },
+                    { "line_num": 67, "content": "                break", "change": "unchanged" },
+                    { "line_num": 68, "content": "            num_cached_blocks += 1", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Per block i (0 .. num_blocks-2): slice the i-th block's tokens via seq.block(i), extend the chained hash, and probe hash_to_block_id. A miss (-1) OR a token mismatch breaks the loop — prefix-caching is contiguous-prefix only, and the token-id equality check is the defense against xxhash collisions.",
+                  "why_its_here": "Chaining the hash means a block's identity depends on EVERY token that came before it, not just its own contents. That's what makes the cache safe: two sequences sharing a long prefix produce the same hash sequence, but a sequence with one differing earlier token produces a totally different chained hash from that point forward.",
+                  "touches": [
+                    { "label": "compute_hash", "kind": "function", "block": null },
+                    { "label": "self.hash_to_block_id", "kind": "variable", "block": null },
+                    { "label": "self.blocks[block_id].token_ids", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "Hash collision: defended by the token_ids equality check on line 66.",
+                    "First-miss semantics: a cached block in the middle of an otherwise-fresh sequence cannot be reused."
+                  ]
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["self.hash_to_block_id", "dict[int, int]"],
+                  ["self.blocks", "list[Block]"]
+                ],
+                "outputs": [
+                  ["h", "int (chained xxhash64 at last hit)"],
+                  ["num_cached_blocks", "int (count of contiguous prefix hits)"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "probe hash_to_block_id + token_ids", "kind": "read" }
+                ]
+              },
+              {
+                "id": "B_can_3",
+                "phase": "main",
+                "title": "POOL-HIT BOOKKEEPING",
+                "line_range": "L69–70",
+                "one_liner": "If the cache-hit block is already in used_block_ids (another live sequence holds it), it can be shared via ref_count bump — so it doesn't consume a free-pool slot.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 68,
+                  "context_end_line": 72,
+                  "lines": [
+                    { "line_num": 68, "content": "            num_cached_blocks += 1", "change": "unchanged" },
+                    { "line_num": 69, "content": "            if block_id in self.used_block_ids:", "change": "unchanged" },
+                    { "line_num": 70, "content": "                num_new_blocks -= 1", "change": "unchanged" },
+                    { "line_num": 71, "content": "        if len(self.free_block_ids) < num_new_blocks:", "change": "unchanged" },
+                    { "line_num": 72, "content": "            return -1", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "When a prefix-cache hit lands on a block that's currently held by some other sequence (`block_id in self.used_block_ids`), decrement `num_new_blocks` because we'll be sharing rather than carving. Cache-hit blocks that are on the free list are NOT decremented here — they DO still need a free-pool slot (allocate will reclaim them via free_block_ids.remove(block_id)).",
+                  "why_its_here": "The asymmetric treatment is subtle but correct: a free-pool prefix-cache block costs one free slot; a used-pool prefix-cache block costs nothing extra. Getting this accounting right is what lets the next check (`len(free_block_ids) < num_new_blocks`) honestly decide admissibility.",
+                  "touches": [
+                    { "label": "self.used_block_ids", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": []
+                },
+                "inputs": [
+                  ["block_id", "int (from B_can_2)"],
+                  ["self.used_block_ids", "set[int]"]
+                ],
+                "outputs": [
+                  ["Δ num_new_blocks", "↓ by 1 if cached block is in used_block_ids"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "membership-test used_block_ids", "kind": "read" }
+                ]
+              },
+              {
+                "id": "B_can_4",
+                "phase": "guard",
+                "title": "FREE-POOL CHECK",
+                "line_range": "L71–73",
+                "one_liner": "Final admissibility test: if the free pool can't cover the tail of uncached + free-pool-cached blocks, return -1; otherwise return the number of prefix-cache hits for allocate to act on.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 70,
+                  "context_end_line": 74,
+                  "lines": [
+                    { "line_num": 70, "content": "                num_new_blocks -= 1", "change": "unchanged" },
+                    { "line_num": 71, "content": "        if len(self.free_block_ids) < num_new_blocks:", "change": "unchanged" },
+                    { "line_num": 72, "content": "            return -1", "change": "unchanged" },
+                    { "line_num": 73, "content": "        return num_cached_blocks", "change": "unchanged" },
+                    { "line_num": 74, "content": "", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Compares free-pool size against the (post-bookkeeping) `num_new_blocks` requirement. Returns `-1` (the scheduler's break-out sentinel) if insufficient, else `num_cached_blocks` for allocate to know how many prefix entries to ref-count-bump vs. carve fresh.",
+                  "why_its_here": "Splitting feasibility-check from reservation lets the scheduler back out cleanly without partial state mutation: if can_allocate returns -1 nothing in BlockManager has changed. This is what makes head-of-line blocking safe — we can ask without committing.",
+                  "touches": [
+                    { "label": "self.free_block_ids", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "-1 sentinel collides with valid block_id only if num_blocks could be -1 in a different context — here num_cached_blocks is always ≥0 so the discriminator is safe."
+                  ]
+                },
+                "inputs": [
+                  ["self.free_block_ids", "deque[int]"],
+                  ["num_new_blocks", "int"],
+                  ["num_cached_blocks", "int"]
+                ],
+                "outputs": [
+                  ["return", "int (num_cached_blocks ≥ 0) | -1 (cannot admit)"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "len(free_block_ids)", "kind": "read" }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "col_alloc",
+            "function": "BlockManager.allocate",
+            "label": "allocate",
+            "description": "Reservation: for the first num_cached_blocks blocks, replay the chained hash and bump ref-count (or pull from free pool + register in used); for the remaining tail blocks, _allocate_block from the free pool. Populates seq.block_table and sets seq.num_cached_tokens.",
+            "blocks": [
+              {
+                "id": "B_alloc_1",
+                "phase": "guard",
+                "title": "PRECONDITION",
+                "line_range": "L75–77",
+                "one_liner": "Asserts the sequence is fresh (empty block_table) and re-seeds the same h=-1 chained-hash sentinel can_allocate started from, so the lookup keys match.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 75,
+                  "context_end_line": 79,
+                  "lines": [
+                    { "line_num": 75, "content": "    def allocate(self, seq: Sequence, num_cached_blocks: int):", "change": "unchanged" },
+                    { "line_num": 76, "content": "        assert not seq.block_table", "change": "unchanged" },
+                    { "line_num": 77, "content": "        h = -1", "change": "unchanged" },
+                    { "line_num": 78, "content": "        for i in range(num_cached_blocks):", "change": "unchanged" },
+                    { "line_num": 79, "content": "            token_ids = seq.block(i)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Asserts the caller hasn't already populated `seq.block_table` (allocate is only for first-time admission; chunked-prefill resumption goes through B_sched_4's else-branch). Resets the chained-hash sentinel to `-1` so the per-block hashes here reproduce the keys can_allocate just probed.",
+                  "why_its_here": "The assert encodes the invariant 'allocate is single-shot per sequence.' The hash re-seed is needed because can_allocate didn't return its rolling `h`; we recompute it cheaply, trusting that the prefix-cache hits are still present (single-threaded schedule guarantees this).",
+                  "touches": [
+                    { "label": "seq.block_table", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "Assert fires if a caller bypasses the `if not seq.block_table` guard in schedule()."
+                  ]
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["num_cached_blocks", "int"]
+                ],
+                "outputs": [
+                  ["h", "int (sentinel -1)"]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B_alloc_2",
+                "phase": "main",
+                "title": "REUSE CACHED PREFIX",
+                "line_range": "L78–89",
+                "one_liner": "Replay the chained hash for each cached prefix block; if the block was already in use, bump ref_count; if it was sitting on the free list, claim it (remove from free, add to used, ref_count=1). Append every reused block_id to seq.block_table.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 77,
+                  "context_end_line": 90,
+                  "lines": [
+                    { "line_num": 77, "content": "        h = -1", "change": "unchanged" },
+                    { "line_num": 78, "content": "        for i in range(num_cached_blocks):", "change": "unchanged" },
+                    { "line_num": 79, "content": "            token_ids = seq.block(i)", "change": "unchanged" },
+                    { "line_num": 80, "content": "            h = self.compute_hash(token_ids, h)", "change": "unchanged" },
+                    { "line_num": 81, "content": "            block_id = self.hash_to_block_id[h]", "change": "unchanged" },
+                    { "line_num": 82, "content": "            block = self.blocks[block_id]", "change": "unchanged" },
+                    { "line_num": 83, "content": "            if block_id in self.used_block_ids:", "change": "unchanged" },
+                    { "line_num": 84, "content": "                block.ref_count += 1", "change": "unchanged" },
+                    { "line_num": 85, "content": "            else:", "change": "unchanged" },
+                    { "line_num": 86, "content": "                block.ref_count = 1", "change": "unchanged" },
+                    { "line_num": 87, "content": "                self.free_block_ids.remove(block_id)", "change": "unchanged" },
+                    { "line_num": 88, "content": "                self.used_block_ids.add(block_id)", "change": "unchanged" },
+                    { "line_num": 89, "content": "            seq.block_table.append(block_id)", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "For each of the first `num_cached_blocks` blocks, recompute the chained hash to get the same key can_allocate found, then look up the block_id (no fallback — this is a direct subscript). Two cases: (a) block is currently used by another sequence -> just `ref_count += 1` (sharing); (b) block was on the free list -> pull it off, register in used_block_ids, set `ref_count = 1`.",
+                  "why_its_here": "Direct subscript instead of .get() encodes the invariant 'can_allocate succeeded, so this key MUST be present'. The two-case split mirrors the bookkeeping in B_can_3: used-pool hits cost nothing extra; free-pool hits consume a free slot via the O(n) `free_block_ids.remove(block_id)` (acceptable because deques are short).",
+                  "touches": [
+                    { "label": "self.hash_to_block_id", "kind": "variable", "block": null },
+                    { "label": "self.free_block_ids.remove", "kind": "external", "block": null },
+                    { "label": "self.used_block_ids.add", "kind": "external", "block": null }
+                  ],
+                  "failure_mode": [
+                    "KeyError on line 81 if can_allocate's contract is violated (race-condition class — N/A under single-threaded schedule)."
+                  ]
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["num_cached_blocks", "int"],
+                  ["self.hash_to_block_id", "dict[int, int]"],
+                  ["self.blocks", "list[Block]"]
+                ],
+                "outputs": [
+                  ["Δ blocks[block_id].ref_count", "↑ by 1"],
+                  ["Δ free_block_ids", "↓ block_id removed (only for free-pool hits)"],
+                  ["Δ used_block_ids", "↑ block_id added (only for free-pool hits)"],
+                  ["Δ seq.block_table", "extended by num_cached_blocks ids"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "bump ref_count / move free→used", "kind": "write" }
+                ]
+              },
+              {
+                "id": "B_alloc_3",
+                "phase": "main",
+                "title": "CARVE TAIL",
+                "line_range": "L90–92",
+                "one_liner": "For the remaining blocks (uncached suffix), call _allocate_block — which popleft()s from free_block_ids, resets the Block, evicts any stale hash entry, and registers it in used_block_ids.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 88,
+                  "context_end_line": 92,
+                  "lines": [
+                    { "line_num": 88, "content": "                self.used_block_ids.add(block_id)", "change": "unchanged" },
+                    { "line_num": 89, "content": "            seq.block_table.append(block_id)", "change": "unchanged" },
+                    { "line_num": 90, "content": "        for i in range(num_cached_blocks, seq.num_blocks):", "change": "unchanged" },
+                    { "line_num": 91, "content": "            seq.block_table.append(self._allocate_block())", "change": "unchanged" },
+                    { "line_num": 92, "content": "        seq.num_cached_tokens = num_cached_blocks * self.block_size", "change": "unchanged" }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Walks from `num_cached_blocks` up to `seq.num_blocks`, calling `_allocate_block()` for each. That helper popleft()s a fresh block_id from the free deque, asserts ref_count is 0, evicts any stale hash_to_block_id entry that referenced this block, calls block.reset() (which sets ref_count=1), adds to used_block_ids, and returns the id.",
+                  "why_its_here": "Splitting cached-reuse from fresh-carve keeps each loop simple. _allocate_block's stale-hash eviction is what prevents the cache index from drifting: a block being recycled MUST drop its prior identity, even though hash_blocks will re-register it after the next forward pass.",
+                  "touches": [
+                    { "label": "_allocate_block", "kind": "function", "block": null },
+                    { "label": "seq.block_table", "kind": "variable", "block": null }
+                  ],
+                  "failure_mode": [
+                    "_allocate_block asserts the popleft'd block has ref_count == 0; can_allocate's free-pool check is what guarantees enough such blocks exist."
+                  ]
+                },
+                "inputs": [
+                  ["seq", "Sequence"],
+                  ["num_cached_blocks", "int"],
+                  ["seq.num_blocks", "int"],
+                  ["self.block_size", "int"]
+                ],
+                "outputs": [
+                  ["Δ free_block_ids", "↓ by (seq.num_blocks - num_cached_blocks) popleft"],
+                  ["Δ used_block_ids", "↑ by (seq.num_blocks - num_cached_blocks)"],
+                  ["Δ seq.block_table", "extended to length seq.num_blocks"],
+                  ["Δ seq.num_cached_tokens", "= num_cached_blocks * block_size"]
+                ],
+                "state_effects": [
+                  { "ds_id": "ds_bm", "op": "_allocate_block × (num_blocks - num_cached)", "kind": "write" }
+                ]
+              }
+            ]
+          }
+        ],
+        "edges": [
+          { "from": "B_sched_2", "to": "B_can_1", "label": "CALL", "style": "solid", "color": null },
+          { "from": "B_can_4", "to": "B_sched_2", "label": "RETURNS num_cached_blocks | -1", "style": "dashed", "color": null },
+          { "from": "B_sched_4", "to": "B_alloc_1", "label": "CALL", "style": "solid", "color": null },
+          { "from": "B_alloc_3", "to": "B_sched_4", "label": "RETURNS (seq.block_table populated)", "style": "dashed", "color": null },
+          { "from": "B_sched_3", "to": "B_sched_6", "label": "break (budget exhausted)", "style": "dashed", "color": "#c54343" }
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "title": "Decode + teardown",
+      "kind": "core_flow",
+      "depth": "summary",
+      "importance_scores": {
+        "centrality": 2,
+        "conceptual_weight": 2,
+        "entry_point": 1,
+        "novelty": 2,
+        "total": 7,
+        "rationale": null
+      },
+      "summary": "Once the waiting queue is empty (or no waiting seq can fit), schedule()'s decode loop drains the running deque one token-step at a time: each sequence pops, asks BlockManager.can_append for the at-most-one-extra block decode needs (only when `len(seq) % block_size == 1`, i.e., the existing tail block is exactly full), and either grows via may_append or — if no free block is available — triggers preempt() on the tail of running (or on itself if it's alone), which returns its KV blocks to the free pool and re-queues it at the front of waiting. postprocess() then hashes any newly-filled blocks (registering them in hash_to_block_id so future requests can prefix-cache hit them), bumps num_cached_tokens, appends the sampled token, and marks EOS/max_tokens sequences FINISHED — at which point BlockManager.deallocate decrements ref_counts (returning any block whose ref_count hits 0 to the free pool) and the sequence is removed from running. The engine learns about teardown only via the (seq_id, completion_token_ids) tuples step() returns; LLMEngine.exit (registered with atexit) takes care of worker-process join at process shutdown.",
+      "files_touched": [
+        "nanovllm/engine/scheduler.py",
+        "nanovllm/engine/block_manager.py",
+        "nanovllm/engine/llm_engine.py"
+      ]
+    }
+  ]
+}
