@@ -20,6 +20,7 @@ PLACEHOLDER = "/*WALKTHROUGH_DATA_PLACEHOLDER*/"
 TEMPLATES = {
     "swimlane": "walkthrough.html",
     "diagram":  "walkthrough_diagram.html",
+    "source":   "walkthrough_source.html",
 }
 
 

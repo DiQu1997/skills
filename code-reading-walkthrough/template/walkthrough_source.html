@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Code walkthrough — source view</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+    --code-bg:#fbfaf7;
+    --gutter:#f6f5f1;
+    --gutter-fg:#a8b1c0;
+
+    --tok-kw:#5b3e9c; --tok-type:#205493; --tok-str:#8a5a14;
+    --tok-num:#2b6b5e; --tok-com:#8b949e; --tok-fn:#2f7a2f;
+
+    /* Block color palette — one tint per block in a column, cycled.
+       The same palette indexes apply across canvas, annotation, detail. */
+    --b0:#5b6cff; --b0-bg:#eef0ff;
+    --b1:#2f7a2f; --b1-bg:#eef9ee;
+    --b2:#a64798; --b2-bg:#fbeefa;
+    --b3:#c98707; --b3-bg:#fff6df;
+    --b4:#205493; --b4-bg:#e5eef9;
+    --b5:#c54343; --b5-bg:#fceeee;
+    --b6:#1f7a78; --b6-bg:#e5f4f3;
+    --b7:#9c5b3e; --b7-bg:#f5ece5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "tabs   tabs"
+      "main   side";
+    height: 100vh;
+  }
+  .topbar { grid-area: topbar; }
+  .tabs   { grid-area: tabs; }
+  .main   { grid-area: main; }
+  .side   { grid-area: side; }
+
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .view-pill {
+    margin-left: auto;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: 10px;
+  }
+
+  .tabs {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex; padding: 0 22px; gap: 4px;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 9px 14px;
+    cursor: pointer; font-size: 12.5px; color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    user-select: none;
+    transition: all 120ms;
+    white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint);
+    padding: 1px 5px; border-radius: 3px; background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+
+  /* MAIN: storyline banner at top, then function sections below */
+  .main {
+    overflow-y: auto;
+    padding: 14px 22px 60px;
+  }
+
+  .storyline-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+  }
+  .storyline-banner .b-title {
+    font-family: ui-monospace, monospace;
+    font-size: 15px; font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .storyline-banner .b-source {
+    margin-left: 10px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--fg-faint);
+    font-weight: 400;
+  }
+  .storyline-banner .b-summary {
+    font-size: 12.5px; color: var(--fg-soft); line-height: 1.55;
+  }
+
+  /* Compact DS strip at top of main */
+  .ds-strip {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 18px;
+    display: flex; flex-wrap: wrap; gap: 8px;
+    font-size: 11px;
+  }
+  .ds-strip .label {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.07em;
+    align-self: center; margin-right: 4px;
+  }
+  .ds-chip {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+  }
+  .ds-chip .ds-type { color: var(--tok-type); margin-left: 3px; }
+  .ds-chip .ds-role { color: var(--fg-faint); margin-left: 5px; font-style: italic; font-family: -apple-system, sans-serif; }
+
+  /* Function section: signature header + code body */
+  .fn-section { margin-bottom: 28px; }
+  .fn-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px 6px 0 0;
+    padding: 10px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .fn-sig {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    margin-bottom: 3px;
+  }
+  .fn-sig .kw { color: var(--tok-kw); font-weight: 600; margin-right: 5px; }
+  .fn-sig .name { color: var(--fg); font-weight: 700; }
+  .fn-sig .paren { color: var(--fg-faint); }
+  .fn-sig .loc { color: var(--fg-faint); font-size: 11px; margin-left: 10px; font-weight: 400; }
+  .fn-desc {
+    font-size: 12px; color: var(--fg-soft); line-height: 1.5;
+  }
+
+  /* The actual code-flow region: 2-column layout. Left is the source,
+     right is annotation chips aligned to each block. */
+  .fn-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    padding: 10px 14px;
+  }
+  .code-flow {
+    position: relative;
+    min-width: 0;
+  }
+  .annotations { position: relative; }
+
+  /* Code lines, continuous, with gutter line numbers. Each block is
+     wrapped in a .blk-region that gets a colored left bar + bg tint. */
+  .code-line {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .code-line .ln {
+    color: var(--gutter-fg);
+    text-align: right;
+    padding-right: 10px;
+    user-select: none;
+    background: var(--gutter);
+    border-right: 1px solid var(--border);
+  }
+  .code-line .src {
+    padding: 0 10px;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--fg);
+  }
+  .code-line .src .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  .code-line .src .tok-type { color: var(--tok-type); }
+  .code-line .src .tok-str { color: var(--tok-str); }
+  .code-line .src .tok-com { color: var(--tok-com); font-style: italic; }
+  .code-line .src .tok-fn { color: var(--tok-fn); }
+
+  /* Block region wraps one or more contiguous code-lines */
+  .blk-region {
+    position: relative;
+    margin: 8px 0;
+    border-left: 4px solid var(--b0);
+    background: var(--b0-bg);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: box-shadow 100ms;
+  }
+  .blk-region:hover { box-shadow: 0 0 0 1px var(--b0) inset; }
+  .blk-region.active { box-shadow: 0 0 0 2px var(--b0) inset; }
+  .blk-region .code-line { background: transparent; }
+  .blk-region .code-line .ln { background: rgba(255,255,255,0.55); }
+
+  /* Color cycle — applied as .c0 .. .c7 to both region and annotation */
+  .c0 { --b: var(--b0); --bg: var(--b0-bg); }
+  .c1 { --b: var(--b1); --bg: var(--b1-bg); }
+  .c2 { --b: var(--b2); --bg: var(--b2-bg); }
+  .c3 { --b: var(--b3); --bg: var(--b3-bg); }
+  .c4 { --b: var(--b4); --bg: var(--b4-bg); }
+  .c5 { --b: var(--b5); --bg: var(--b5-bg); }
+  .c6 { --b: var(--b6); --bg: var(--b6-bg); }
+  .c7 { --b: var(--b7); --bg: var(--b7-bg); }
+  .blk-region.c0 { border-left-color: var(--b0); background: var(--b0-bg); }
+  .blk-region.c1 { border-left-color: var(--b1); background: var(--b1-bg); }
+  .blk-region.c2 { border-left-color: var(--b2); background: var(--b2-bg); }
+  .blk-region.c3 { border-left-color: var(--b3); background: var(--b3-bg); }
+  .blk-region.c4 { border-left-color: var(--b4); background: var(--b4-bg); }
+  .blk-region.c5 { border-left-color: var(--b5); background: var(--b5-bg); }
+  .blk-region.c6 { border-left-color: var(--b6); background: var(--b6-bg); }
+  .blk-region.c7 { border-left-color: var(--b7); background: var(--b7-bg); }
+  .blk-region.c0:hover, .blk-region.c0.active { box-shadow: 0 0 0 2px var(--b0) inset; }
+  .blk-region.c1:hover, .blk-region.c1.active { box-shadow: 0 0 0 2px var(--b1) inset; }
+  .blk-region.c2:hover, .blk-region.c2.active { box-shadow: 0 0 0 2px var(--b2) inset; }
+  .blk-region.c3:hover, .blk-region.c3.active { box-shadow: 0 0 0 2px var(--b3) inset; }
+  .blk-region.c4:hover, .blk-region.c4.active { box-shadow: 0 0 0 2px var(--b4) inset; }
+  .blk-region.c5:hover, .blk-region.c5.active { box-shadow: 0 0 0 2px var(--b5) inset; }
+  .blk-region.c6:hover, .blk-region.c6.active { box-shadow: 0 0 0 2px var(--b6) inset; }
+  .blk-region.c7:hover, .blk-region.c7.active { box-shadow: 0 0 0 2px var(--b7) inset; }
+
+  /* Annotation chip pinned to right of code-flow, aligned to its block region */
+  .annot {
+    position: absolute;
+    left: 0; right: 0;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--b0);
+    background: var(--bg-card);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: box-shadow 100ms, transform 100ms;
+  }
+  .annot:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateY(-1px); }
+  .annot.active { box-shadow: 0 2px 10px rgba(91,108,255,0.18); }
+  .annot.c0 { border-left-color: var(--b0); }
+  .annot.c1 { border-left-color: var(--b1); }
+  .annot.c2 { border-left-color: var(--b2); }
+  .annot.c3 { border-left-color: var(--b3); }
+  .annot.c4 { border-left-color: var(--b4); }
+  .annot.c5 { border-left-color: var(--b5); }
+  .annot.c6 { border-left-color: var(--b6); }
+  .annot.c7 { border-left-color: var(--b7); }
+  .annot-head {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+  }
+  .annot-step {
+    width: 22px; height: 22px;
+    border-radius: 11px;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    color: var(--fg-soft);
+    font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .annot.active .annot-step { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .annot-tag {
+    font-family: ui-monospace, monospace;
+    font-size: 9px;
+    color: var(--fg-faint);
+    letter-spacing: 0.07em; text-transform: uppercase;
+  }
+  .annot-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12px;
+    color: var(--fg);
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .annot-line {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+  }
+  .annot-says {
+    font-size: 11.5px; color: var(--fg-soft); line-height: 1.45;
+  }
+
+  /* SVG connector layer from each .blk-region edge to its .annot */
+  svg.connectors {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
+  }
+
+  /* Elision marker between non-contiguous line ranges */
+  .elision {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--fg-faint);
+    margin: 2px 0;
+  }
+  .elision .ln { color: var(--gutter-fg); text-align: right; padding-right: 10px; background: var(--gutter); border-right: 1px solid var(--border); }
+  .elision .src { padding: 2px 10px; font-style: italic; }
+
+  /* SIDE: detail panel */
+  .side {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 16px 30px;
+  }
+  .side h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
+  }
+  .step-nav {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .step-nav .step-counter { color: var(--fg-soft); flex: 1; }
+  .step-nav .step-counter strong { color: var(--fg); font-weight: 700; }
+  .step-nav button {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 9px; font-size: 11px;
+    font-family: ui-monospace, monospace;
+    color: var(--fg); cursor: pointer;
+  }
+  .step-nav button:hover:not(:disabled) {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+  .step-nav button:disabled { color: var(--fg-faint); opacity: 0.5; cursor: default; }
+
+  .focus-tag {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    color: var(--fg-faint); letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .focus-name {
+    font-family: ui-monospace, monospace;
+    font-size: 17px; font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 6px;
+  }
+  .focus-loc {
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    margin-bottom: 10px;
+  }
+  .focus-purpose {
+    font-size: 12.5px; color: var(--fg); line-height: 1.55;
+    margin-bottom: 12px;
+  }
+  .focus-section {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .focus-section-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .focus-section .body { font-size: 12px; color: var(--fg); line-height: 1.55; }
+  .chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    background: var(--bg-soft);
+    padding: 1px 6px; border-radius: 3px;
+    margin: 1px 3px 1px 0;
+    border: 1px solid var(--border);
+  }
+  .chip.read  { color: #5b6cff; border-color: #c5d0fc; background:#eef0ff; }
+  .chip.write { color: #a4332a; border-color: #f8c5c5; background:#fff0f0; }
+  .port-line {
+    font-family: ui-monospace, monospace; font-size: 11px;
+    color: var(--fg); display: block; margin-top: 1px;
+  }
+  .port-line .key { color: var(--fg-soft); margin-right: 4px; }
+  .port-line .val { color: var(--tok-type); }
+  .failure-item {
+    margin-top: 4px; padding-left: 8px;
+    border-left: 2px solid #f5cdc6;
+    font-size: 11.5px; color: var(--fg-soft);
+  }
+
+  .next-hint {
+    margin-top: 14px; padding: 8px 10px;
+    background: var(--bg-soft);
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    font-size: 11.5px; color: var(--fg-soft);
+  }
+  .next-hint .nh-label {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    display: block; margin-bottom: 3px;
+  }
+  .next-hint .nh-link {
+    color: var(--accent); cursor: pointer;
+    font-family: ui-monospace, monospace; font-weight: 700;
+  }
+  .next-hint .nh-link:hover { text-decoration: underline; }
+  .next-hint .nh-kind {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+    margin-right: 4px;
+  }
+  .next-hint .nh-kind.async { background:#fbeefa; color:#a64798; }
+  .next-hint .nh-kind.error { background:#fceeee; color:#c54343; }
+
+  pre.focus-code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.55;
+    overflow-x: auto; margin: 0;
+    color: var(--fg);
+  }
+  .placeholder {
+    margin: 80px auto 0; max-width: 520px; text-align: center;
+    color: var(--fg-faint); font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1 id="hdr-title">📄 Code walkthrough</h1>
+    <div class="crumb" id="hdr-crumb"></div>
+    <span class="view-pill">source view · ←/→ to walk</span>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <section class="main" id="main"></section>
+  <aside class="side" id="side">
+    <div class="step-nav" id="step-nav">
+      <span class="step-counter" id="step-counter">—</span>
+      <button id="btn-prev" title="Previous (←)">◀ Prev</button>
+      <button id="btn-next" title="Next (→)">Next ▶</button>
+    </div>
+    <div class="focus-tag" id="focus-tag"></div>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-loc" id="focus-loc"></div>
+    <div class="focus-purpose" id="focus-purpose">Click a highlighted block in the code to focus it.</div>
+    <div id="focus-extras"></div>
+    <div id="focus-next"></div>
+  </aside>
+</div>
+
+<script>
+  const WALKTHROUGH_DATA = /*WALKTHROUGH_DATA_PLACEHOLDER*/;
+
+  const STATE = { activeStorylineId: null, activeBlockId: null };
+
+  // ---------- Helpers ----------
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function parseRange(s) {
+    if (!s) return null;
+    const m = String(s).match(/L?(\d+)[–\-—](\d+)/);
+    if (m) return [+m[1], +m[2]];
+    const single = String(s).match(/L?(\d+)/);
+    if (single) return [+single[1], +single[1]];
+    return null;
+  }
+  const PY_KEYWORDS = new Set(['def','class','if','elif','else','return','while','for','in','not','and','or','break','continue','import','from','as','with','try','except','finally','raise','yield','lambda','self','None','True','False','pass','assert']);
+  function highlight(line) {
+    const src = String(line == null ? '' : line);
+    const out = [];
+    let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '#') { out.push(['com', src.slice(i)]); break; }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < src.length && src[j] !== c) {
+          if (src[j] === '\\') j += 2; else j++;
+        }
+        out.push(['str', src.slice(i, Math.min(j + 1, src.length))]);
+        i = Math.min(j + 1, src.length); continue;
+      }
+      if (/[0-9]/.test(c) && (i === 0 || !/[A-Za-z_]/.test(src[i-1]))) {
+        let j = i;
+        while (j < src.length && /[0-9._]/.test(src[j])) j++;
+        out.push(['num', src.slice(i, j)]);
+        i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        out.push([PY_KEYWORDS.has(word) ? 'kw' : null, word]);
+        i = j; continue;
+      }
+      out.push([null, c]); i++;
+    }
+    return out.map(([cls, text]) =>
+      cls ? '<span class="tok-' + cls + '">' + esc(text) + '</span>' : esc(text)
+    ).join('');
+  }
+  function edgeKind(e) {
+    const lbl = String(e.label || '').toUpperCase();
+    const style = String(e.style || '').toLowerCase();
+    if (/ERROR|EXCEPT|RAISE|CATCH/.test(lbl)) return 'error';
+    if (style === 'dashed' || /ASYNC|CALL_SOON|SIGNAL|NOTIFY|SCHEDULE|ENQUEUE|RESUME|CALLBACK/.test(lbl)) return 'async';
+    if (/SUCCESS|OK|THEN/.test(lbl)) return 'success';
+    if (/RETURN|RET\b/.test(lbl)) return 'return';
+    if (/CALL|INVOKE/.test(lbl)) return 'call';
+    return 'plain';
+  }
+
+  // ---------- View object for a storyline ----------
+  function viewForStoryline(sl) {
+    const diag = sl.diagram || {};
+    const cols = diag.cols || [];
+    const blocksFlat = [];
+    cols.forEach(col => {
+      (col.blocks || []).forEach(b => {
+        blocksFlat.push({ ...b, _col: col, _step: blocksFlat.length + 1 });
+      });
+    });
+    const blockIds = new Set(blocksFlat.map(b => b.id));
+    const flowEdges = (diag.edges || []).filter(e => blockIds.has(e.from) && blockIds.has(e.to));
+    return {
+      id: sl.id, title: sl.title,
+      summary: sl.summary || '',
+      files: sl.files_touched || [],
+      placeholder: sl.depth === 'summary' || !sl.diagram,
+      data_structures: diag.data_structures || [],
+      cols, blocks: blocksFlat, edges: flowEdges,
+      defaultActive: blocksFlat[0]?.id || null,
+    };
+  }
+
+  // ---------- Tabs ----------
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    (WALKTHROUGH_DATA.storylines || []).forEach(sl => {
+      const t = document.createElement('div');
+      t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
+      t.innerHTML = '<span class="tab-num">' + esc(sl.id) + '</span>' + esc(sl.title);
+      t.onclick = () => setStoryline(sl.id);
+      root.appendChild(t);
+    });
+  }
+
+  // ---------- DS strip ----------
+  function renderDSStrip(view) {
+    if (!view.data_structures.length) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'ds-strip';
+    wrap.innerHTML = '<span class="label">Data structures</span>' +
+      view.data_structures.map(ds =>
+        '<span class="ds-chip">' + esc(ds.name) +
+        (ds.type ? '<span class="ds-type">: ' + esc(ds.type) + '</span>' : '') +
+        (ds.role ? '<span class="ds-role">— ' + esc(ds.role) + '</span>' : '') +
+        '</span>'
+      ).join('');
+    return wrap;
+  }
+
+  // ---------- Function section: header + code body w/ annotations ----------
+  function renderFnSection(col, view) {
+    const section = document.createElement('div');
+    section.className = 'fn-section';
+    section.id = 'fn-' + col.id;
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'fn-header';
+    const loc = (col.blocks && col.blocks[0] && col.blocks[0].code_view)
+      ? col.blocks[0].code_view.file : '';
+    header.innerHTML =
+      '<div class="fn-sig">' +
+        '<span class="kw">def</span>' +
+        '<span class="name">' + esc(col.function || col.label || col.id) + '</span>' +
+        '<span class="paren">(…)</span>' +
+        (loc ? '<span class="loc">' + esc(loc) + '</span>' : '') +
+      '</div>' +
+      (col.description ? '<div class="fn-desc">' + esc(col.description) + '</div>' : '');
+    section.appendChild(header);
+
+    // Body: code-flow + annotations
+    const body = document.createElement('div');
+    body.className = 'fn-body';
+
+    const codeFlow = document.createElement('div');
+    codeFlow.className = 'code-flow';
+    const annotations = document.createElement('div');
+    annotations.className = 'annotations';
+
+    // Build a continuous code map for this column: line_num → content.
+    // Pull from every block's code_view.lines (they may overlap; later block wins
+    // if there's a conflict — shouldn't happen in practice).
+    const lineMap = new Map();
+    (col.blocks || []).forEach(b => {
+      const lines = (b.code_view && b.code_view.lines) || [];
+      lines.forEach(l => {
+        if (l && typeof l.line_num === 'number') lineMap.set(l.line_num, l.content);
+      });
+    });
+    if (lineMap.size === 0) {
+      codeFlow.innerHTML = '<div class="placeholder" style="margin:20px 0">No code lines for this column.</div>';
+      body.appendChild(codeFlow);
+      body.appendChild(annotations);
+      section.appendChild(body);
+      return section;
+    }
+
+    const sortedLineNums = Array.from(lineMap.keys()).sort((a, b) => a - b);
+    const minLine = sortedLineNums[0];
+    const maxLine = sortedLineNums[sortedLineNums.length - 1];
+
+    // For each block, compute the line range it owns.
+    const blockRanges = (col.blocks || []).map(b => {
+      let lo, hi;
+      const r = parseRange(b.line_range);
+      if (r) { lo = r[0]; hi = r[1]; }
+      else {
+        const ls = (b.code_view && b.code_view.lines) || [];
+        const nums = ls.map(l => l.line_num).filter(n => typeof n === 'number');
+        if (nums.length) { lo = Math.min(...nums); hi = Math.max(...nums); }
+      }
+      return { block: b, lo, hi };
+    }).filter(r => r.lo != null && r.hi != null)
+      .sort((a, b) => a.lo - b.lo);
+
+    // Render code: walk from minLine..maxLine. Lines that belong to a block
+    // get wrapped in a .blk-region. Lines NOT in lineMap become elision markers
+    // (or just contribute to an elision run).
+    let i = 0;  // index into blockRanges
+    let ln = minLine;
+    let elisionStart = null;
+    function flushElision(endLineExclusive) {
+      if (elisionStart != null) {
+        const span = endLineExclusive - elisionStart;
+        const el = document.createElement('div');
+        el.className = 'elision';
+        el.innerHTML = '<span class="ln">…</span><span class="src">' +
+          esc((span === 1 ? 'line ' : 'lines ') + elisionStart +
+              (span > 1 ? '–' + (endLineExclusive - 1) : '') + ' elided') + '</span>';
+        codeFlow.appendChild(el);
+        elisionStart = null;
+      }
+    }
+
+    while (ln <= maxLine) {
+      // Find the next block whose range we enter
+      const cur = blockRanges[i];
+      if (cur && ln === cur.lo) {
+        flushElision(ln);
+        // Open a region wrapping lines [cur.lo, cur.hi]
+        const region = document.createElement('div');
+        const colorIdx = i % 8;
+        region.className = 'blk-region c' + colorIdx;
+        region.id = 'reg-' + cur.block.id;
+        region.dataset.blockId = cur.block.id;
+        for (let l = cur.lo; l <= cur.hi; l++) {
+          const content = lineMap.get(l);
+          const lineEl = document.createElement('div');
+          lineEl.className = 'code-line';
+          if (content !== undefined) {
+            lineEl.innerHTML = '<span class="ln">' + l + '</span><span class="src">' + highlight(content) + '</span>';
+          } else {
+            // missing within range: render as faded
+            lineEl.innerHTML = '<span class="ln">' + l + '</span><span class="src" style="opacity:0.4">…</span>';
+          }
+          region.appendChild(lineEl);
+        }
+        region.onclick = () => gotoBlock(cur.block.id);
+        codeFlow.appendChild(region);
+
+        // Annotation for this block (positioned later in layoutAnnotations)
+        const annot = document.createElement('div');
+        const _step = view.blocks.find(x => x.id === cur.block.id)?._step ?? '';
+        annot.className = 'annot c' + colorIdx;
+        annot.dataset.blockId = cur.block.id;
+        annot.innerHTML =
+          '<div class="annot-head">' +
+            '<div class="annot-step">' + _step + '</div>' +
+            '<div style="flex:1; min-width:0">' +
+              '<div class="annot-tag">' + esc(cur.block.phase || '') + ' · L' + cur.lo + (cur.hi > cur.lo ? '–' + cur.hi : '') + '</div>' +
+              '<div class="annot-name">' + esc(cur.block.title || cur.block.name || cur.block.id) + '</div>' +
+            '</div>' +
+          '</div>' +
+          (cur.block.one_liner ? '<div class="annot-says">' + esc(cur.block.one_liner) + '</div>' : '');
+        annot.onclick = () => gotoBlock(cur.block.id);
+        annotations.appendChild(annot);
+
+        ln = cur.hi + 1;
+        i++;
+      } else {
+        // Outside any block: check if this line exists in lineMap
+        if (lineMap.has(ln)) {
+          flushElision(ln);
+          const content = lineMap.get(ln);
+          const lineEl = document.createElement('div');
+          lineEl.className = 'code-line';
+          lineEl.innerHTML = '<span class="ln">' + ln + '</span><span class="src">' + highlight(content) + '</span>';
+          codeFlow.appendChild(lineEl);
+        } else {
+          if (elisionStart == null) elisionStart = ln;
+        }
+        ln++;
+      }
+    }
+    flushElision(maxLine + 1);
+
+    body.appendChild(codeFlow);
+    body.appendChild(annotations);
+    section.appendChild(body);
+    return section;
+  }
+
+  // ---------- Layout: align each .annot to its .blk-region vertically ----------
+  function layoutAnnotations() {
+    document.querySelectorAll('.fn-section').forEach(section => {
+      const body = section.querySelector('.fn-body');
+      if (!body) return;
+      const annotations = section.querySelector('.annotations');
+      if (!annotations) return;
+      const bodyRect = body.getBoundingClientRect();
+      const regions = section.querySelectorAll('.blk-region');
+      const annots = section.querySelectorAll('.annot');
+      // Collect desired positions
+      const positions = [];
+      regions.forEach((reg, idx) => {
+        const annot = annots[idx];
+        if (!annot) return;
+        const rr = reg.getBoundingClientRect();
+        const desiredTop = rr.top - bodyRect.top + section.querySelector('.fn-body').scrollTop;
+        positions.push({ idx, desired: desiredTop, height: 0, annot });
+      });
+      // Set initial position, measure height, then resolve overlaps top-down
+      positions.forEach(p => {
+        p.annot.style.top = p.desired + 'px';
+      });
+      // Force layout to measure heights
+      positions.forEach(p => { p.height = p.annot.offsetHeight; });
+      // Resolve overlaps: push each annot down past previous one if needed
+      const MIN_GAP = 6;
+      let lastBottom = -Infinity;
+      positions.forEach(p => {
+        const top = Math.max(p.desired, lastBottom + MIN_GAP);
+        p.annot.style.top = top + 'px';
+        lastBottom = top + p.height;
+      });
+      // Ensure annotations container is at least as tall as the lowest annot
+      if (positions.length) {
+        const lowest = positions[positions.length - 1];
+        const need = parseFloat(lowest.annot.style.top) + lowest.height;
+        annotations.style.minHeight = need + 'px';
+      }
+    });
+  }
+
+  // ---------- Step navigation ----------
+  function nextStep(view, blockId) {
+    const outs = (view.edges || []).filter(e => e.from === blockId);
+    if (outs.length) {
+      const ranked = outs.slice().sort((a, b) => {
+        const order = { call: 0, success: 0, plain: 1, return: 2, async: 3, error: 4 };
+        return (order[edgeKind(a)] ?? 5) - (order[edgeKind(b)] ?? 5);
+      });
+      return { id: ranked[0].to, via: ranked[0], alternates: ranked.slice(1) };
+    }
+    const i = view.blocks.findIndex(b => b.id === blockId);
+    const nb = view.blocks[i + 1];
+    return nb ? { id: nb.id, via: null, alternates: [] } : null;
+  }
+  function prevStep(view, blockId) {
+    const ins = (view.edges || []).filter(e => e.to === blockId);
+    if (ins.length) return { id: ins[0].from };
+    const i = view.blocks.findIndex(b => b.id === blockId);
+    const pb = view.blocks[i - 1];
+    return pb ? { id: pb.id } : null;
+  }
+
+  function gotoBlock(blockId) {
+    if (!blockId) return;
+    STATE.activeBlockId = blockId;
+    renderActiveState();
+    renderSidePanel();
+    const reg = document.getElementById('reg-' + blockId);
+    if (reg) reg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function renderActiveState() {
+    document.querySelectorAll('.blk-region.active, .annot.active').forEach(el => el.classList.remove('active'));
+    if (!STATE.activeBlockId) return;
+    const reg = document.getElementById('reg-' + STATE.activeBlockId);
+    if (reg) reg.classList.add('active');
+    document.querySelectorAll('.annot').forEach(a => {
+      if (a.dataset.blockId === STATE.activeBlockId) a.classList.add('active');
+    });
+  }
+
+  // ---------- Side panel ----------
+  function renderSidePanel() {
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) return;
+    const view = viewForStoryline(sl);
+    const b = view.blocks.find(b => b.id === STATE.activeBlockId);
+    const f = id => document.getElementById(id);
+
+    const total = view.blocks.length;
+    const stepNum = b ? b._step : 0;
+    const prev = b ? prevStep(view, b.id) : null;
+    const next = b ? nextStep(view, b.id) : null;
+    f('step-counter').innerHTML = b ? 'Step <strong>' + stepNum + '</strong> / ' + total : '—';
+    f('btn-prev').disabled = !prev;
+    f('btn-next').disabled = !next;
+    f('btn-prev').onclick = () => prev && gotoBlock(prev.id);
+    f('btn-next').onclick = () => next && gotoBlock(next.id);
+
+    if (!b) {
+      f('focus-tag').textContent = '';
+      f('focus-name').textContent = '—';
+      f('focus-loc').textContent = '';
+      f('focus-purpose').textContent = 'Click a highlighted block in the code to focus it.';
+      f('focus-extras').innerHTML = '';
+      f('focus-next').innerHTML = '';
+      return;
+    }
+    const rp = b.right_panel || {};
+    f('focus-tag').textContent = (b.phase || '') + (b._col ? '  ·  ' + (b._col.function || b._col.id) : '');
+    f('focus-name').textContent = b.title || b.name || b.id;
+    f('focus-loc').textContent = b.code_view ? b.code_view.file + ':' + (b.line_range || '') : '';
+    f('focus-purpose').textContent = rp.what_it_does || b.one_liner || '';
+
+    const extras = [];
+    if (rp.why_its_here) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Why it\'s here</div><div class="body">' + esc(rp.why_its_here) + '</div></div>');
+    }
+    const inputsHtml = (b.inputs || []).map(([k, v]) =>
+      '<span class="port-line"><span class="key">' + esc(k) + ':</span><span class="val">' + esc(v) + '</span></span>').join('');
+    const outputsHtml = (b.outputs || []).map(([k, v]) =>
+      '<span class="port-line"><span class="key">' + esc(k) + ':</span><span class="val">' + esc(v) + '</span></span>').join('');
+    if (inputsHtml) extras.push('<div class="focus-section"><div class="focus-section-label">Inputs</div><div class="body">' + inputsHtml + '</div></div>');
+    if (outputsHtml) extras.push('<div class="focus-section"><div class="focus-section-label">Outputs</div><div class="body">' + outputsHtml + '</div></div>');
+    const stateEffects = (b.state_effects || []).map(e => {
+      const cls = e.kind === 'read' ? 'read' : e.kind === 'write' ? 'write' : '';
+      return '<span class="chip ' + cls + '">' + esc(e.op || '') + ' → ' + esc(e.ds_id) + '</span>';
+    }).join('');
+    if (stateEffects) extras.push('<div class="focus-section"><div class="focus-section-label">State effects</div><div class="body">' + stateEffects + '</div></div>');
+    const touches = (rp.touches || []).map(t => '<span class="chip">' + esc(t.label) + '</span>').join('');
+    if (touches) extras.push('<div class="focus-section"><div class="focus-section-label">Touches</div><div class="body">' + touches + '</div></div>');
+    const failure = (rp.failure_mode || []).map(s => '<div class="failure-item">' + esc(s) + '</div>').join('');
+    if (failure) extras.push('<div class="focus-section"><div class="focus-section-label">Failure mode</div><div class="body">' + failure + '</div></div>');
+    if (b.code_view && b.code_view.lines) {
+      const codeHtml = b.code_view.lines.map(l => esc(l.content)).join('\n');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Code</div><pre class="focus-code">' + codeHtml + '</pre></div>');
+    }
+    f('focus-extras').innerHTML = extras.join('');
+
+    // Next-step hint
+    if (next) {
+      const nb = view.blocks.find(x => x.id === next.id);
+      const kind = next.via ? edgeKind(next.via) : 'plain';
+      const kindCls = (kind === 'async' || kind === 'error') ? kind : '';
+      const viaLabel = next.via && next.via.label ? next.via.label : (next.via ? kind.toUpperCase() : 'in source order');
+      const primary = nb ? '<div class="next-hint">' +
+        '<span class="nh-label">Next  →</span>' +
+        '<span class="nh-kind ' + kindCls + '">' + esc(viaLabel) + '</span> ' +
+        '<span class="nh-link" data-go="' + esc(nb.id) + '">#' + nb._step + ' ' + esc(nb.title || nb.id) + '</span>' +
+        '</div>' : '';
+      const alts = next.alternates.map(e => {
+        const ab = view.blocks.find(x => x.id === e.to);
+        const k = edgeKind(e);
+        const kc = (k === 'async' || k === 'error') ? k : '';
+        return ab ? '<div style="margin-top:5px;"><span class="nh-kind ' + kc + '">' + esc(e.label || k.toUpperCase()) + '</span> ' +
+          '<span class="nh-link" data-go="' + esc(ab.id) + '">#' + ab._step + ' ' + esc(ab.title || ab.id) + '</span></div>' : '';
+      }).join('');
+      f('focus-next').innerHTML = primary + alts;
+      f('focus-next').querySelectorAll('[data-go]').forEach(el => {
+        el.onclick = () => gotoBlock(el.getAttribute('data-go'));
+      });
+    } else {
+      f('focus-next').innerHTML = '';
+    }
+  }
+
+  // ---------- Main render ----------
+  function renderMain() {
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) { main.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
+    const view = viewForStoryline(sl);
+
+    const banner = document.createElement('div');
+    banner.className = 'storyline-banner';
+    banner.innerHTML =
+      '<div class="b-title">' + esc(sl.title) +
+      (view.files[0] ? '<span class="b-source">' + esc(view.files[0]) + '</span>' : '') +
+      '</div>' +
+      (view.summary ? '<div class="b-summary">' + esc(view.summary) + '</div>' : '');
+    main.appendChild(banner);
+
+    if (view.placeholder) {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.innerHTML = '<strong>' + esc(sl.title) + '</strong> — summary-only storyline.<br>' + esc(view.summary);
+      main.appendChild(p);
+      return;
+    }
+
+    const dsStrip = renderDSStrip(view);
+    if (dsStrip) main.appendChild(dsStrip);
+
+    view.cols.forEach(col => main.appendChild(renderFnSection(col, view)));
+
+    requestAnimationFrame(() => {
+      layoutAnnotations();
+      renderActiveState();
+    });
+  }
+
+  function setStoryline(id) {
+    STATE.activeStorylineId = id;
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === id);
+    const v = sl ? viewForStoryline(sl) : null;
+    STATE.activeBlockId = v ? v.defaultActive : null;
+    renderTabs();
+    renderMain();
+    renderSidePanel();
+    // Reset the main scroll to the storyline banner; if the active block is
+    // far down the file, the user can press → / Next to walk into it.
+    const main = document.getElementById('main');
+    if (main) main.scrollTop = 0;
+    // If the active block is not on screen, gently scroll it into view after
+    // the storyline banner has been read. Use a single requestAnimationFrame
+    // so the DOM has measured its final heights.
+    requestAnimationFrame(() => {
+      if (!STATE.activeBlockId) return;
+      const reg = document.getElementById('reg-' + STATE.activeBlockId);
+      if (!reg) return;
+      const mainRect = main.getBoundingClientRect();
+      const regRect = reg.getBoundingClientRect();
+      if (regRect.top > mainRect.bottom || regRect.bottom < mainRect.top + 100) {
+        reg.scrollIntoView({ behavior: 'auto', block: 'center' });
+      }
+    });
+  }
+
+  // ---------- Init ----------
+  function renderTopbar() {
+    const md = WALKTHROUGH_DATA.metadata || {};
+    const t = document.getElementById('hdr-title');
+    if (t) t.textContent = '📄 ' + (md.title || 'Code walkthrough');
+    const c = document.getElementById('hdr-crumb');
+    if (c) {
+      const parts = [];
+      if (md.repo) parts.push('<code>' + esc(md.repo) + '</code>');
+      const sm = WALKTHROUGH_DATA.summary || {};
+      if (sm.one_line) parts.push(esc(sm.one_line));
+      c.innerHTML = parts.join(' · ');
+    }
+  }
+
+  function init() {
+    if (!WALKTHROUGH_DATA || !WALKTHROUGH_DATA.storylines) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No walkthrough data injected.</div>';
+      return;
+    }
+    renderTopbar();
+    const firstFull = (WALKTHROUGH_DATA.storylines || []).find(s => s.depth !== 'summary' && s.diagram);
+    if (!firstFull) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No full-depth storyline.</div>'; return; }
+    setStoryline(firstFull.id);
+    window.addEventListener('resize', () => layoutAnnotations());
+    window.addEventListener('keydown', (ev) => {
+      if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (!sl) return;
+      const view = viewForStoryline(sl);
+      if (!STATE.activeBlockId) return;
+      const step = ev.key === 'ArrowRight' ? nextStep(view, STATE.activeBlockId) : prevStep(view, STATE.activeBlockId);
+      if (step) { ev.preventDefault(); gotoBlock(step.id); }
+    });
+  }
+  init();
+</script>
+</body>
+</html>
