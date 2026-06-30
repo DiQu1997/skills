@@ -42,6 +42,37 @@ storyline:
   `right_panel` (`what_it_does`, `why_its_here`, `touches`,
   `failure_mode`, plus optional `invariants` / `key_data_structures` /
   `prerequisites`)
+- **Optional diagram-view extensions** (only if rendering with
+  `render.py --view diagram`): top-level `diagram.data_structures[]`
+  + per-block `inputs`/`outputs`/`state_effects` — see Phase 7B below
+
+## Core discipline: this is a CODE walkthrough, not an EXAMPLE walkthrough
+
+The hardest single distinction. Block names, deltas, types all describe
+what THE CODE DOES in general — parameterized over inputs — not what
+happens for a specific input.
+
+  ✗ EXAMPLE thinking: "ALLOC-3", "block_table = [0, 1, 2]", "free 16→13",
+                       "seq 0", concrete numbers anywhere
+  ✓ CODE thinking:   "ALLOCATE",  "block_table extended by (n - cached)",
+                       "Δ free_block_ids: ↓ by (n - cached)", "seq: Sequence"
+
+**Self-test on every block field**: can you name the value/delta in
+terms of *inputs and state*, without referencing a worked example? If
+no, you've slipped into example mode — rewrite.
+
+  - For an output delta you wrote as "free 16 → 13": that '16' and '13'
+    are example artifacts. The delta is `↓ by (n - cached)`. The CODE
+    does not care that there are 16 blocks; it does whatever it does for
+    however many `num_blocks - num_cached_blocks` evaluates to.
+  - For an `inputs` port you wrote as "seq: seq 0": `seq 0` is the test
+    case. The code's parameter is `seq: Sequence`.
+  - For a block title containing a count like "ALLOCATE 3 BLOCKS": no.
+    `ALLOCATE` is the operation; the count is a runtime fact.
+
+Apply this same discipline to data-structure visualization:
+no placeholder slots that imply "I'm hiding 6 values"; just type +
+operations.
 
 ## Workflow phases
 
@@ -445,6 +476,62 @@ Color defaults:
 - `green` (#2f7a2f): synchronous happy-path calls
 - `gray` (#777, the default): generic flow
 
+### Phase 8B — Diagram-view extensions (OPTIONAL)
+
+Skip this phase if rendering with the default (swimlane) template only.
+Populate if rendering with `render.py --view diagram`.
+
+The diagram view exposes state data structures as first-class entities
+at the top of the canvas; each block connects to them with read/write
+arrows. This requires THREE additions to the JSON your earlier phases produced:
+
+**1. `diagram.data_structures[]` (top-level)** — declare primary state.
+
+A data structure is "primary state" if it: (a) lives across calls (an
+`__init__` attribute on a long-lived object), (b) mutates during execution,
+(c) has named operations the code performs on it. Skip configs, model
+weights, tokenizers, request inputs — those are NOT state the code reshapes.
+
+For each primary state DS, fill `id`, `name`, `type`, `role`, `shape`,
+`ops_r`, `ops_w`. The `shape.kind` selects the visual: `deque` / `list` /
+`set` / `dict` / `scalar` / `composite`. Pick whichever maps to the
+data structure's runtime semantics. For class-like containers (e.g.
+`BlockManager` whose fields are themselves containers), use
+`composite` with one piece per field — each piece is itself a Shape.
+
+Schema reference: see `schema.md`'s `### data_structures (diagram view)`
+section for full field spec.
+
+**The CODE-not-EXAMPLE discipline applies to shapes too.** No filler
+slots implying "I'm hiding N items"; the visual is a type symbol with
+operational hints, NOT a stripped-instance rendering. A `deque` is
+`◀ popleft  HEAD ── TAIL  append ▶`, not 6 placeholder rectangles.
+
+**2. Per-block `inputs` and `outputs`** — typed I/O ports.
+
+`inputs`: `[[name, type]]`. Type signatures, not values. Skip incidental
+locals; only fields whose presence matters to the block's contract.
+
+`outputs`: `[[name, value-or-delta]]`. Return values use type form
+(`["num_cached", "int (≥0 or -1)"]`). State mutations use the `Δ` prefix
+(`["Δ free_block_ids", "↓ by (num_blocks - num_cached)"]`).
+
+**3. Per-block `state_effects[]`** — link the block to the DSes it touches.
+
+For each top-level DS the block reads or writes, add an entry:
+`{ds_id, op, kind}`.
+
+- `ds_id` must match a `diagram.data_structures[].id` on this same diagram.
+- `op` is the short arrow-label string (e.g. `"popleft"`, `"register hash"`).
+- `kind`: `"read"` for peek/len/lookup, `"write"` for mutation, `"rw"`
+  only when read and write happen as one logical op (rarely the right
+  pick — prefer two separate entries).
+
+**state_effects vs right_panel.key_data_structures**: see schema.md's
+disambiguation section. Short version: prefer `state_effects` (the
+renderer draws an arrow for each); use `key_data_structures` only when
+a prose paragraph adds something the arrow can't.
+
 ### Phase 9 — Summary-depth storylines: minimum fields only
 
 For `depth: "summary"` storylines, populate only:
@@ -471,6 +558,14 @@ Validate before emitting:
 - Every storyline's `importance_scores.total` equals the sum of its
   four sub-scores
 - `scope.mode` is `"files"` or `"topic"`
+- **Source-content fidelity**: every `code_view.lines[].content` matches
+  the actual source file line-for-line, including whitespace. `render.py`
+  enforces this with a hard validator; mismatches abort the render. Do
+  NOT paraphrase code, drop indentation, or guess at content from
+  memory — re-read the source file with line numbers and copy exactly.
+- **Diagram-view checks** (if `data_structures` is populated):
+  every `state_effects[].ds_id` resolves to a declared `data_structure.id`
+  on the same diagram; every `shape.kind` is one of the documented kinds.
 
 Emit one JSON document. No prose around it. No code fences. Just JSON.
 
