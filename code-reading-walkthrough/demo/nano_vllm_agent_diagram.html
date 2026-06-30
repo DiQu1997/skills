@@ -1,0 +1,3177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Code walkthrough — diagram view</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+
+    --blk-bg:#fefefe;
+    --blk-border:#d0d7de;
+    --blk-active-bg:#fff8c5;
+    --blk-active-border:#bf8700;
+
+    --ds-waiting:#fff8e0;  --ds-waiting-border:#c79a09;
+    --ds-running:#e7dff5;  --ds-running-border:#5b3e9c;
+    --ds-pool:#dfeaf7;     --ds-pool-border:#205493;
+    --ds-cache:#dff0df;    --ds-cache-border:#1f883d;
+
+    --arrow-read:#5b6cff;
+    --arrow-write:#a4332a;
+    --arrow-rw:#8a5a14;
+
+    --port-in:#3d8a5c;
+    --port-out:#a4332a;
+
+    --code-bg:#fbfaf7;
+
+    --tok-kw:#5b3e9c; --tok-type:#205493; --tok-str:#8a5a14;
+    --tok-num:#2b6b5e; --tok-com:#8b949e; --tok-fn:#2f7a2f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "tabs   tabs"
+      "canvas side";
+    height: 100vh;
+  }
+  .topbar { grid-area: topbar; }
+  .tabs   { grid-area: tabs; }
+  .canvas { grid-area: canvas; }
+  .side   { grid-area: side; }
+
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .legend { margin-left: auto; display: flex; gap: 14px; font-size: 11px; color: var(--fg-soft); }
+  .topbar .legend .swatch {
+    display: inline-block; width: 16px; height: 2px;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  .tabs {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex; padding: 0 22px; gap: 4px;
+  }
+  .tab {
+    padding: 9px 16px;
+    cursor: pointer; font-size: 12.5px; color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    border-top: 1px solid transparent;
+    border-left: 1px solid transparent;
+    border-right: 1px solid transparent;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -1px;
+    user-select: none;
+    transition: all 120ms;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg); background: var(--bg);
+    border-color: var(--border);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint); margin-right: 5px;
+    padding: 1px 5px; border-radius: 3px; background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+  .tab .tab-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+  }
+
+  .canvas {
+    overflow: auto;
+    background-image: radial-gradient(circle, #e1e4e8 1px, transparent 1px);
+    background-size: 18px 18px;
+    background-position: 0 0;
+    position: relative;
+  }
+  .canvas-inner {
+    position: relative;
+    padding: 14px 22px 26px;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .fn-banner {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+  }
+  .fn-banner.b-ST1 { border-left-color: var(--ds-waiting-border); }
+  .fn-banner.b-ST2 { border-left-color: #cf80c2; }
+  .fn-banner.b-ST3 { border-left-color: var(--ds-pool-border); }
+  .fn-banner.b-ST4 { border-left-color: var(--ds-cache-border); }
+  .fn-banner.b-ST5 { border-left-color: var(--ds-running-border); }
+  .fn-banner .b-title {
+    font-family: ui-monospace, monospace;
+    font-size: 14px; font-weight: 700; color: var(--fg);
+    margin-bottom: 2px;
+  }
+  .fn-banner .b-title .keyword { color: var(--tok-kw); font-weight: 600; }
+  .fn-banner .b-source {
+    margin-left: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-weight: 400;
+  }
+
+  /* Data structures — schemas (operations, not values) */
+  .ds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .ds-box {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    position: relative;
+  }
+  .ds-box.waiting { border-color: var(--ds-waiting-border); background: var(--ds-waiting); }
+  .ds-box.running { border-color: var(--ds-running-border); background: var(--ds-running); }
+  .ds-box.pool    { border-color: var(--ds-pool-border);    background: var(--ds-pool); grid-column: 1 / 3; }
+  .ds-box.cache   { border-color: var(--ds-cache-border);   background: var(--ds-cache); grid-column: 1 / 3; }
+  .ds-box.touched { box-shadow: 0 0 0 3px rgba(91,108,255,0.10), 0 1px 3px rgba(0,0,0,0.04); }
+  .ds-box.untouched { opacity: 0.40; }
+  .ds-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 5px; flex-wrap: wrap;
+  }
+  .ds-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; font-weight: 700;
+    color: var(--fg);
+  }
+  .ds-type {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--tok-type);
+  }
+  .ds-role {
+    margin-left: auto;
+    font-size: 10.5px; color: var(--fg-soft);
+    font-style: italic;
+  }
+  .ds-ops {
+    display: flex; gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .op-chip {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    background: rgba(255,255,255,0.6);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--fg);
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+  .op-chip.r { color: var(--arrow-read); }
+  .op-chip.w { color: var(--arrow-write); }
+  .ds-shape {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--fg);
+    margin-top: 5px;
+    display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap;
+  }
+  .ds-shape .endpoint {
+    color: var(--fg-faint); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .ds-shape .placeholder {
+    color: var(--fg-faint); font-style: italic;
+  }
+  .ds-shape .schema-piece {
+    background: rgba(255,255,255,0.55);
+    border: 1px dashed rgba(0,0,0,0.18);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 10.5px;
+  }
+
+  /* ---------- Per-kind shape visualizations (compact, type-level) ----------
+     Each shape is a SYMBOL of the type/semantics, not a rendered instance.
+     No placeholder slots implying counts. No instance content. ~20px tall. */
+  .shape-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-family: ui-monospace, monospace; font-size: 11px;
+    margin-top: 4px;
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  .shape-row .note {
+    color: var(--fg-faint); font-style: italic; font-size: 10px;
+    font-family: -apple-system, sans-serif;
+  }
+  .shape-row .type {
+    color: var(--tok-type);
+  }
+
+  /* deque: two operation-labeled endpoints connected by a thin line */
+  .shape-deque-line {
+    display: flex; align-items: center; gap: 0;
+    flex: 0 1 auto;
+  }
+  .shape-deque-end {
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 10px;
+    color: var(--fg);
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .shape-deque-end .end-label {
+    color: var(--fg-faint); font-size: 8.5px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    display: block; margin-top: -2px;
+    font-weight: 400;
+  }
+  .shape-deque-track {
+    flex: 1; min-width: 60px; max-width: 140px;
+    height: 0;
+    border-top: 1.5px dashed rgba(0,0,0,0.25);
+    margin: 0 -1px;
+  }
+
+  /* grid (fixed-size array): just type[capacity], no cells */
+  .shape-list-glyph {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+  }
+  .shape-list-glyph .bracket { color: var(--fg-faint); font-weight: 700; }
+  .shape-list-glyph .mul { color: var(--fg-faint); }
+
+  /* set: curly braces + type */
+  .shape-set-glyph {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+  }
+  .shape-set-glyph .brace { color: var(--fg-faint); font-weight: 700; font-size: 13px; }
+
+  /* dict: key → value */
+  .shape-dict-glyph {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 11px;
+  }
+  .shape-dict-glyph .key { font-style: italic; color: var(--fg-soft); }
+  .shape-dict-glyph .map-arrow { color: var(--fg-faint); font-weight: 700; }
+  .shape-dict-glyph .val { color: var(--fg); }
+
+  /* scalar: just a type chip */
+  .shape-scalar-glyph {
+    display: inline-block;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+    color: var(--tok-type);
+  }
+
+  /* composite: 2-col table of {field: name, shape: visual} */
+  .shape-composite-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .shape-composite-table td {
+    padding: 4px 8px;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    vertical-align: middle;
+  }
+  .shape-composite-table tr:first-child td { border-top: 0; }
+  .shape-composite-table td.field {
+    color: var(--fg); font-weight: 600;
+    white-space: nowrap; width: 1%;
+  }
+  .shape-composite-table td.shape-cell { width: auto; }
+
+  /* Logic blocks — code-walkthrough flavour */
+  .blocks-area {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    overflow-x: auto;
+    padding: 4px 4px 8px;
+  }
+  .blk {
+    background: var(--blk-bg);
+    border: 1.5px solid var(--blk-border);
+    border-radius: 8px;
+    padding: 0;
+    min-width: 230px;
+    max-width: 260px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 120ms, box-shadow 120ms;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .blk:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.10); }
+  .blk.active {
+    background: var(--blk-active-bg);
+    border-color: var(--blk-active-border);
+    border-width: 2px;
+    box-shadow: 0 0 0 4px rgba(191,135,0,0.22);
+  }
+
+  .blk-head {
+    background: rgba(0,0,0,0.04);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .blk.active .blk-head { background: rgba(191,135,0,0.16); border-color: var(--blk-active-border); }
+  .blk-tag {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .blk-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12.5px;
+    color: var(--fg);
+  }
+
+  .blk-body { padding: 7px 10px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    line-height: 1.45;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--fg);
+  }
+  .code-block .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  .code-block .tok-type { color: var(--tok-type); }
+  .code-block .tok-str { color: var(--tok-str); }
+  .code-block .tok-com { color: var(--tok-com); font-style: italic; }
+  .code-block .tok-fn { color: var(--tok-fn); }
+
+  .blk-says {
+    font-size: 11px;
+    color: var(--fg-soft);
+    line-height: 1.45;
+    border-left: 2px solid var(--border);
+    padding-left: 7px;
+  }
+
+  .port-section {
+    border-radius: 4px;
+    padding: 4px 7px;
+    font-size: 10.5px;
+    line-height: 1.4;
+  }
+  .port-section.in  { background: rgba(61,138,92,0.07);  border-left: 2.5px solid var(--port-in); }
+  .port-section.out { background: rgba(164,51,42,0.06);  border-left: 2.5px solid var(--port-out); }
+  .port-label {
+    font-family: ui-monospace, monospace;
+    font-size: 8.5px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .port-section.in  .port-label { color: var(--port-in); }
+  .port-section.out .port-label { color: var(--port-out); }
+  .port-item {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+    display: block;
+    margin-top: 1px;
+  }
+  .port-item .key { color: var(--fg-soft); }
+  .port-item .type { color: var(--tok-type); }
+
+  .blk-source {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    text-align: right;
+  }
+
+  .flow-arrow {
+    align-self: center;
+    color: var(--fg-faint);
+    font-size: 14px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  /* Side panel */
+  .side {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 16px 30px;
+  }
+  .side h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
+  }
+  .focus-name {
+    font-family: ui-monospace, monospace;
+    font-size: 16px; font-weight: 700; margin-bottom: 4px;
+    color: var(--blk-active-border);
+  }
+  .focus-purpose {
+    font-size: 12.5px; color: var(--fg);
+    margin-bottom: 12px; line-height: 1.5;
+  }
+  .reads-writes { margin-bottom: 12px; font-size: 11.5px; line-height: 1.5; }
+  .reads-writes .rw-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .reads-writes .rw-chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    background: var(--bg-soft);
+    padding: 1px 6px; border-radius: 3px;
+    margin-right: 4px; margin-top: 2px;
+    border: 1px solid var(--border);
+  }
+  .reads-writes .rw-chip.read  { color: var(--arrow-read); border-color: #c5d0fc; background:#eef0ff; }
+  .reads-writes .rw-chip.write { color: var(--arrow-write); border-color: #f8c5c5; background:#fff0f0; }
+  pre.code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.55;
+    overflow-x: auto;
+    margin: 0 0 10px;
+    color: var(--fg);
+  }
+  pre.code .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  pre.code .tok-type { color: var(--tok-type); }
+  pre.code .tok-str { color: var(--tok-str); }
+  pre.code .tok-com { color: var(--tok-com); font-style: italic; }
+  pre.code .tok-fn { color: var(--tok-fn); }
+  .code-loc {
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    margin-bottom: 5px;
+  }
+
+  svg.arrows {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
+  }
+
+  .placeholder {
+    margin: 80px auto 0; max-width: 480px; text-align: center;
+    color: var(--fg-faint); font-style: italic;
+  }
+  .placeholder strong { color: var(--fg-soft); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1 id="hdr-title">📐 Code walkthrough</h1>
+    <div class="crumb" id="hdr-crumb"></div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--arrow-read)"></span>reads</span>
+      <span><span class="swatch" style="background:var(--arrow-write)"></span>writes</span>
+      <span><span class="swatch" style="background:var(--arrow-rw)"></span>reads + writes</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+  <section class="canvas"><div class="canvas-inner" id="canvas-inner"></div></section>
+  <aside class="side" id="side">
+    <h2>Selected logic block</h2>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-purpose" id="focus-purpose">Click any block on the canvas.</div>
+    <div class="reads-writes" id="focus-rw"></div>
+    <div class="code-loc" id="focus-loc"></div>
+    <pre class="code" id="focus-code"></pre>
+  </aside>
+</div>
+
+
+<script>
+  const WALKTHROUGH_DATA = {
+  "schema_version": "0.5-reading",
+  "metadata": {
+    "repo": "nano-vllm",
+    "commit": "unknown (local snapshot at /tmp/nano-vllm, no .git directory)",
+    "target": "How does nano-vllm admit a new request and schedule its prefill?",
+    "title": "Nano-vLLM: request admission and prefill scheduling",
+    "generated_at": "2026-06-30T00:00:00Z"
+  },
+  "summary": {
+    "one_line": "How a prompt becomes a scheduled prefill batch in nano-vllm, from add_request through BlockManager allocation.",
+    "description": "This walkthrough traces a single request's life from the moment LLMEngine.generate is called through the per-tick step loop into the Scheduler's prefill branch and the BlockManager's prefix-cache probe and allocation. It is aimed at readers who have a rough mental model of vLLM-style paged attention and want to see how the lean nano-vllm port wires together its three small primitives: a FIFO of waiting sequences, a token-budgeted greedy scheduler, and a hash-keyed block pool that supports cross-sequence prefix sharing. After reading, you should be able to point at every line that touches an inbound request before the first GPU op runs, and explain why the chunked-prefill carve-out only applies to the first-in-batch sequence."
+  },
+  "scope": {
+    "mode": "topic",
+    "input": "How does nano-vllm admit a new request and schedule its prefill?",
+    "discovered_scope": [
+      {
+        "path": "nanovllm/engine/llm_engine.py",
+        "reason": "entry-point",
+        "note": "Public LLMEngine.generate / add_request / step — where the request enters the system."
+      },
+      {
+        "path": "nanovllm/engine/scheduler.py",
+        "reason": "core-flow",
+        "note": "Owns waiting/running deques and the prefill+decode policy in schedule()."
+      },
+      {
+        "path": "nanovllm/engine/block_manager.py",
+        "reason": "core-flow",
+        "note": "Backs the scheduler's allocation decisions and implements the prefix cache."
+      },
+      {
+        "path": "nanovllm/engine/sequence.py",
+        "reason": "type-def",
+        "note": "Sequence is the unit the scheduler and block manager pass around; needed to read both."
+      }
+    ],
+    "excluded": [
+      {
+        "path": "nanovllm/engine/model_runner.py",
+        "reason": "Out of scope: this walkthrough stops at scheduling; the model runner is the GPU-side consumer of the batch."
+      },
+      {
+        "path": "nanovllm/sampling_params.py",
+        "reason": "Plain config dataclass — surfaces only as fields read off Sequence."
+      },
+      {
+        "path": "nanovllm/config.py",
+        "reason": "Config plumbing — values are consumed but the schema itself is not load-bearing for understanding the flow."
+      }
+    ],
+    "importance_criteria": "We kept the four files that the request itself flows through between add_request and the first GPU op: the engine, the scheduler, the block manager, and the Sequence type they all manipulate. Everything downstream of model_runner.call('run', ...) is intentionally out of scope so the walkthrough stays focused on admission + scheduling rather than turning into a tour of the whole runtime."
+  },
+  "storylines": [
+    {
+      "id": "S1",
+      "title": "Engine pump: enqueue and per-tick orchestration",
+      "kind": "entry_point",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 1,
+        "entry_point": 3,
+        "novelty": 1,
+        "total": 8,
+        "rationale": "centrality=3 because every request and every tick funnels through LLMEngine.step; entry_point=3 because generate() is the user-facing API."
+      },
+      "summary": "LLMEngine.generate enqueues every prompt as a Sequence, then drives a tight loop that calls step() — schedule, run, postprocess, emit — until the scheduler reports empty.",
+      "files_touched": [
+        "nanovllm/engine/llm_engine.py"
+      ],
+      "mental_model_anchor": "Think of generate() as a hand-cranked pump and step() as one revolution: each turn pulls whatever the scheduler hands back, runs it on the GPU, and drips finished sequences out the spout. There is no async, no event loop — just a while-loop that keeps cranking until both deques are empty.",
+      "purpose": {
+        "stated": null,
+        "evident": "generate() is the public batch API; step() is the smallest unit of engine progress and is the only place where scheduling, execution, and postprocessing are composed.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "Outer driver — wraps the scheduler and the multi-process ModelRunner into a single blocking call.",
+        "involved_modules": [
+          {
+            "module": "LLMEngine",
+            "role_in_storyline": "Owns the pump loop and per-tick composition."
+          },
+          {
+            "module": "Scheduler",
+            "role_in_storyline": "Consulted via add() and schedule(); produces the batch."
+          },
+          {
+            "module": "ModelRunner",
+            "role_in_storyline": "Invoked via call('run', ...) — opaque GPU executor from this storyline's perspective."
+          },
+          {
+            "module": "Sequence",
+            "role_in_storyline": "Constructed in add_request and passed through unchanged."
+          }
+        ],
+        "data_flow": "prompt strings → tokenize → Sequence → scheduler.waiting → schedule() → model_runner.call → postprocess → finished outputs → decoded text"
+      },
+      "change_overview": "generate() is the single user-facing entry point in this storyline. It first normalizes sampling_params to per-prompt form, enqueues each prompt as a Sequence via add_request, and then enters a synchronous while-loop that turns the crank until the scheduler is empty. Each crank is one step(): the scheduler hands back a batch (prefill or decode) plus an is_prefill flag, the ModelRunner executes it, the scheduler postprocesses and possibly retires sequences, and any finished outputs are buffered and surfaced to the progress bar. There is no batching of inbound requests across calls — every prompt provided in a single generate() invocation is dropped into waiting before the first step runs.",
+      "diagram": {
+        "file_badge": "llm_engine.py",
+        "subtitle": "two functions, one synchronous crank",
+        "phases": [
+          {
+            "id": "setup",
+            "label": "Setup",
+            "color": "setup"
+          },
+          {
+            "id": "handoff",
+            "label": "Handoff",
+            "color": "handoff"
+          },
+          {
+            "id": "main",
+            "label": "Main loop",
+            "color": "main"
+          },
+          {
+            "id": "emit",
+            "label": "Emit",
+            "color": "emit"
+          }
+        ],
+        "cols": [
+          {
+            "id": "col-generate",
+            "function": "LLMEngine.generate",
+            "label": "generate",
+            "description": "Public batch entry point. Tokenizes (via add_request), enqueues every prompt up-front, then drives step() in a blocking loop until the scheduler drains. Maintains throughput metrics and a tqdm progress bar; collects per-sequence outputs into a dict keyed by seq_id and returns them sorted by seq_id so output order matches input order.",
+            "blocks": [
+              {
+                "id": "B1",
+                "phase": "setup",
+                "title": "NORMALIZE PARAMS",
+                "line_range": "L66–68",
+                "one_liner": "Build the progress bar and broadcast a single SamplingParams into a per-prompt list so the zip in the next block lines up.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 65,
+                  "context_end_line": 70,
+                  "lines": [
+                    {
+                      "line_num": 65,
+                      "content": "    ) -> list[str]:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 66,
+                      "content": "        pbar = tqdm(total=len(prompts), desc=\"Generating\", dynamic_ncols=True, disable=not use_tqdm)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 67,
+                      "content": "        if not isinstance(sampling_params, list):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 68,
+                      "content": "            sampling_params = [sampling_params] * len(prompts)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 69,
+                      "content": "        for prompt, sp in zip(prompts, sampling_params):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 70,
+                      "content": "            self.add_request(prompt, sp)",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Constructs a tqdm bar sized to the number of prompts, then expands a scalar SamplingParams into a list whose length matches prompts so per-prompt zipping is uniform.",
+                  "why_its_here": "The downstream loop zips prompts with sampling_params; without this broadcast, callers passing a single SamplingParams (the common case) would get a length-1 zip and only one request would be enqueued.",
+                  "touches": [
+                    {
+                      "label": "tqdm",
+                      "kind": "external",
+                      "block": null
+                    },
+                    {
+                      "label": "SamplingParams",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "No failure mode beyond list duplication; the broadcast shares references, so all sequences will read identical SamplingParams fields (fine because Sequence copies the fields it needs)."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "prompts",
+                    "list[str] | list[list[int]]"
+                  ],
+                  [
+                    "sampling_params",
+                    "SamplingParams | list[SamplingParams]"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "pbar",
+                    "tqdm"
+                  ],
+                  [
+                    "sampling_params",
+                    "list[SamplingParams] (length == len(prompts))"
+                  ]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B2",
+                "phase": "handoff",
+                "title": "ENQUEUE ALL",
+                "line_range": "L69–70",
+                "one_liner": "Hand every (prompt, sampling_params) pair to add_request, which tokenizes if needed, wraps in a Sequence, and appends to scheduler.waiting.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 68,
+                  "context_end_line": 72,
+                  "lines": [
+                    {
+                      "line_num": 68,
+                      "content": "            sampling_params = [sampling_params] * len(prompts)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 69,
+                      "content": "        for prompt, sp in zip(prompts, sampling_params):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 70,
+                      "content": "            self.add_request(prompt, sp)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 71,
+                      "content": "        outputs = {}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 72,
+                      "content": "        prefill_throughput = decode_throughput = 0.",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "For every input, calls add_request which (a) tokenizes if the prompt is a string, (b) constructs a Sequence with a fresh seq_id from the class counter and WAITING status, and (c) appends to scheduler.waiting.",
+                  "why_its_here": "The pump loop assumes everything has already been enqueued — there is no per-tick admission. Filling waiting up-front lets the scheduler immediately form maximally-packed batches starting at step 0.",
+                  "touches": [
+                    {
+                      "label": "add_request",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "Sequence",
+                      "kind": "type",
+                      "block": null
+                    },
+                    {
+                      "label": "scheduler.waiting",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "add_request raises if the tokenizer fails (e.g. malformed string); no graceful skipping.",
+                    "Sequence's __init__ reads token_ids[-1] for last_token, so empty prompts crash with IndexError."
+                  ],
+                  "invariants": [
+                    "After this block, len(scheduler.waiting) == len(prompts) and every Sequence has status=WAITING, block_table=[]."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "prompts",
+                    "list"
+                  ],
+                  [
+                    "sampling_params",
+                    "list[SamplingParams]"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "Δ scheduler.waiting",
+                    "↑ by len(prompts) Sequences"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "waiting",
+                    "op": "append (×N)",
+                    "kind": "write"
+                  }
+                ]
+              },
+              {
+                "id": "B3",
+                "phase": "main",
+                "title": "PUMP LOOP",
+                "line_range": "L71–86",
+                "one_liner": "Crank step() until the scheduler is empty, attributing wall time to prefill or decode by sign of num_tokens and collecting finished outputs into a dict.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 70,
+                  "context_end_line": 88,
+                  "lines": [
+                    {
+                      "line_num": 70,
+                      "content": "            self.add_request(prompt, sp)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 71,
+                      "content": "        outputs = {}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 72,
+                      "content": "        prefill_throughput = decode_throughput = 0.",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 73,
+                      "content": "        while not self.is_finished():",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 74,
+                      "content": "            t = perf_counter()",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 75,
+                      "content": "            output, num_tokens = self.step()",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 76,
+                      "content": "            if num_tokens > 0:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 77,
+                      "content": "                prefill_throughput = num_tokens / (perf_counter() - t)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 78,
+                      "content": "            else:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 79,
+                      "content": "                decode_throughput = -num_tokens / (perf_counter() - t)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 80,
+                      "content": "                pbar.set_postfix({",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 81,
+                      "content": "                \"Prefill\": f\"{int(prefill_throughput)}tok/s\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 82,
+                      "content": "                \"Decode\": f\"{int(decode_throughput)}tok/s\",",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 83,
+                      "content": "            })",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 84,
+                      "content": "            for seq_id, token_ids in output:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 85,
+                      "content": "                outputs[seq_id] = token_ids",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 86,
+                      "content": "                pbar.update(1)",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Loops on is_finished (true when both waiting and running deques are empty). Each iteration calls step(), times it, and uses the sign of num_tokens to decide whether it was a prefill batch (positive = total scheduled prompt tokens) or a decode batch (negative = batch size). Finished outputs returned by step are stored by seq_id and the progress bar is advanced.",
+                  "why_its_here": "This is the only place engine progress happens. The sign-encoded num_tokens is a tiny optimization that lets step communicate both kind and size in one int without an extra return value. Storing outputs in a dict keyed by seq_id allows out-of-order completion (decode finishing earlier than later-prefilled sequences) without losing the original prompt index.",
+                  "touches": [
+                    {
+                      "label": "step",
+                      "kind": "function",
+                      "block": "B4"
+                    },
+                    {
+                      "label": "is_finished",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "scheduler.waiting",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "scheduler.running",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If step() raises, the loop terminates with state half-mutated; there is no try/except.",
+                    "Throughput math divides by elapsed wall time — for zero-duration ticks (rare, but plausible on a fast cache hit) this would zero-divide, but step always runs a GPU op so elapsed > 0 in practice."
+                  ],
+                  "invariants": [
+                    "Loop exits only when both scheduler.waiting and scheduler.running are empty.",
+                    "outputs[seq_id] is written at most once because finished sequences are removed from running in postprocess."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "scheduler.waiting",
+                    "deque[Sequence]"
+                  ],
+                  [
+                    "scheduler.running",
+                    "deque[Sequence]"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "outputs",
+                    "dict[int, list[int]] (filled incrementally)"
+                  ],
+                  [
+                    "Δ pbar",
+                    "advances per finished seq"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "waiting",
+                    "op": "len (poll empty)",
+                    "kind": "read"
+                  },
+                  {
+                    "ds_id": "running",
+                    "op": "len (poll empty)",
+                    "kind": "read"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "col-step",
+            "function": "LLMEngine.step",
+            "label": "step",
+            "description": "One revolution of the engine crank. Asks the scheduler for the next batch and an is_prefill flag, hands the batch to the model runner via IPC, then routes the produced token_ids back into the scheduler's postprocess and filters out any sequences that just finished. Returns those finished sequences plus a signed num_tokens for throughput accounting.",
+            "blocks": [
+              {
+                "id": "B4",
+                "phase": "handoff",
+                "title": "SCHEDULE NEXT BATCH",
+                "line_range": "L50–51",
+                "one_liner": "Ask the scheduler for a batch and use the is_prefill flag to compute a signed num_tokens for the caller's throughput attribution.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 49,
+                  "context_end_line": 53,
+                  "lines": [
+                    {
+                      "line_num": 49,
+                      "content": "    def step(self):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 50,
+                      "content": "        seqs, is_prefill = self.scheduler.schedule()",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 51,
+                      "content": "        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 52,
+                      "content": "        token_ids = self.model_runner.call(\"run\", seqs, is_prefill)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 53,
+                      "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Invokes Scheduler.schedule(), which prefers prefill batches when waiting is non-empty and otherwise produces a decode batch from running. The sign of num_tokens encodes the batch kind: positive = total scheduled prompt tokens (prefill), negative = batch size (decode).",
+                  "why_its_here": "This is the single bridge between the outer pump and the scheduler. The is_prefill flag also tells the model runner which kernel path to take (chunked-prefill attention vs single-token decode), so the same boolean is reused for two purposes.",
+                  "touches": [
+                    {
+                      "label": "Scheduler.schedule",
+                      "kind": "function",
+                      "block": "B5"
+                    },
+                    {
+                      "label": "Sequence.num_scheduled_tokens",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "schedule asserts that decode produces a non-empty batch when waiting is empty — an unsatisfiable decode (all sequences preempted) would AssertionError; cannot happen in prefill-only flows."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "scheduler",
+                    "Scheduler"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "seqs",
+                    "list[Sequence]"
+                  ],
+                  [
+                    "is_prefill",
+                    "bool"
+                  ],
+                  [
+                    "num_tokens",
+                    "int (signed; + prefill tokens / - decode batch size)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "waiting",
+                    "op": "may popleft inside schedule()",
+                    "kind": "rw"
+                  },
+                  {
+                    "ds_id": "running",
+                    "op": "may append inside schedule()",
+                    "kind": "rw"
+                  }
+                ]
+              },
+              {
+                "id": "B5",
+                "phase": "emit",
+                "title": "RUN + POSTPROCESS + EMIT",
+                "line_range": "L52–55",
+                "one_liner": "Send the batch to the GPU process, feed the sampled token_ids back through postprocess, and return any sequences that just finished.",
+                "code_view": {
+                  "file": "nanovllm/engine/llm_engine.py",
+                  "language": "python",
+                  "context_start_line": 51,
+                  "context_end_line": 56,
+                  "lines": [
+                    {
+                      "line_num": 51,
+                      "content": "        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 52,
+                      "content": "        token_ids = self.model_runner.call(\"run\", seqs, is_prefill)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 53,
+                      "content": "        self.scheduler.postprocess(seqs, token_ids, is_prefill)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 54,
+                      "content": "        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 55,
+                      "content": "        return outputs, num_tokens",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls into the ModelRunner over IPC to execute either prefill or decode for the batch; ModelRunner returns one sampled token per sequence. postprocess hashes any newly-completed blocks back into the prefix cache, appends the sampled token, and flips status to FINISHED on EOS or max_tokens. The list comprehension then filters for those just-finished sequences and returns them.",
+                  "why_its_here": "Centralizing post-step bookkeeping here (rather than in the runner) keeps GPU code stateless w.r.t. the scheduler. The is_finished filter is the only thing the pump loop in B3 needs to surface results to the user.",
+                  "touches": [
+                    {
+                      "label": "ModelRunner.call",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "Scheduler.postprocess",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "Sequence.is_finished",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If model_runner.call raises (CUDA OOM, IPC drop), the batch is left half-scheduled — no rollback is attempted.",
+                    "postprocess removes finished sequences from running via running.remove(seq) — O(n) but small n."
+                  ],
+                  "invariants": [
+                    "len(token_ids) == len(seqs) is assumed (per-sequence sample); not asserted in this file."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seqs",
+                    "list[Sequence]"
+                  ],
+                  [
+                    "is_prefill",
+                    "bool"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "outputs",
+                    "list[(seq_id, completion_token_ids)]"
+                  ],
+                  [
+                    "num_tokens",
+                    "int (signed)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "running",
+                    "op": "may remove finished seqs (inside postprocess)",
+                    "kind": "rw"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "B3",
+            "to": "B4",
+            "label": "CALL step()",
+            "style": "solid",
+            "color": null
+          },
+          {
+            "from": "B2",
+            "to": "B3",
+            "label": "loop begins",
+            "style": "dashed",
+            "color": null
+          }
+        ],
+        "data_structures": [
+          {
+            "id": "waiting",
+            "name": "scheduler.waiting",
+            "type": "deque[Sequence]",
+            "role": "FIFO of unstarted (and preempted) requests; the pump never touches it directly — only through add_request and schedule.",
+            "shape": {
+              "kind": "deque",
+              "item_type": "Sequence",
+              "slots": 6
+            },
+            "ops_r": [
+              "len (via is_finished)"
+            ],
+            "ops_w": [
+              "append (via add_request)"
+            ]
+          },
+          {
+            "id": "running",
+            "name": "scheduler.running",
+            "type": "deque[Sequence]",
+            "role": "FIFO of sequences that have completed prefill and are now decoding; surfaced only via is_finished from this storyline.",
+            "shape": {
+              "kind": "deque",
+              "item_type": "Sequence",
+              "slots": 6
+            },
+            "ops_r": [
+              "len (via is_finished)"
+            ],
+            "ops_w": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "S2",
+      "title": "Schedule prefill: token-budgeted greedy admission with prefix cache",
+      "kind": "core_flow",
+      "depth": "full",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 3,
+        "entry_point": 2,
+        "novelty": 3,
+        "total": 11,
+        "rationale": "conceptual_weight=3 (chunked-prefill carve-out + prefix-cache reuse in one loop) and novelty=3 (the secret sauce of paged attention reuse); centrality=3 because every admitted sequence passes through this triple."
+      },
+      "summary": "Scheduler.schedule's prefill loop drains scheduler.waiting in FIFO order under two budgets (max_num_seqs, max_num_batched_tokens), consulting BlockManager.can_allocate to estimate prefix-cache hits and calling BlockManager.allocate to wire up block tables that may share blocks across sequences via ref_count.",
+      "files_touched": [
+        "nanovllm/engine/scheduler.py",
+        "nanovllm/engine/block_manager.py"
+      ],
+      "mental_model_anchor": "Picture three actors at a counter. The scheduler is a greedy doorman that peeks at the front of the waiting queue and, for each candidate, checks two budgets (slot count, token count) before admitting. The block manager is the coatroom: can_allocate does a dry-run of the prefix-cache lookup and tells the doorman both 'I have room' (return ≥ 0) or 'I don't' (-1), and how many blocks the candidate can re-use from prior coats already hanging. allocate then actually hangs the new coat, sharing hangers (incrementing ref_count) where it can. The chunked-prefill carve-out is one subtle rule: only the very first candidate is allowed to be split across ticks; everyone else must fit whole or wait.",
+      "purpose": {
+        "stated": "Comment on line 42 calls out 'only allow chunked prefill for the first seq' — the single in-source explanation of the carve-out.",
+        "evident": "Function returns (batch, is_prefill); prefill takes priority over decode and the loop is a strict FIFO drain with two budget guards and prefix-cache reuse inlined.",
+        "discrepancy": null
+      },
+      "architectural_context": {
+        "system_role": "Inner control plane — converts an unbounded queue of pending requests into a concrete batch ready for GPU execution.",
+        "involved_modules": [
+          {
+            "module": "Scheduler",
+            "role_in_storyline": "Owns waiting/running and the prefill policy."
+          },
+          {
+            "module": "BlockManager",
+            "role_in_storyline": "Provides can_allocate / allocate primitives and owns the block pool + prefix cache."
+          },
+          {
+            "module": "Sequence",
+            "role_in_storyline": "Mutated in place: block_table is populated, num_scheduled_tokens set, status promoted."
+          }
+        ],
+        "data_flow": "waiting[0] (peek) → can_allocate(seq) → (-1 break | num_cached_blocks) → chunked-prefill guard → allocate(seq, num_cached_blocks) → seq.num_scheduled_tokens set → (whole fit? promote to running : leave at head of waiting) → next iteration"
+      },
+      "change_overview": "The prefill loop is the heart of admission. Each iteration peeks at waiting[0] without popping, because a partially-fitted sequence must remain at the queue head for the next tick (chunked prefill). For a fresh sequence (empty block_table) the loop dry-runs can_allocate, which walks every-block-but-the-last of the prompt, recomputes the chained prefix hash, and looks each hash up in hash_to_block_id; a contiguous run of hits from the start tells the scheduler how many blocks can be skipped at allocation time. If can_allocate returns -1 the pool is full and the loop breaks. Otherwise the scheduler subtracts cached tokens from the work to do, applies the chunked-prefill carve-out (only the first-in-batch sequence may be split — subsequent sequences must fit whole or wait), commits the actual block table via allocate, sets num_scheduled_tokens, and either promotes the sequence to running (whole fit) or leaves it at the head of waiting (partial fit). allocate's two halves matter: the cached prefix gets re-used by bumping ref_count on already-used blocks (or rescuing a still-free block before reset would evict it), and the remaining blocks come from free_block_ids.",
+      "diagram": {
+        "file_badge": "scheduler.py + block_manager.py",
+        "subtitle": "one loop, two helpers, one prefix cache",
+        "phases": [
+          {
+            "id": "setup",
+            "label": "Setup",
+            "color": "setup"
+          },
+          {
+            "id": "guard",
+            "label": "Budget guard",
+            "color": "guard"
+          },
+          {
+            "id": "main",
+            "label": "Main",
+            "color": "main"
+          },
+          {
+            "id": "handoff",
+            "label": "Handoff",
+            "color": "handoff"
+          },
+          {
+            "id": "emit",
+            "label": "Emit",
+            "color": "emit"
+          }
+        ],
+        "cols": [
+          {
+            "id": "col-schedule",
+            "function": "Scheduler.schedule",
+            "label": "schedule (prefill branch)",
+            "description": "Greedy FIFO drain of the waiting deque under two budgets: at most max_num_seqs sequences in the batch and at most max_num_batched_tokens prompt tokens total. Returns as soon as a non-empty prefill batch is built (decode is the fallback when no prefill can be scheduled — out of scope here).",
+            "blocks": [
+              {
+                "id": "B1",
+                "phase": "setup",
+                "title": "INIT BATCH",
+                "line_range": "L26–27",
+                "one_liner": "Initialize the empty batch accumulator and the running token-count for budget arithmetic.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 25,
+                  "context_end_line": 29,
+                  "lines": [
+                    {
+                      "line_num": 25,
+                      "content": "    def schedule(self) -> tuple[list[Sequence], bool]:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 26,
+                      "content": "        scheduled_seqs = []",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 27,
+                      "content": "        num_batched_tokens = 0",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 28,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 29,
+                      "content": "        # prefill",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Allocates the per-call accumulator list and zeroes the running prompt-token total.",
+                  "why_its_here": "Both are recomputed every call — the scheduler is stateless across calls except for waiting/running and the block manager.",
+                  "touches": [],
+                  "failure_mode": [
+                    "No failure mode."
+                  ]
+                },
+                "inputs": [],
+                "outputs": [
+                  [
+                    "scheduled_seqs",
+                    "list[Sequence] (empty)"
+                  ],
+                  [
+                    "num_batched_tokens",
+                    "int (0)"
+                  ]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B2",
+                "phase": "guard",
+                "title": "PEEK + BUDGET CHECK",
+                "line_range": "L30–34",
+                "one_liner": "Loop while there is a waiting candidate and batch slots remain; peek (do not pop) at waiting[0] and break if the token budget is exhausted.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 29,
+                  "context_end_line": 36,
+                  "lines": [
+                    {
+                      "line_num": 29,
+                      "content": "        # prefill",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 30,
+                      "content": "        while self.waiting and len(scheduled_seqs) < self.max_num_seqs:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 31,
+                      "content": "            seq = self.waiting[0]",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 32,
+                      "content": "            remaining = self.max_num_batched_tokens - num_batched_tokens",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 33,
+                      "content": "            if remaining == 0:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 34,
+                      "content": "                break",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 35,
+                      "content": "            if not seq.block_table:",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Bounds the loop by both seq count and the existence of waiting candidates, peeks (waiting[0], not popleft) so a partially-fitted sequence can stay at the head, and short-circuits once the token budget is fully spent.",
+                  "why_its_here": "Peek-without-pop is what enables chunked prefill — the same sequence will be the head again next tick if it was only partly scheduled this tick. The remaining==0 break is a fast exit when the previous iteration filled the budget exactly.",
+                  "touches": [
+                    {
+                      "label": "scheduler.waiting",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "max_num_seqs",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "max_num_batched_tokens",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "No failure mode; both budgets are configured at construction and assumed positive."
+                  ],
+                  "invariants": [
+                    "waiting[0] is never mutated by this block — only inspected."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "scheduler.waiting",
+                    "deque[Sequence]"
+                  ],
+                  [
+                    "num_batched_tokens",
+                    "int"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "seq",
+                    "Sequence (head of waiting)"
+                  ],
+                  [
+                    "remaining",
+                    "int (≥ 0)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "waiting",
+                    "op": "peek[0]",
+                    "kind": "read"
+                  }
+                ]
+              },
+              {
+                "id": "B3",
+                "phase": "main",
+                "title": "PROBE CACHE OR RESUME",
+                "line_range": "L35–41",
+                "one_liner": "For a fresh sequence, dry-run can_allocate to learn cache hits and break on OOM; for a resumed (chunked) sequence, derive remaining work from existing num_cached_tokens.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 34,
+                  "context_end_line": 43,
+                  "lines": [
+                    {
+                      "line_num": 34,
+                      "content": "                break",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 35,
+                      "content": "            if not seq.block_table:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 36,
+                      "content": "                num_cached_blocks = self.block_manager.can_allocate(seq)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 37,
+                      "content": "                if num_cached_blocks == -1:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 38,
+                      "content": "                    break",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 39,
+                      "content": "                num_tokens = seq.num_tokens - num_cached_blocks * self.block_size",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 40,
+                      "content": "            else:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 41,
+                      "content": "                num_tokens = seq.num_tokens - seq.num_cached_tokens",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Branches on whether this is the sequence's first prefill tick. Fresh sequences (empty block_table) ask the block manager how many leading blocks are already cached (and whether the pool can fit the rest); a returned -1 means the pool is out of room and the loop must stop. Resumed sequences already know num_cached_tokens from the previous tick.",
+                  "why_its_here": "Splitting the two paths keeps allocate idempotent w.r.t. partial sequences — the actual allocation (block table population) happens exactly once per sequence, on the first tick. Subsequent ticks just need to know how much work is left, which is a simple subtraction.",
+                  "touches": [
+                    {
+                      "label": "BlockManager.can_allocate",
+                      "kind": "function",
+                      "block": "B9"
+                    },
+                    {
+                      "label": "Sequence.block_table",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "Sequence.num_cached_tokens",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "OOM (can_allocate == -1) breaks the loop without scheduling this seq; on the next tick the scheduler will re-probe (possibly after decode evictions free blocks).",
+                    "No retry / shuffle: subsequent waiting entries are not given a chance even if they would fit, because FIFO ordering is preserved."
+                  ],
+                  "invariants": [
+                    "num_tokens after this block == remaining prompt tokens that still need to be prefilled for seq."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seq",
+                    "Sequence"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "num_cached_blocks",
+                    "int | (only set on fresh path)"
+                  ],
+                  [
+                    "num_tokens",
+                    "int (work remaining for seq)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "hash_to_block_id",
+                    "op": "probe (inside can_allocate)",
+                    "kind": "read"
+                  },
+                  {
+                    "ds_id": "block_manager",
+                    "op": "scan free_block_ids capacity",
+                    "kind": "read"
+                  }
+                ]
+              },
+              {
+                "id": "B4",
+                "phase": "guard",
+                "title": "CHUNKED-PREFILL CARVE-OUT",
+                "line_range": "L42–43",
+                "one_liner": "If the remaining budget cannot fit this sequence whole and the batch already contains at least one sequence, stop — only the head-of-batch is allowed to be split.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 41,
+                  "context_end_line": 45,
+                  "lines": [
+                    {
+                      "line_num": 41,
+                      "content": "                num_tokens = seq.num_tokens - seq.num_cached_tokens",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 42,
+                      "content": "            if remaining < num_tokens and scheduled_seqs:  # only allow chunked prefill for the first seq",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 43,
+                      "content": "                break",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 44,
+                      "content": "            if not seq.block_table:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 45,
+                      "content": "                self.block_manager.allocate(seq, num_cached_blocks)",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Compares the budget remaining to this sequence's outstanding token count. If the sequence doesn't fit whole AND we've already admitted at least one earlier sequence, the loop breaks instead of scheduling a chunk.",
+                  "why_its_here": "Chunked prefill is allowed only for the first-in-batch sequence so the model can run a single contiguous attention kernel for that chunk plus full prefills for the remaining sequences. Allowing arbitrary chunking would multiply per-batch attention launches and complicate the kernel boundary. The 'and scheduled_seqs' clause is exactly what makes the head-of-batch the carve-out exception.",
+                  "touches": [
+                    {
+                      "label": "remaining",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "num_tokens",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If a single sequence's prompt is larger than max_num_batched_tokens, this guard is bypassed (scheduled_seqs is empty) and the sequence proceeds to be chunked — exactly the desired behavior, but it means the per-tick budget is a soft cap for the first seq."
+                  ],
+                  "invariants": [
+                    "After this block, either we break out of the loop or remaining >= num_tokens OR scheduled_seqs is empty (chunked-head case)."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "remaining",
+                    "int"
+                  ],
+                  [
+                    "num_tokens",
+                    "int"
+                  ],
+                  [
+                    "scheduled_seqs",
+                    "list[Sequence]"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "control",
+                    "continue or break"
+                  ]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B5",
+                "phase": "handoff",
+                "title": "ALLOCATE BLOCKS",
+                "line_range": "L44–45",
+                "one_liner": "On the first tick for this sequence, materialize the block table by calling block_manager.allocate, reusing the num_cached_blocks count from the earlier probe.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 43,
+                  "context_end_line": 47,
+                  "lines": [
+                    {
+                      "line_num": 43,
+                      "content": "                break",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 44,
+                      "content": "            if not seq.block_table:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 45,
+                      "content": "                self.block_manager.allocate(seq, num_cached_blocks)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 46,
+                      "content": "            seq.num_scheduled_tokens = min(num_tokens, remaining)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 47,
+                      "content": "            num_batched_tokens += seq.num_scheduled_tokens",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Calls allocate which appends num_cached_blocks reused block ids (bumping their ref_count) followed by freshly-popped block ids for the rest of the prompt's blocks, and sets num_cached_tokens on the sequence so subsequent ticks know where to start.",
+                  "why_its_here": "Allocation is split from can_allocate so the scheduler can break safely on OOM (no allocation rollback needed). Skipping it on resumed ticks keeps the cost of chunked prefill at O(1) bookkeeping per tick.",
+                  "touches": [
+                    {
+                      "label": "BlockManager.allocate",
+                      "kind": "function",
+                      "block": "B11"
+                    },
+                    {
+                      "label": "Sequence.block_table",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "allocate asserts seq.block_table is empty (re-entry safety) — would AssertionError if the if-guard above were ever removed.",
+                    "Pool is assumed to still have room as observed by can_allocate; nothing else mutates the pool between probe and allocate within a single schedule() call, so the dry-run remains accurate."
+                  ],
+                  "invariants": [
+                    "After this block, len(seq.block_table) == seq.num_blocks."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seq",
+                    "Sequence"
+                  ],
+                  [
+                    "num_cached_blocks",
+                    "int (≥ 0)"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "Δ seq.block_table",
+                    "filled to num_blocks entries"
+                  ],
+                  [
+                    "Δ seq.num_cached_tokens",
+                    "set to num_cached_blocks * block_size"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "block_manager",
+                    "op": "allocate(seq, num_cached_blocks)",
+                    "kind": "rw"
+                  },
+                  {
+                    "ds_id": "hash_to_block_id",
+                    "op": "lookup cached blocks",
+                    "kind": "read"
+                  }
+                ]
+              },
+              {
+                "id": "B6",
+                "phase": "main",
+                "title": "COMMIT TOKEN COUNT",
+                "line_range": "L46–47",
+                "one_liner": "Record how many tokens this sequence will prefill on this tick (whole or chunked) and add to the running batch total.",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 45,
+                  "context_end_line": 49,
+                  "lines": [
+                    {
+                      "line_num": 45,
+                      "content": "                self.block_manager.allocate(seq, num_cached_blocks)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 46,
+                      "content": "            seq.num_scheduled_tokens = min(num_tokens, remaining)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 47,
+                      "content": "            num_batched_tokens += seq.num_scheduled_tokens",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 48,
+                      "content": "            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "min(num_tokens, remaining) handles the chunked case for the head-of-batch sequence: when the prompt is bigger than the budget remaining, only the chunk that fits is scheduled. num_batched_tokens is updated to reflect what the GPU will actually consume this tick.",
+                  "why_its_here": "num_scheduled_tokens is read by the model runner to slice the prompt for this tick and by the next iteration's guard (`remaining`) to determine if more sequences can fit. Without this commit, partial-prefill bookkeeping would be lost between ticks.",
+                  "touches": [
+                    {
+                      "label": "Sequence.num_scheduled_tokens",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "num_batched_tokens",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "No failure mode."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "num_tokens",
+                    "int"
+                  ],
+                  [
+                    "remaining",
+                    "int"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "Δ seq.num_scheduled_tokens",
+                    "set to min(num_tokens, remaining)"
+                  ],
+                  [
+                    "Δ num_batched_tokens",
+                    "↑ by seq.num_scheduled_tokens"
+                  ]
+                ],
+                "state_effects": []
+              },
+              {
+                "id": "B7",
+                "phase": "main",
+                "title": "PROMOTE OR LEAVE AT HEAD",
+                "line_range": "L48–53",
+                "one_liner": "If this tick finished the prefill, pop from waiting and push to running with RUNNING status; either way, append the seq to the batch (chunked head still ships its chunk this tick).",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 47,
+                  "context_end_line": 54,
+                  "lines": [
+                    {
+                      "line_num": 47,
+                      "content": "            num_batched_tokens += seq.num_scheduled_tokens",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 48,
+                      "content": "            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 49,
+                      "content": "                seq.status = SequenceStatus.RUNNING",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 50,
+                      "content": "                self.waiting.popleft()",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 51,
+                      "content": "                self.running.append(seq)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 52,
+                      "content": "            scheduled_seqs.append(seq)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 53,
+                      "content": "",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Tests whether the cumulative scheduled tokens cover the full prompt. If yes, flips the sequence to RUNNING and moves it from waiting to running (popleft + append). Line 52 is at the loop's indent level (not inside the if), so the seq is always added to scheduled_seqs — chunked heads ship their chunk on the same tick.",
+                  "why_its_here": "Promoting only when the whole prompt has been prefilled keeps the running deque semantically meaningful (everything in it is decode-eligible). The chunked-head case relies on waiting[0] staying put so the next schedule() finds it again; it remains the head because popleft is guarded by the whole-fit predicate.",
+                  "touches": [
+                    {
+                      "label": "scheduler.waiting",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "scheduler.running",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "SequenceStatus.RUNNING",
+                      "kind": "type",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "If the prompt has zero tokens, num_tokens is 0 and the equality holds trivially — but empty prompts are rejected upstream by Sequence.__init__."
+                  ],
+                  "invariants": [
+                    "Whole-fit case: seq leaves waiting, joins running with status RUNNING, is added to the batch.",
+                    "Chunked-head case: seq stays at waiting[0] with status WAITING, is added to the batch with num_scheduled_tokens < (num_tokens - num_cached_tokens).",
+                    "scheduled_seqs.append(seq) runs unconditionally on every successful loop iteration."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seq",
+                    "Sequence"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "Δ scheduler.waiting",
+                    "↓ by 1 (whole-fit case)"
+                  ],
+                  [
+                    "Δ scheduler.running",
+                    "↑ by 1 (whole-fit case)"
+                  ],
+                  [
+                    "Δ seq.status",
+                    "WAITING → RUNNING (whole-fit case)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "waiting",
+                    "op": "popleft (whole-fit)",
+                    "kind": "write"
+                  },
+                  {
+                    "ds_id": "running",
+                    "op": "append (whole-fit)",
+                    "kind": "write"
+                  }
+                ]
+              },
+              {
+                "id": "B8",
+                "phase": "emit",
+                "title": "RETURN PREFILL BATCH",
+                "line_range": "L54–55",
+                "one_liner": "If the prefill loop produced any sequences, return the batch with is_prefill=True; otherwise fall through to the decode branch (out of scope here).",
+                "code_view": {
+                  "file": "nanovllm/engine/scheduler.py",
+                  "language": "python",
+                  "context_start_line": 53,
+                  "context_end_line": 57,
+                  "lines": [
+                    {
+                      "line_num": 53,
+                      "content": "            scheduled_seqs.append(seq)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 54,
+                      "content": "        if scheduled_seqs:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 55,
+                      "content": "            return scheduled_seqs, True",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 56,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 57,
+                      "content": "        # decode",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Returns the (batch, True) tuple if any sequences were admitted. Empty batch means there was no prefill work admissible this tick (pool full or budgets exhausted with no head-of-batch resumable), so control falls through to the decode branch.",
+                  "why_its_here": "Prefill is prioritized over decode in nano-vllm; this early-return is the simple expression of that policy. By contrast, vLLM proper has prompt vs decode interleaving rules — nano-vllm strips this down to 'prefill first, decode only if no prefill was possible'.",
+                  "touches": [
+                    {
+                      "label": "scheduled_seqs",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "No failure mode."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "scheduled_seqs",
+                    "list[Sequence]"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "return",
+                    "(list[Sequence], True)"
+                  ]
+                ],
+                "state_effects": []
+              }
+            ]
+          },
+          {
+            "id": "col-can-allocate",
+            "function": "BlockManager.can_allocate",
+            "label": "can_allocate (dry-run)",
+            "description": "A pure inspection of the prefix cache and free pool. Walks the prompt's blocks (excluding the last partial block) in order, recomputes the chained xxhash, and counts how many leading blocks the cache already has. Returns -1 if the free pool cannot fit the (un-cached) remainder, otherwise the number of cached blocks the caller can reuse.",
+            "blocks": [
+              {
+                "id": "B9",
+                "phase": "main",
+                "title": "SCAN PREFIX HITS",
+                "line_range": "L58–70",
+                "one_liner": "Walk blocks 0..num_blocks-1 (excluding the last partial), recompute the chained prefix hash, and count contiguous cache hits — stopping at the first miss.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 57,
+                  "context_end_line": 72,
+                  "lines": [
+                    {
+                      "line_num": 57,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 58,
+                      "content": "    def can_allocate(self, seq: Sequence) -> int:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 59,
+                      "content": "        h = -1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 60,
+                      "content": "        num_cached_blocks = 0",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 61,
+                      "content": "        num_new_blocks = seq.num_blocks",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 62,
+                      "content": "        for i in range(seq.num_blocks - 1):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 63,
+                      "content": "            token_ids = seq.block(i)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 64,
+                      "content": "            h = self.compute_hash(token_ids, h)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 65,
+                      "content": "            block_id = self.hash_to_block_id.get(h, -1)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 66,
+                      "content": "            if block_id == -1 or self.blocks[block_id].token_ids != token_ids:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 67,
+                      "content": "                break",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 68,
+                      "content": "            num_cached_blocks += 1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 69,
+                      "content": "            if block_id in self.used_block_ids:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 70,
+                      "content": "                num_new_blocks -= 1",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Replays the prompt's chained block-hash walk against hash_to_block_id, breaking on the first miss or on a hash collision (the explicit token_ids equality check). For each hit, increments num_cached_blocks; if that hit is on a block already in use (still pinned by another sequence), num_new_blocks is decremented because re-using a still-used block costs zero pool slots.",
+                  "why_its_here": "Doing this as a read-only dry-run lets the scheduler decide whether to admit the sequence at all (returning -1 means the pool cannot fit it). The seq.num_blocks - 1 bound skips the final block because it is partial (may not be full block_size tokens) and so cannot be canonically hashed for the cache yet.",
+                  "touches": [
+                    {
+                      "label": "hash_to_block_id",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "used_block_ids",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "compute_hash",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "Sequence.block",
+                      "kind": "function",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "Hash collision is defended by the explicit token_ids equality check — a collision causes a treat-as-miss break, not silent corruption.",
+                    "Iteration bound is num_blocks - 1; if num_blocks == 0 (empty prompt) the loop body never runs and num_cached_blocks stays 0. (Empty prompts are blocked earlier by Sequence.__init__ which dereferences token_ids[-1].)"
+                  ],
+                  "invariants": [
+                    "After the loop, num_cached_blocks <= num_blocks - 1 (the last block is never counted as a hit).",
+                    "h ends equal to the chained hash of the first num_cached_blocks blocks — but it is discarded because allocate recomputes it."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seq",
+                    "Sequence"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "num_cached_blocks",
+                    "int (≥ 0)"
+                  ],
+                  [
+                    "num_new_blocks",
+                    "int (= num_blocks - shared_already_used)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "hash_to_block_id",
+                    "op": "get(h)",
+                    "kind": "read"
+                  },
+                  {
+                    "ds_id": "block_manager",
+                    "op": "blocks[id].token_ids equality",
+                    "kind": "read"
+                  }
+                ]
+              },
+              {
+                "id": "B10",
+                "phase": "emit",
+                "title": "CAPACITY GATE",
+                "line_range": "L71–73",
+                "one_liner": "If the free pool can't cover the new blocks needed return -1 (caller breaks); otherwise return the cached-blocks count for allocate to consume.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 70,
+                  "context_end_line": 74,
+                  "lines": [
+                    {
+                      "line_num": 70,
+                      "content": "                num_new_blocks -= 1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 71,
+                      "content": "        if len(self.free_block_ids) < num_new_blocks:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 72,
+                      "content": "            return -1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 73,
+                      "content": "        return num_cached_blocks",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Compares free pool size against the number of blocks that will need to be popped from free_block_ids (i.e. the total prompt blocks minus those that can be re-shared from still-used blocks). Returns -1 on insufficient capacity, else the count of cached prefix blocks the scheduler can reuse.",
+                  "why_its_here": "Returning the cache-hit count from the same dry-run avoids a second pass in allocate. The -1 sentinel is the only fail signal — there is no exception path for OOM, the scheduler simply breaks.",
+                  "touches": [
+                    {
+                      "label": "free_block_ids",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "Returns -1 silently on OOM; caller responsibility to handle. Not racy because the pool is single-threaded under the scheduler."
+                  ],
+                  "invariants": [
+                    "If return >= 0, allocate will succeed (no further pool re-check)."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "free_block_ids",
+                    "deque[int]"
+                  ],
+                  [
+                    "num_new_blocks",
+                    "int"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "return",
+                    "int (-1 on OOM, else num_cached_blocks)"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "block_manager",
+                    "op": "len(free_block_ids)",
+                    "kind": "read"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "col-allocate",
+            "function": "BlockManager.allocate",
+            "label": "allocate (commit)",
+            "description": "Populates seq.block_table to length seq.num_blocks. The first num_cached_blocks entries are reused from the prefix cache (either by bumping ref_count on a still-used block or by rescuing a still-free block from the free pool before its slot would be reset); the remaining entries are freshly popped from free_block_ids.",
+            "blocks": [
+              {
+                "id": "B11",
+                "phase": "main",
+                "title": "REUSE CACHED PREFIX",
+                "line_range": "L75–89",
+                "one_liner": "Re-walk the prefix hash chain for num_cached_blocks blocks and append each cached block_id to seq.block_table, bumping ref_count or rescuing-from-free as appropriate.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 74,
+                  "context_end_line": 90,
+                  "lines": [
+                    {
+                      "line_num": 74,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 75,
+                      "content": "    def allocate(self, seq: Sequence, num_cached_blocks: int):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 76,
+                      "content": "        assert not seq.block_table",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 77,
+                      "content": "        h = -1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 78,
+                      "content": "        for i in range(num_cached_blocks):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 79,
+                      "content": "            token_ids = seq.block(i)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 80,
+                      "content": "            h = self.compute_hash(token_ids, h)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 81,
+                      "content": "            block_id = self.hash_to_block_id[h]",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 82,
+                      "content": "            block = self.blocks[block_id]",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 83,
+                      "content": "            if block_id in self.used_block_ids:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 84,
+                      "content": "                block.ref_count += 1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 85,
+                      "content": "            else:",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 86,
+                      "content": "                block.ref_count = 1",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 87,
+                      "content": "                self.free_block_ids.remove(block_id)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 88,
+                      "content": "                self.used_block_ids.add(block_id)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 89,
+                      "content": "            seq.block_table.append(block_id)",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "For each cached prefix block, recomputes the chained hash, looks up its block_id, and either (a) bumps ref_count if the block is still pinned by another seq, or (b) rescues the block from free_block_ids (it was returned to the free pool but not yet evicted) by removing it from the free deque, marking it used, and setting ref_count=1. Either way the block_id is appended to seq.block_table.",
+                  "why_its_here": "The rescue branch is the key trick: nano-vllm doesn't proactively evict cached-but-free blocks. They linger in free_block_ids with valid hash metadata, so as long as no other sequence grabs them via _allocate_block (which resets them), they can be reclaimed by a later prefix-cache hit. This is what makes the prefix cache useful across decode/finish cycles.",
+                  "touches": [
+                    {
+                      "label": "used_block_ids",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "free_block_ids",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "hash_to_block_id",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "Block.ref_count",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "The assert on line 76 enforces that allocate is called at most once per Sequence; chunked-prefill correctness depends on the scheduler's `if not seq.block_table` guard.",
+                    "free_block_ids.remove is O(n) — only called on the (rare) rescue branch, but worth noting for very large pools."
+                  ],
+                  "invariants": [
+                    "After the loop, len(seq.block_table) == num_cached_blocks and every appended block has ref_count >= 1."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seq",
+                    "Sequence"
+                  ],
+                  [
+                    "num_cached_blocks",
+                    "int (from can_allocate)"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "Δ seq.block_table",
+                    "↑ by num_cached_blocks ids"
+                  ],
+                  [
+                    "Δ used_block_ids",
+                    "may gain rescued ids"
+                  ],
+                  [
+                    "Δ free_block_ids",
+                    "↓ by num_rescued"
+                  ],
+                  [
+                    "Δ Block.ref_count",
+                    "↑ on each reused block"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "hash_to_block_id",
+                    "op": "lookup",
+                    "kind": "read"
+                  },
+                  {
+                    "ds_id": "block_manager",
+                    "op": "rescue or bump-ref on cached blocks",
+                    "kind": "rw"
+                  }
+                ]
+              },
+              {
+                "id": "B12",
+                "phase": "main",
+                "title": "ALLOC FRESH BLOCKS",
+                "line_range": "L90–92",
+                "one_liner": "Pop fresh block ids from free_block_ids for the remainder of the prompt's blocks and record num_cached_tokens on the sequence.",
+                "code_view": {
+                  "file": "nanovllm/engine/block_manager.py",
+                  "language": "python",
+                  "context_start_line": 89,
+                  "context_end_line": 93,
+                  "lines": [
+                    {
+                      "line_num": 89,
+                      "content": "            seq.block_table.append(block_id)",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 90,
+                      "content": "        for i in range(num_cached_blocks, seq.num_blocks):",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 91,
+                      "content": "            seq.block_table.append(self._allocate_block())",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 92,
+                      "content": "        seq.num_cached_tokens = num_cached_blocks * self.block_size",
+                      "change": "unchanged"
+                    }
+                  ]
+                },
+                "right_panel": {
+                  "what_it_does": "Fills the remaining block_table slots with freshly popped block ids via _allocate_block (which popleft's from free, resets the block, evicts any stale hash mapping, and marks used). Then records the cached-token count on the sequence so subsequent chunked-prefill ticks know where to resume.",
+                  "why_its_here": "Separating the cached-prefix path from the fresh-block path keeps each tight: cached blocks need hash recomputation and ref_count bumping; fresh blocks just need to be popped, reset, and indexed. num_cached_tokens is the durable bridge between this allocation and the scheduler's resumption logic on the next tick.",
+                  "touches": [
+                    {
+                      "label": "_allocate_block",
+                      "kind": "function",
+                      "block": null
+                    },
+                    {
+                      "label": "Sequence.num_cached_tokens",
+                      "kind": "variable",
+                      "block": null
+                    }
+                  ],
+                  "failure_mode": [
+                    "_allocate_block asserts the popped block has ref_count == 0 — invariant maintained by deallocate which only returns blocks to free when ref_count hits 0.",
+                    "If free_block_ids is empty here the popleft would raise IndexError, but can_allocate's capacity gate makes this unreachable."
+                  ],
+                  "invariants": [
+                    "After this block, len(seq.block_table) == seq.num_blocks exactly.",
+                    "seq.num_cached_tokens is a multiple of block_size."
+                  ]
+                },
+                "inputs": [
+                  [
+                    "seq",
+                    "Sequence"
+                  ],
+                  [
+                    "num_cached_blocks",
+                    "int"
+                  ]
+                ],
+                "outputs": [
+                  [
+                    "Δ seq.block_table",
+                    "↑ to num_blocks total ids"
+                  ],
+                  [
+                    "Δ free_block_ids",
+                    "↓ by (num_blocks - num_cached_blocks - num_rescued)"
+                  ],
+                  [
+                    "Δ used_block_ids",
+                    "↑ by (num_blocks - num_cached_blocks - num_rescued)"
+                  ],
+                  [
+                    "Δ seq.num_cached_tokens",
+                    "= num_cached_blocks * block_size"
+                  ]
+                ],
+                "state_effects": [
+                  {
+                    "ds_id": "block_manager",
+                    "op": "_allocate_block (popleft free_block_ids ×N)",
+                    "kind": "rw"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "from": "B3",
+            "to": "B9",
+            "label": "CALL can_allocate",
+            "style": "solid",
+            "color": null
+          },
+          {
+            "from": "B5",
+            "to": "B11",
+            "label": "CALL allocate",
+            "style": "solid",
+            "color": null
+          },
+          {
+            "from": "B10",
+            "to": "B3",
+            "label": "return (-1 | num_cached)",
+            "style": "dashed",
+            "color": null
+          },
+          {
+            "from": "B12",
+            "to": "B6",
+            "label": "return",
+            "style": "dashed",
+            "color": null
+          }
+        ],
+        "data_structures": [
+          {
+            "id": "waiting",
+            "name": "scheduler.waiting",
+            "type": "deque[Sequence]",
+            "role": "FIFO of unstarted (and chunked-head) requests. Peek-only inside the loop; popleft only on whole-fit promotion.",
+            "shape": {
+              "kind": "deque",
+              "item_type": "Sequence",
+              "slots": 6
+            },
+            "ops_r": [
+              "peek[0]",
+              "len"
+            ],
+            "ops_w": [
+              "popleft (on whole-fit)"
+            ]
+          },
+          {
+            "id": "running",
+            "name": "scheduler.running",
+            "type": "deque[Sequence]",
+            "role": "FIFO of decode-eligible sequences (fully prefilled). The prefill loop only appends to it on promotion; the decode branch consumes it.",
+            "shape": {
+              "kind": "deque",
+              "item_type": "Sequence",
+              "slots": 6
+            },
+            "ops_r": [],
+            "ops_w": [
+              "append (on whole-fit)"
+            ]
+          },
+          {
+            "id": "block_manager",
+            "name": "block_manager",
+            "type": "BlockManager",
+            "role": "Paged KV-cache block pool plus prefix cache. Owns the only mutable allocation state in the engine.",
+            "shape": {
+              "kind": "composite",
+              "pieces": [
+                {
+                  "name": "blocks",
+                  "kind": "list",
+                  "item_type": "Block",
+                  "capacity": 16,
+                  "access": "random access by block_id"
+                },
+                {
+                  "name": "free_block_ids",
+                  "kind": "deque",
+                  "item_type": "int",
+                  "slots": 8
+                },
+                {
+                  "name": "used_block_ids",
+                  "kind": "set",
+                  "item_type": "int"
+                },
+                {
+                  "name": "block_size",
+                  "kind": "scalar",
+                  "value_type": "int"
+                }
+              ]
+            },
+            "ops_r": [
+              "len(free_block_ids)",
+              "blocks[id].token_ids",
+              "id in used_block_ids"
+            ],
+            "ops_w": [
+              "popleft free_block_ids",
+              "free_block_ids.remove(id)",
+              "used_block_ids.add(id)",
+              "Block.reset / ref_count++"
+            ]
+          },
+          {
+            "id": "hash_to_block_id",
+            "name": "hash_to_block_id",
+            "type": "dict[int, int]",
+            "role": "The prefix cache itself — maps a chained xxhash of a block's token_ids (with predecessor hash as prefix) to the block_id holding those tokens. Lives on BlockManager but visualized separately because it is the entire point of the cache hit / rescue logic.",
+            "shape": {
+              "kind": "dict",
+              "key_label": "chained xxhash64",
+              "value_label": "block_id"
+            },
+            "ops_r": [
+              "get(h)",
+              "[h] (in allocate)"
+            ],
+            "ops_w": [
+              "del[h] (eviction in _allocate_block)",
+              "[h] = id (in postprocess.hash_blocks)"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "S3",
+      "title": "Decode, postprocess, and teardown (out of scope)",
+      "kind": "core_flow",
+      "depth": "summary",
+      "importance_scores": {
+        "centrality": 3,
+        "conceptual_weight": 2,
+        "entry_point": 1,
+        "novelty": 2,
+        "total": 8,
+        "rationale": "Acknowledged but deliberately excluded; full coverage would double the walkthrough length without changing the admission story."
+      },
+      "summary": "After prefill, the same engine pump keeps cranking: schedule()'s decode branch (lines 58–73) pops from running, calls block_manager.can_append / may_append to grow each sequence's last block by one slot when needed, and may preempt the tail of running back into waiting if the pool is full. Postprocess (scheduler.postprocess, lines 81–92) is run after every step — it calls block_manager.hash_blocks to register any newly-completed blocks into the prefix cache (so they can be reused by later sequences), appends the sampled token, and on EOS or max_tokens flips status to FINISHED and deallocates the sequence's blocks via block_manager.deallocate. Teardown happens at process exit via the atexit handler registered in LLMEngine.__init__, which sends 'exit' to the model runner and joins worker processes. None of this is needed to understand the admission + prefill story the previous two storylines tell.",
+      "files_touched": [
+        "nanovllm/engine/scheduler.py",
+        "nanovllm/engine/block_manager.py",
+        "nanovllm/engine/llm_engine.py"
+      ]
+    }
+  ]
+};
+
+  // ---------- State ----------
+  const STATE = {
+    activeStorylineId: null,
+    activeBlockId: null,
+  };
+
+  // ---------- Adapt v0.5-reading storyline → v4-mock-style view object ----------
+  // Each storyline.diagram has:
+  //   data_structures: [{id, name, type, role, schema_pieces?, ops_r?, ops_w?}]
+  //   cols:            [{id, function, label, description, blocks}]
+  //   edges:           [{from, to, label, style, color}]   (control flow, kept but not primary in this view)
+  // Each block additionally may carry (NEW for diagram view):
+  //   inputs:          [[key, type]]
+  //   outputs:         [[key, value]]
+  //   state_effects:   [{ds_id, op, kind: read|write|rw}]
+  //
+  // We derive: which DSes this storyline touches, the flat block sequence with col labels,
+  // and the connection list (block_id → ds_id).
+  function viewForStoryline(sl) {
+    const diag = sl.diagram || {};
+    const cols = diag.cols || [];
+    const blocksFlat = [];
+    cols.forEach(col => {
+      (col.blocks || []).forEach(b => blocksFlat.push({ ...b, _col: col }));
+    });
+    const touches = new Set();
+    blocksFlat.forEach(b => (b.state_effects || []).forEach(e => touches.add(e.ds_id)));
+    const connections = [];
+    blocksFlat.forEach(b => (b.state_effects || []).forEach(e => connections.push({
+      from: b.id, to: e.ds_id, kind: e.kind || 'rw', label: e.op || ''
+    })));
+    return {
+      id: sl.id,
+      title: sl.title,
+      source: (sl.files_touched || [])[0] || '',
+      summary: sl.summary || '',
+      placeholder: sl.depth === 'summary' || !sl.diagram,
+      touches,
+      data_structures: diag.data_structures || [],
+      cols,
+      blocks: blocksFlat,
+      connections,
+      defaultActive: blocksFlat[0]?.id || null,
+    };
+  }
+
+  // ---------- Tabs ----------
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    (WALKTHROUGH_DATA.storylines || []).forEach(sl => {
+      const t = document.createElement('div');
+      t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
+      t.innerHTML = '<span class="tab-num">' + esc(sl.id) + '</span><span class="tab-name">' + esc(sl.title) + '</span>';
+      t.onclick = () => setStoryline(sl.id);
+      root.appendChild(t);
+    });
+  }
+
+  // ---------- Data structures grid ----------
+  function renderDS(view) {
+    const grid = document.createElement('div');
+    grid.className = 'ds-grid';
+    view.data_structures.forEach((ds, i) => {
+      const touched = view.touches.has(ds.id);
+      const box = document.createElement('div');
+      // Use "pool" cls for any wide DS (every other slot if many); otherwise alternate waiting/running/cache
+      const cls = ds.cls || ['waiting', 'running', 'pool', 'cache'][i % 4];
+      box.className = 'ds-box ' + cls + (touched ? ' touched' : ' untouched');
+      box.id = 'ds-' + ds.id;
+      const opsR = (ds.ops_r || []).map(o => '<span class="op-chip r">' + esc(o) + '</span>').join('');
+      const opsW = (ds.ops_w || []).map(o => '<span class="op-chip w">' + esc(o) + '</span>').join('');
+      // Shape visual: prefer structured `shape` field over legacy schema_pieces
+      let shapeHtml;
+      if (ds.shape && typeof ds.shape === 'object') {
+        shapeHtml = renderShape(ds.shape);
+      } else if (ds.schema_pieces && ds.schema_pieces.length) {
+        shapeHtml = '<div class="ds-shape">' +
+          ds.schema_pieces.map(p => '<span class="schema-piece">' + esc(p) + '</span>').join('') +
+          '</div>';
+      } else {
+        shapeHtml = '<div class="ds-shape"><span class="placeholder">…</span></div>';
+      }
+      box.innerHTML =
+        '<div class="ds-head">' +
+          '<span class="ds-name">' + esc(ds.name) + '</span>' +
+          (ds.type ? '<span class="ds-type">: ' + esc(ds.type) + '</span>' : '') +
+          (ds.role ? '<span class="ds-role">' + esc(ds.role) + '</span>' : '') +
+        '</div>' +
+        shapeHtml +
+        ((opsR || opsW) ? '<div class="ds-ops">' + opsR + opsW + '</div>' : '');
+      grid.appendChild(box);
+    });
+    return grid;
+  }
+
+  // ---------- Logic blocks (grouped by col) ----------
+  function renderBlocksArea(view) {
+    const area = document.createElement('div');
+    area.style.display = 'flex';
+    area.style.flexDirection = 'column';
+    area.style.gap = '12px';
+
+    view.cols.forEach((col, ci) => {
+      const colHeader = document.createElement('div');
+      colHeader.style.cssText = 'font-family: ui-monospace, monospace; font-size: 11px; color: var(--fg-soft); padding: 4px 0; border-top: 1px dashed var(--border); margin-top: 8px;';
+      colHeader.innerHTML = '<span style="color: var(--tok-kw); font-weight: 600;">def</span> ' +
+        esc(col.function || col.label || col.id) +
+        ' <span style="color: var(--fg-faint); font-style: italic;">— ' + esc(col.description || '') + '</span>';
+      if (ci === 0) colHeader.style.borderTop = 'none';
+      area.appendChild(colHeader);
+
+      const row = document.createElement('div');
+      row.className = 'blocks-area';
+      (col.blocks || []).forEach((b, bi) => {
+        if (bi > 0) {
+          const arr = document.createElement('div');
+          arr.className = 'flow-arrow';
+          arr.textContent = '▶';
+          row.appendChild(arr);
+        }
+        row.appendChild(renderBlock(b, view));
+      });
+      area.appendChild(row);
+    });
+    return area;
+  }
+
+  function renderBlock(b, view) {
+    const blk = document.createElement('div');
+    blk.className = 'blk' + (STATE.activeBlockId === b.id ? ' active' : '');
+    blk.id = b.id;
+    const inputsHtml = (b.inputs || []).map(([k, v]) =>
+      '<span class="port-item"><span class="key">' + esc(k) + ':</span> <span class="type">' + esc(v) + '</span></span>').join('');
+    const outputsHtml = (b.outputs || []).map(([k, v]) =>
+      '<span class="port-item"><span class="key">' + esc(k) + ':</span> ' + esc(v) + '</span>').join('');
+    // The "code" is either an explicit block.code field OR the first ~6 lines of code_view.lines
+    let codeHtml = '';
+    if (b.code) {
+      codeHtml = b.code;  // pre-formatted HTML allowed
+    } else if (b.code_view && b.code_view.lines) {
+      const range = parseRange(b.line_range);
+      const inRange = (l) => !range || (l.line_num >= range[0] && l.line_num <= range[1]);
+      codeHtml = b.code_view.lines
+        .filter(inRange)
+        .slice(0, 8)
+        .map(l => highlight(l.content))
+        .join('\n');
+    }
+    blk.innerHTML =
+      '<div class="blk-head">' +
+        '<div class="blk-tag">' + esc(b.phase || '') + (b.line_range ? ' · ' + esc(b.line_range) : '') + '</div>' +
+        '<div class="blk-name">' + esc(b.title || b.name || b.id) + '</div>' +
+      '</div>' +
+      '<div class="blk-body">' +
+        (codeHtml ? '<pre class="code-block">' + codeHtml + '</pre>' : '') +
+        (b.one_liner ? '<div class="blk-says">' + esc(b.one_liner) + '</div>' : '') +
+        (inputsHtml ? '<div class="port-section in"><div class="port-label">▸ in</div>' + inputsHtml + '</div>' : '') +
+        (outputsHtml ? '<div class="port-section out"><div class="port-label">out ▸</div>' + outputsHtml + '</div>' : '') +
+        (b._col ? '<div class="blk-source">' + esc(b._col.function || b._col.id) + '</div>' : '') +
+      '</div>';
+    blk.onclick = () => { STATE.activeBlockId = b.id; renderCanvas(); renderSidePanel(); };
+    return blk;
+  }
+
+  // ---------- Canvas ----------
+  function renderCanvas() {
+    const inner = document.getElementById('canvas-inner');
+    inner.innerHTML = '';
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) { inner.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
+    const view = viewForStoryline(sl);
+
+    const banner = document.createElement('div');
+    banner.className = 'fn-banner b-' + sl.id;
+    banner.innerHTML =
+      '<div class="b-title">' + esc(sl.title) +
+      (view.source ? ' <span class="b-source">' + esc(view.source) + '</span>' : '') +
+      '</div>' +
+      '<div>' + esc(view.summary) + '</div>';
+    inner.appendChild(banner);
+
+    if (view.placeholder) {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.innerHTML = '<strong>' + esc(sl.title) + '</strong> — summary-only storyline.<br>' + esc(view.summary);
+      inner.appendChild(p);
+      return;
+    }
+
+    if (view.data_structures.length) inner.appendChild(renderDS(view));
+    inner.appendChild(renderBlocksArea(view));
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'arrows'); svg.id = 'arrows';
+    inner.appendChild(svg);
+    requestAnimationFrame(() => drawArrows(view));
+  }
+
+  function drawArrows(view) {
+    const svg = document.getElementById('arrows');
+    if (!svg) return;
+    const canvas = document.getElementById('canvas-inner');
+    const rect = canvas.getBoundingClientRect();
+    svg.setAttribute('viewBox', '0 0 ' + canvas.scrollWidth + ' ' + canvas.scrollHeight);
+    svg.setAttribute('width', canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+
+    const defs = '<defs>' +
+      '<marker id="m-read"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>' +
+      '<marker id="m-write" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a4332a" /></marker>' +
+      '<marker id="m-rw"    markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#8a5a14" /></marker>' +
+      '</defs>';
+    const parts = [];
+    view.connections.forEach(c => {
+      if (c.from !== STATE.activeBlockId) return;  // only draw arrows for active block
+      const fromEl = document.getElementById(c.from);
+      const toEl = document.getElementById('ds-' + c.to);
+      if (!fromEl || !toEl) return;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const x1 = fr.left - rect.left + fr.width / 2;
+      const y1 = fr.top - rect.top;
+      const dsLeft = tr.left - rect.left;
+      const dsRight = tr.right - rect.left;
+      const dsBottom = tr.bottom - rect.top;
+      const x2 = Math.max(dsLeft + 25, Math.min(dsRight - 25, x1));
+      const y2 = dsBottom;
+      const midY = (y1 + y2) / 2;
+      const d = 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + midY + ', ' + x2 + ' ' + midY + ', ' + x2 + ' ' + y2;
+      const color = c.kind === 'read' ? '#5b6cff' : c.kind === 'write' ? '#a4332a' : '#8a5a14';
+      const marker = c.kind === 'read' ? 'm-read' : c.kind === 'write' ? 'm-write' : 'm-rw';
+      parts.push('<path d="' + d + '" stroke="' + color + '" stroke-width="2.4" fill="none" marker-end="url(#' + marker + ')" />');
+      if (c.label) {
+        const lx = (x1 + x2) / 2, ly = midY - 4;
+        const w = c.label.length * 5.4 + 12;
+        parts.push('<rect x="' + (lx - w/2) + '" y="' + (ly - 9) + '" width="' + w + '" height="14" rx="3" fill="' +
+          (color === '#5b6cff' ? '#eef0ff' : color === '#a4332a' ? '#fff0f0' : '#fff8dd') +
+          '" stroke="' + color + '" stroke-width="0.7"/>');
+        parts.push('<text x="' + lx + '" y="' + (ly + 1) + '" text-anchor="middle" fill="' + color +
+          '" font-family="ui-monospace, monospace" font-size="9.5" font-weight="700">' + esc(c.label) + '</text>');
+      }
+    });
+    svg.innerHTML = defs + parts.join('');
+  }
+
+  // ---------- Side panel ----------
+  function renderSidePanel() {
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) return;
+    const view = viewForStoryline(sl);
+    const b = view.blocks.find(b => b.id === STATE.activeBlockId);
+    const f = id => document.getElementById(id);
+    if (!b) {
+      f('focus-name').textContent = '—';
+      f('focus-purpose').textContent = 'Click any block.';
+      f('focus-rw').innerHTML = '';
+      f('focus-loc').textContent = '';
+      f('focus-code').textContent = '';
+      return;
+    }
+    const rp = b.right_panel || {};
+    f('focus-name').textContent = b.title || b.name || b.id;
+    f('focus-purpose').textContent = rp.what_it_does || b.one_liner || '';
+    const why = rp.why_its_here ? '<div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-soft);"><strong style="color: var(--fg);">Why it\'s here:</strong> ' + esc(rp.why_its_here) + '</div>' : '';
+    const touches = (rp.touches || []).map(t => '<span class="rw-chip">' + esc(t.label) + '</span>').join('');
+    const stateEffects = (b.state_effects || []).map(e => {
+      const cls = e.kind === 'read' ? 'read' : e.kind === 'write' ? 'write' : '';
+      return '<span class="rw-chip ' + cls + '">' + esc(e.op || '') + ' → ' + esc(e.ds_id) + '</span>';
+    }).join('');
+    const failureMode = (rp.failure_mode || []).map(s => '<div style="margin-top:4px; padding-left:8px; border-left: 2px solid #f5cdc6; font-size: 11.5px; color: var(--fg-soft);">' + esc(s) + '</div>').join('');
+    f('focus-rw').innerHTML =
+      (stateEffects ? '<div><span class="rw-label">state effects</span>' + stateEffects + '</div>' : '') +
+      (touches ? '<div style="margin-top:4px"><span class="rw-label">touches</span>' + touches + '</div>' : '') +
+      why +
+      (failureMode ? '<div style="margin-top:10px; padding-top:8px; border-top: 1px solid var(--border);"><div class="rw-label" style="margin-bottom:4px;">failure mode</div>' + failureMode + '</div>' : '');
+    f('focus-loc').textContent = (b.code_view ? b.code_view.file + ':' + (b.line_range || '') : '');
+    if (b.code_view && b.code_view.lines) {
+      f('focus-code').textContent = b.code_view.lines.map(l => l.content).join('\n');
+    } else {
+      f('focus-code').textContent = '';
+    }
+  }
+
+  // ---------- Shape renderers (compact, type-level, no instance content) ----------
+  function renderShape(shape) {
+    if (!shape || !shape.kind) return '<div class="shape-row"><span class="note">…</span></div>';
+    switch (shape.kind) {
+      case 'deque':     return renderDequeShape(shape);
+      case 'grid':      return renderListShape(shape);   // grid = fixed-size list
+      case 'list':      return renderListShape(shape);
+      case 'set':       return renderSetShape(shape);
+      case 'dict':      return renderDictShape(shape);
+      case 'scalar':    return renderScalarShape(shape);
+      case 'composite': return renderCompositeShape(shape);
+      default:          return '<div class="shape-row"><span class="note">' + esc(shape.kind) + '</span></div>';
+    }
+  }
+  // deque: HEAD endpoint with popleft op ─── TAIL endpoint with append op
+  // No slots. Just shows the two ends, their direction, and item type.
+  function renderDequeShape(s) {
+    const it = s.item_type ? ' <span class="type">' + esc(s.item_type) + '</span>' : '';
+    return '<div class="shape-row">' +
+      '<div class="shape-deque-line">' +
+        '<div class="shape-deque-end">◀ popleft<span class="end-label">HEAD</span></div>' +
+        '<div class="shape-deque-track"></div>' +
+        '<div class="shape-deque-end">append ▶<span class="end-label">TAIL</span></div>' +
+      '</div>' +
+      (it ? '<span class="note">items:</span>' + it : '') +
+      '</div>';
+  }
+  // list/grid: [Type × N], no cells drawn
+  function renderListShape(s) {
+    const n = s.capacity != null ? ' <span class="mul">× ' + s.capacity + '</span>' : '';
+    const t = s.item_type ? '<span class="type">' + esc(s.item_type) + '</span>' : '<span class="type">item</span>';
+    const note = s.access || (s.capacity != null ? 'random access by index' : 'ordered');
+    return '<div class="shape-row">' +
+      '<div class="shape-list-glyph"><span class="bracket">[</span>' + t + n + '<span class="bracket">]</span></div>' +
+      '<span class="note">' + esc(note) + '</span>' +
+      '</div>';
+  }
+  // set: {Type}, unordered/unique
+  function renderSetShape(s) {
+    const t = s.item_type ? '<span class="type">' + esc(s.item_type) + '</span>' : '<span class="type">item</span>';
+    return '<div class="shape-row">' +
+      '<div class="shape-set-glyph"><span class="brace">{</span>' + t + '<span class="brace">}</span></div>' +
+      '<span class="note">unordered, unique; O(1) membership</span>' +
+      '</div>';
+  }
+  // dict: key ──→ value
+  function renderDictShape(s) {
+    const k = '<span class="key">' + esc(s.key_label || s.key_type || 'key') + '</span>';
+    const v = '<span class="val">' + esc(s.value_label || s.value_type || 'value') + '</span>';
+    return '<div class="shape-row">' +
+      '<div class="shape-dict-glyph">' + k + '<span class="map-arrow">──▶</span>' + v + '</div>' +
+      '<span class="note">O(1) lookup</span>' +
+      '</div>';
+  }
+  // scalar: just the type
+  function renderScalarShape(s) {
+    return '<div class="shape-row">' +
+      '<div class="shape-scalar-glyph">' + esc(s.value_type || 'value') + '</div>' +
+      '</div>';
+  }
+  // composite: 2-col table — field name | shape glyph
+  function renderCompositeShape(s) {
+    const rows = (s.pieces || []).map(p =>
+      '<tr>' +
+        '<td class="field">.' + esc(p.name) + '</td>' +
+        '<td class="shape-cell">' + renderShape(p) + '</td>' +
+      '</tr>'
+    ).join('');
+    return '<table class="shape-composite-table">' + rows + '</table>';
+  }
+
+  function setStoryline(id) {
+    STATE.activeStorylineId = id;
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === id);
+    const v = sl ? viewForStoryline(sl) : null;
+    STATE.activeBlockId = v ? v.defaultActive : null;
+    renderTabs();
+    renderCanvas();
+    renderSidePanel();
+  }
+
+  // ---------- Helpers ----------
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function parseRange(s) {
+    if (!s) return null;
+    const m = String(s).match(/L?(\d+)[–\-—](\d+)/);
+    if (m) return [+m[1], +m[2]];
+    const single = String(s).match(/L?(\d+)/);
+    if (single) return [+single[1], +single[1]];
+    return null;
+  }
+  // Python syntax highlighter. Tokenize first on the RAW source, then esc
+  // each token's text and wrap in <span> — avoids the bug where a string
+  // regex matches inside class="tok-kw" attributes we'd inserted earlier.
+  const PY_KEYWORDS = new Set(['def','class','if','elif','else','return','while','for','in','not','and','or','break','continue','import','from','as','with','try','except','finally','raise','yield','lambda','self','None','True','False','pass','assert']);
+  function highlight(line) {
+    const src = String(line == null ? '' : line);
+    const out = [];
+    let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '#') { out.push(['com', src.slice(i)]); break; }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < src.length && src[j] !== c) {
+          if (src[j] === '\\') j += 2; else j++;
+        }
+        out.push(['str', src.slice(i, Math.min(j + 1, src.length))]);
+        i = Math.min(j + 1, src.length); continue;
+      }
+      if (/[0-9]/.test(c) && (i === 0 || !/[A-Za-z_]/.test(src[i-1]))) {
+        let j = i;
+        while (j < src.length && /[0-9._]/.test(src[j])) j++;
+        out.push(['num', src.slice(i, j)]);
+        i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        out.push([PY_KEYWORDS.has(word) ? 'kw' : null, word]);
+        i = j; continue;
+      }
+      out.push([null, c]); i++;
+    }
+    return out.map(([cls, text]) =>
+      cls ? '<span class="tok-' + cls + '">' + esc(text) + '</span>' : esc(text)
+    ).join('');
+  }
+
+  // ---------- Init ----------
+  function renderTopbar() {
+    const md = WALKTHROUGH_DATA.metadata || {};
+    const t = document.getElementById('hdr-title');
+    if (t) t.textContent = '📐 ' + (md.title || 'Code walkthrough');
+    const c = document.getElementById('hdr-crumb');
+    if (c) {
+      const parts = [];
+      if (md.repo) parts.push('<code>' + esc(md.repo) + '</code>');
+      const sm = WALKTHROUGH_DATA.summary || {};
+      if (sm.one_line) parts.push(esc(sm.one_line));
+      c.innerHTML = parts.join(' · ');
+    }
+  }
+
+  function init() {
+    if (!WALKTHROUGH_DATA || !WALKTHROUGH_DATA.storylines) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No walkthrough data injected.</div>';
+      return;
+    }
+    renderTopbar();
+    const firstFull = (WALKTHROUGH_DATA.storylines || []).find(s => s.depth !== 'summary' && s.diagram);
+    if (!firstFull) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No full-depth storyline with diagram found.</div>'; return; }
+    setStoryline(firstFull.id);
+    window.addEventListener('resize', () => {
+      const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (sl) drawArrows(viewForStoryline(sl));
+    });
+  }
+  init();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock: codeless-style runtime trace — ST2 cold prefill</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+
+    /* logic block colors */
+    --blk-bg:#fefefe;
+    --blk-border:#d0d7de;
+    --blk-active-bg:#fff8c5;
+    --blk-active-border:#bf8700;
+    --blk-past-bg:#eaeef2;
+    --blk-future-bg:#fafbfc;
+
+    /* data structure tints */
+    --ds-waiting:#fff8c5;
+    --ds-running:#ddd3f0;
+    --ds-pool:#d6e4f5;
+    --ds-cache:#d4ead4;
+
+    --arrow-read:#5b6cff;     /* blue: read */
+    --arrow-write:#a4332a;    /* red: write */
+    --arrow-rw:#8a5a14;       /* amber: read/write */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+  }
+  .topbar {
+    grid-column: 1 / 3;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 {
+    font-size: 14px; font-weight: 700; margin: 0;
+  }
+  .topbar .crumb {
+    font-size: 12px; color: var(--fg-soft);
+  }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+    background: var(--bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .topbar .legend {
+    margin-left: auto;
+    display: flex; gap: 14px;
+    font-size: 11px; color: var(--fg-soft);
+  }
+  .topbar .legend .swatch {
+    display: inline-block; width: 16px; height: 2px;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  /* Canvas */
+  .canvas {
+    position: relative;
+    overflow: auto;
+    background: linear-gradient(0deg, var(--bg) 0%, var(--bg) 100%);
+    background-image:
+      radial-gradient(circle, #e1e4e8 1px, transparent 1px);
+    background-size: 16px 16px;
+    background-position: 0 0;
+  }
+  .canvas-inner {
+    position: relative;
+    width: 1240px;
+    height: 720px;
+    padding: 24px;
+  }
+
+  /* Data structures row (top half) */
+  .ds-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 14px;
+    position: relative;
+  }
+  .ds-box {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    position: relative;
+  }
+  .ds-box .ds-label {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .ds-box.waiting { border-color: #c79a09; background: var(--ds-waiting); }
+  .ds-box.running { border-color: #5b3e9c; background: var(--ds-running); }
+  .ds-box.pool    { border-color: #205493; background: var(--ds-pool);    grid-column: 1 / 3; }
+  .ds-box.cache   { border-color: #1f883d; background: var(--ds-cache);   grid-column: 1 / 3; }
+
+  .deque {
+    display: flex; gap: 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  .deque .seq-chip {
+    background: var(--bg-card);
+    border: 1.5px solid var(--fg-soft);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-weight: 600;
+  }
+  .deque-empty {
+    color: var(--fg-faint);
+    font-style: italic;
+    font-size: 12px;
+  }
+
+  .pool-grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 4px;
+  }
+  .pool-cell {
+    aspect-ratio: 1 / 1;
+    background: var(--bg-card);
+    border: 1.5px solid #c9cdd2;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--fg-faint);
+  }
+  .pool-cell.used {
+    background: #b6cbe5;
+    border-color: #205493;
+    color: #205493;
+    font-weight: 700;
+  }
+
+  .cache-empty {
+    color: var(--fg-faint);
+    font-style: italic;
+    font-family: ui-monospace, monospace;
+  }
+
+  /* Logic blocks row (bottom half) */
+  .blocks-area {
+    margin-top: 240px;
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .blk {
+    background: var(--blk-bg);
+    border: 1.5px solid var(--blk-border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    min-width: 130px;
+    max-width: 150px;
+    position: relative;
+    cursor: pointer;
+    transition: transform 120ms, box-shadow 120ms;
+  }
+  .blk:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+
+  .blk.past {
+    background: var(--blk-past-bg);
+    color: var(--fg-soft);
+    opacity: 0.72;
+  }
+  .blk.active {
+    background: var(--blk-active-bg);
+    border-color: var(--blk-active-border);
+    border-width: 2px;
+    padding: 8px 11px;
+    box-shadow: 0 0 0 4px rgba(191,135,0,0.18);
+  }
+  .blk.future {
+    background: var(--blk-future-bg);
+    color: var(--fg-faint);
+    opacity: 0.55;
+    border-style: dashed;
+  }
+
+  .blk .blk-tag {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .blk .blk-name {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+  }
+  .blk .blk-detail {
+    font-size: 11px;
+    color: var(--fg-soft);
+    line-height: 1.4;
+  }
+  .blk .blk-source {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    margin-top: 4px;
+  }
+
+  /* Inter-block flow arrows (subtle, on bottom row only) */
+  .flow-arrow {
+    align-self: center;
+    color: var(--fg-faint);
+    font-size: 14px;
+    user-select: none;
+  }
+
+  /* Side panel — code drill-down */
+  .side {
+    grid-row: 2 / 3;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 18px 18px 40px;
+  }
+  .side h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    margin: 0 0 6px;
+    font-weight: 700;
+  }
+  .side .focus-name {
+    font-size: 18px; font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--blk-active-border);
+  }
+  .side .focus-purpose {
+    font-size: 13px;
+    color: var(--fg);
+    margin-bottom: 12px;
+    line-height: 1.55;
+  }
+  .side .reads-writes {
+    margin-bottom: 14px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .side .reads-writes .rw-label {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--fg-faint);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .side .reads-writes .rw-chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    background: var(--bg-soft);
+    padding: 1px 7px;
+    border-radius: 3px;
+    margin-right: 4px;
+    border: 1px solid var(--border);
+  }
+  .side .reads-writes .rw-chip.read  { color: var(--arrow-read); border-color: #c5d0fc; background:#eef0ff; }
+  .side .reads-writes .rw-chip.write { color: var(--arrow-write); border-color: #f8c5c5; background:#fff0f0; }
+  .side pre.code {
+    background: #fbfaf7;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    overflow-x: auto;
+    margin: 0 0 12px;
+    color: var(--fg);
+  }
+  .side .code-loc {
+    font-size: 11px;
+    color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    margin-bottom: 6px;
+  }
+
+  /* SVG overlay for arrows */
+  svg.arrows {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .help-banner {
+    position: absolute;
+    top: 12px; right: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--fg-soft);
+    max-width: 280px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  }
+  .help-banner strong { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1>📐 Mock — codeless-platform style runtime trace</h1>
+    <div class="crumb">
+      <code>nano-vllm</code> · ST2 cold prefill · frozen at <strong>ALLOC-3</strong> firing (logic block 3 of 6)
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--arrow-read)"></span>read</span>
+      <span><span class="swatch" style="background:var(--arrow-write)"></span>write</span>
+      <span><span class="swatch" style="background:var(--arrow-rw)"></span>read+write</span>
+    </div>
+  </header>
+
+  <section class="canvas">
+    <div class="canvas-inner" id="canvas">
+
+      <!-- ============== Data structures (top) ============== -->
+      <div class="ds-row">
+        <div class="ds-box waiting" id="ds-waiting">
+          <div class="ds-label">waiting · deque</div>
+          <div class="deque">
+            <div class="seq-chip">seq 0</div>
+            <div class="seq-chip">seq 1</div>
+          </div>
+        </div>
+        <div class="ds-box running" id="ds-running">
+          <div class="ds-label">running · deque</div>
+          <div class="deque">
+            <div class="deque-empty">(empty — seq 0 about to enter)</div>
+          </div>
+        </div>
+        <div class="ds-box pool" id="ds-pool">
+          <div class="ds-label">block_pool · 16 physical blocks · free_deque popleft / refcount</div>
+          <div class="pool-grid">
+            <div class="pool-cell used">#0 r1</div>
+            <div class="pool-cell used">#1 r1</div>
+            <div class="pool-cell used">#2 r1</div>
+            <div class="pool-cell">#3</div>
+            <div class="pool-cell">#4</div>
+            <div class="pool-cell">#5</div>
+            <div class="pool-cell">#6</div>
+            <div class="pool-cell">#7</div>
+            <div class="pool-cell">#8</div>
+            <div class="pool-cell">#9</div>
+            <div class="pool-cell">#10</div>
+            <div class="pool-cell">#11</div>
+            <div class="pool-cell">#12</div>
+            <div class="pool-cell">#13</div>
+            <div class="pool-cell">#14</div>
+            <div class="pool-cell">#15</div>
+          </div>
+        </div>
+        <div class="ds-box cache" id="ds-cache">
+          <div class="ds-label">hash_to_block_id · prefix cache</div>
+          <div class="cache-empty">(empty — will populate after HASH-3 fires)</div>
+        </div>
+      </div>
+
+      <!-- ============== Logic blocks (bottom) ============== -->
+      <div class="blocks-area">
+
+        <div class="blk past" id="blk-pop">
+          <div class="blk-tag">L1 · ITER</div>
+          <div class="blk-name">POP-WAITING</div>
+          <div class="blk-detail">pop head → seq 0</div>
+          <div class="blk-source">scheduler.py:31</div>
+        </div>
+        <div class="flow-arrow">▶</div>
+
+        <div class="blk past" id="blk-probe">
+          <div class="blk-tag">L2 · LOOKUP</div>
+          <div class="blk-name">PROBE-CACHE</div>
+          <div class="blk-detail">walk seq 0's blocks, chained hash → MISS</div>
+          <div class="blk-source">block_manager.py:58</div>
+        </div>
+        <div class="flow-arrow">▶</div>
+
+        <div class="blk active" id="blk-alloc">
+          <div class="blk-tag">L3 · ALLOC · firing now</div>
+          <div class="blk-name">ALLOC-3</div>
+          <div class="blk-detail">pop 3 fresh from free_deque → seq 0.block_table</div>
+          <div class="blk-source">block_manager.py:75</div>
+        </div>
+        <div class="flow-arrow">▶</div>
+
+        <div class="blk future" id="blk-promote">
+          <div class="blk-tag">L4 · TRANSITION</div>
+          <div class="blk-name">PROMOTE</div>
+          <div class="blk-detail">seq 0: WAITING → RUNNING, move queue</div>
+          <div class="blk-source">scheduler.py:49</div>
+        </div>
+        <div class="flow-arrow">▶</div>
+
+        <div class="blk future" id="blk-fwd">
+          <div class="blk-tag">L5 · COMPUTE</div>
+          <div class="blk-name">FORWARD-PASS</div>
+          <div class="blk-detail">12 tokens through model → sample 401</div>
+          <div class="blk-source">llm_engine.py:52</div>
+        </div>
+        <div class="flow-arrow">▶</div>
+
+        <div class="blk future" id="blk-hash">
+          <div class="blk-tag">L6 · REGISTER</div>
+          <div class="blk-name">HASH-3</div>
+          <div class="blk-detail">chain hashes for 3 full blocks → cache</div>
+          <div class="blk-source">block_manager.py:110</div>
+        </div>
+
+      </div>
+
+      <!-- SVG arrows from logic blocks UP to data structures they touch -->
+      <svg class="arrows" id="arrows"></svg>
+
+      <div class="help-banner">
+        <strong>What this mock shows:</strong> data structures live as persistent
+        spatial objects on the canvas. Each logic block in the bottom row connects
+        UP to the data structure(s) it touches via an arrow (blue=read, red=write,
+        amber=both). Past blocks are dimmed; the active one is highlighted; future
+        blocks are ghosted. Click any block — code drill-down on the right.
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============== Side panel — code drill-down ============== -->
+  <aside class="side" id="side">
+    <h2>Selected logic block</h2>
+    <div class="focus-name" id="focus-name">ALLOC-3</div>
+    <div class="focus-purpose" id="focus-purpose">
+      Pop 3 fresh physical blocks from the free deque and bind them to
+      seq 0's block_table.
+    </div>
+
+    <div class="reads-writes" id="focus-rw">
+      <div><span class="rw-label">reads</span><span class="rw-chip read">block_pool.free_block_ids</span></div>
+      <div style="margin-top:4px"><span class="rw-label">writes</span><span class="rw-chip write">block_pool.{free, used, blocks[i].ref_count}</span><span class="rw-chip write">seq 0.block_table</span></div>
+    </div>
+
+    <div class="code-loc">block_manager.py:75–92</div>
+    <pre class="code" id="focus-code">def allocate(self, seq, num_cached_blocks):
+    assert not seq.block_table
+    h = -1
+    for i in range(num_cached_blocks):
+        # …(cached path — not taken this call)…
+        pass
+    for i in range(num_cached_blocks, seq.num_blocks):
+        seq.block_table.append(
+            self._allocate_block())
+    seq.num_cached_tokens = (
+        num_cached_blocks * self.block_size)
+
+def _allocate_block(self) -> int:
+    block_id = self.free_block_ids.popleft()
+    block = self.blocks[block_id]
+    assert block.ref_count == 0
+    if block.hash != -1:
+        # invalidate stale prefix-cache entry
+        del self.hash_to_block_id[block.hash]
+    block.reset()  # ref_count = 1
+    self.used_block_ids.add(block_id)
+    return block_id</pre>
+
+    <div class="code-loc" style="margin-top: 8px;">
+      ✦ Try other blocks: hover or click any logic block in the canvas.
+      Past blocks let you replay; future blocks preview what's next.
+    </div>
+  </aside>
+</div>
+
+<script>
+  // Draw SVG arrows from each logic block to the data structures it touches.
+  // Connections are declared inline for the mock (in a real build, the trace
+  // schema would carry these).
+  const CONNECTIONS = [
+    // {from: blkId, to: dsId, kind: 'read'|'write'|'rw', curve: number}
+    { from: 'blk-pop',    to: 'ds-waiting',  kind: 'rw',    side: 'right' },
+    { from: 'blk-probe',  to: 'ds-cache',    kind: 'read',  side: 'right' },
+    { from: 'blk-alloc',  to: 'ds-pool',     kind: 'write', side: 'left'  },
+    { from: 'blk-promote',to: 'ds-running',  kind: 'write', side: 'right' },
+    { from: 'blk-fwd',    to: 'ds-pool',     kind: 'read',  side: 'right' },  // attention reads KV
+    { from: 'blk-hash',   to: 'ds-cache',    kind: 'write', side: 'right' },
+    { from: 'blk-hash',   to: 'ds-pool',     kind: 'write', side: 'left'  },  // also writes block.hash
+  ];
+  const COLOR = { read: 'var(--arrow-read)', write: 'var(--arrow-write)', rw: 'var(--arrow-rw)' };
+
+  function drawArrows() {
+    const svg = document.getElementById('arrows');
+    const canvas = document.getElementById('canvas');
+    const rect = canvas.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${canvas.scrollWidth} ${canvas.scrollHeight}`);
+    svg.setAttribute('width', canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+
+    // Marker defs (once)
+    let defs = `<defs>
+      <marker id="m-read"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" />
+      </marker>
+      <marker id="m-write" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a4332a" />
+      </marker>
+      <marker id="m-rw" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M 0 0 L 9 4.5 L 0 9 z" fill="#8a5a14" />
+      </marker>
+    </defs>`;
+
+    const paths = CONNECTIONS.map(c => {
+      const fromEl = document.getElementById(c.from);
+      const toEl   = document.getElementById(c.to);
+      if (!fromEl || !toEl) return '';
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const x1 = fr.left - rect.left + fr.width / 2;
+      const y1 = fr.top - rect.top;             // top edge of block
+      // Pick a sensible anchor on the data structure: the bottom edge nearest to x1
+      const dsLeft = tr.left - rect.left;
+      const dsRight = tr.right - rect.left;
+      const dsBottom = tr.bottom - rect.top;
+      const x2 = Math.max(dsLeft + 20, Math.min(dsRight - 20, x1));
+      const y2 = dsBottom;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const midY = (y1 + y2) / 2;
+      const d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+      const color = c.kind === 'read' ? '#5b6cff' : c.kind === 'write' ? '#a4332a' : '#8a5a14';
+      const marker = c.kind === 'read' ? 'm-read' : c.kind === 'write' ? 'm-write' : 'm-rw';
+      const opacity = (c.from === 'blk-alloc') ? 1 : 0.32;
+      const dash = (c.from === 'blk-pop' || c.from === 'blk-probe') ? 'stroke-dasharray="5,4"' : '';
+      const sw = (c.from === 'blk-alloc') ? 2.4 : 1.6;
+      return `<path d="${d}" stroke="${color}" stroke-width="${sw}" fill="none" marker-end="url(#${marker})" opacity="${opacity}" ${dash} />`;
+    }).join('');
+
+    svg.innerHTML = defs + paths;
+  }
+  // Draw + redraw on resize
+  drawArrows();
+  window.addEventListener('resize', drawArrows);
+
+  // Mock click → swap side panel content for a few blocks (just the mock; static)
+  const BLOCK_DETAIL = {
+    'blk-pop': {
+      name: 'POP-WAITING',
+      purpose: 'Take the head of the waiting deque. The scheduler always processes oldest-first for fairness.',
+      reads:  ['scheduler.waiting (peek + popleft)'],
+      writes: ['scheduler.waiting (popleft)'],
+      loc:    'scheduler.py:31, 51',
+      code:
+`# inside Scheduler.schedule()'s prefill loop:
+while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
+    seq = self.waiting[0]              # peek head
+    # …probe + allocate decisions…
+    if seq.num_cached_tokens + seq.num_scheduled_tokens \\
+            == seq.num_tokens:
+        seq.status = SequenceStatus.RUNNING
+        self.waiting.popleft()         # commit pop
+        self.running.append(seq)`
+    },
+    'blk-probe': {
+      name: 'PROBE-CACHE',
+      purpose: "Walk seq's blocks, compute the chained hash for each, look up in hash_to_block_id. First miss terminates the walk.",
+      reads:  ['hash_to_block_id', 'block_pool.blocks[i].token_ids'],
+      writes: ['(none — pure read)'],
+      loc:    'block_manager.py:58–73',
+      code:
+`def can_allocate(self, seq) -> int:
+    h = -1
+    num_cached_blocks = 0
+    num_new_blocks = seq.num_blocks
+    for i in range(seq.num_blocks - 1):
+        token_ids = seq.block(i)
+        h = self.compute_hash(token_ids, h)      # chained
+        block_id = self.hash_to_block_id.get(h, -1)
+        if block_id == -1 \\
+                or self.blocks[block_id].token_ids != token_ids:
+            break                                # first miss → stop
+        num_cached_blocks += 1
+        if block_id in self.used_block_ids:
+            num_new_blocks -= 1
+    if len(self.free_block_ids) < num_new_blocks:
+        return -1
+    return num_cached_blocks`
+    },
+    'blk-alloc': {
+      name: 'ALLOC-3',
+      purpose: "Pop 3 fresh physical blocks from the free deque and bind them to seq 0's block_table.",
+      reads:  ['block_pool.free_block_ids'],
+      writes: ['block_pool.{free, used, blocks[i].ref_count}', 'seq 0.block_table'],
+      loc:    'block_manager.py:75–92',
+      code:
+`def allocate(self, seq, num_cached_blocks):
+    assert not seq.block_table
+    h = -1
+    for i in range(num_cached_blocks):
+        # …(cached path — not taken this call)…
+        pass
+    for i in range(num_cached_blocks, seq.num_blocks):
+        seq.block_table.append(
+            self._allocate_block())
+    seq.num_cached_tokens = (
+        num_cached_blocks * self.block_size)
+
+def _allocate_block(self) -> int:
+    block_id = self.free_block_ids.popleft()
+    block = self.blocks[block_id]
+    assert block.ref_count == 0
+    if block.hash != -1:
+        # invalidate stale prefix-cache entry
+        del self.hash_to_block_id[block.hash]
+    block.reset()  # ref_count = 1
+    self.used_block_ids.add(block_id)
+    return block_id`
+    },
+    'blk-promote': {
+      name: 'PROMOTE',
+      purpose: "Flip seq.status from WAITING to RUNNING, move from waiting deque to running deque.",
+      reads:  ['scheduler.waiting'],
+      writes: ['seq.status', 'scheduler.waiting', 'scheduler.running'],
+      loc:    'scheduler.py:48–50',
+      code:
+`# still inside Scheduler.schedule()'s prefill loop:
+if seq.num_cached_tokens + seq.num_scheduled_tokens \\
+        == seq.num_tokens:
+    seq.status = SequenceStatus.RUNNING
+    self.waiting.popleft()
+    self.running.append(seq)`
+    },
+    'blk-fwd': {
+      name: 'FORWARD-PASS',
+      purpose: "Run the model on seq 0's 12 prompt tokens; attention reads KV slots via block_table; sample the next token.",
+      reads:  ['block_pool.blocks[i].{k_cache, v_cache}', 'seq 0.token_ids'],
+      writes: ['(model side-effects only, sampled token returned by value)'],
+      loc:    'llm_engine.py:52  (delegates to ModelRunner)',
+      code:
+`# inside LLMEngine.step():
+token_ids = self.model_runner.call(
+    "run", seqs, is_prefill)
+# token_ids = [401]    # one sample per scheduled seq`
+    },
+    'blk-hash': {
+      name: 'HASH-3',
+      purpose: "For each FULL block just filled, compute its chained hash and register hash → block_id in the prefix cache.",
+      reads:  ['block_pool.blocks[i].token_ids', 'seq.block_table', 'seq.num_cached/num_scheduled_tokens'],
+      writes: ['block_pool.blocks[i].hash', 'hash_to_block_id'],
+      loc:    'block_manager.py:110–120',
+      code:
+`def hash_blocks(self, seq):
+    start = seq.num_cached_tokens // self.block_size
+    end = (seq.num_cached_tokens
+            + seq.num_scheduled_tokens) // self.block_size
+    h = (self.blocks[seq.block_table[start - 1]].hash
+            if start > 0 else -1)
+    for i in range(start, end):
+        block = self.blocks[seq.block_table[i]]
+        token_ids = seq.block(i)
+        h = self.compute_hash(token_ids, h)   # CHAINED
+        block.update(h, token_ids)
+        self.hash_to_block_id[h] = block.block_id`
+    }
+  };
+
+  document.querySelectorAll('.blk').forEach(b => {
+    b.addEventListener('click', () => {
+      const d = BLOCK_DETAIL[b.id];
+      if (!d) return;
+      document.getElementById('focus-name').textContent = d.name;
+      document.getElementById('focus-purpose').textContent = d.purpose;
+      const rw = document.getElementById('focus-rw');
+      rw.innerHTML =
+        '<div><span class="rw-label">reads</span>' +
+        d.reads.map(s => '<span class="rw-chip read">' + s + '</span>').join('') + '</div>' +
+        '<div style="margin-top:4px"><span class="rw-label">writes</span>' +
+        d.writes.map(s => '<span class="rw-chip write">' + s + '</span>').join('') + '</div>';
+      document.querySelector('.side .code-loc').textContent = d.loc;
+      document.getElementById('focus-code').textContent = d.code;
+    });
+  });
+</script>
+
+</body>
+</html>

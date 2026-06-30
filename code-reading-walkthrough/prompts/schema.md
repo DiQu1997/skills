@@ -6,17 +6,55 @@ for the `code-reading-walkthrough` skill — the reading-oriented sibling of
 
 ## What changed from v0.4
 
-v0.5 replaces the linear `steps[]` model with a **flow inspector**: each
-full-depth storyline is rendered as a swimlane-style canvas where columns
-are functions / lanes, blocks are small chunks within a column (3–10 lines
-each), and edges between blocks visualize control flow (calls, catches,
-finally branches). Clicking a block expands its code inline; a right-side
-dock surfaces what / why / touches / failure-mode for the selected block.
+v0.5 replaces the linear `steps[]` model with the **flow-inspector
+schema**: each full-depth storyline carries a `diagram` of columns
+(functions or lanes) and blocks (3–10 line chunks within a column) with
+optional edges. Three render targets read this same JSON:
+
+| View | Render command | Shape |
+|------|---------------|-------|
+| **source** (default) | `python3 render.py …` | continuous code top-to-bottom with each block as a colored highlight band over its `line_range` and a 1–2 sentence annotation chip in the right margin |
+| **diagram** | `… --view diagram` | data structures as canvas entities at the top, blocks with typed I/O ports, read/write arrows to DSes |
+| **swimlane** | `… --view swimlane` | original flow-inspector cards in horizontal swim lanes with CALL/CATCH/FINALLY edges |
 
 Storyline-level fields (`mental_model_anchor`, `purpose`,
 `architectural_context`, `change_overview`) carry over unchanged. The
 `code_view` shape, `function_purpose`, and `walkthrough` annotation
 structures from v0.4 carry over as building blocks for per-block content.
+
+### Source view (default)
+
+The source view stitches all blocks in a column into one continuous
+file display with each `line_range` shown as a colored band. Lines that
+appear in some block's `code_view.lines` render as plain context; lines
+NOT covered by any block render as "lines N–M elided" markers. For a
+function-level walkthrough, aim for ZERO elision within a function —
+either (a) extend each block's `code_view` to cover the gap to the
+next block, or (b) author every block's `code_view` to span the whole
+function (the renderer dedupes by `line_num`). See Phase 7 in
+`analyze_code.md` for the coverage pattern.
+
+The source view also makes `code_view.lines[].content` source-fidelity
+glaring — the actual source is displayed; a paraphrased or off-by-one
+line breaks the highlight alignment. Lift lines verbatim with `Read`
+offset/limit or via a small builder script.
+
+### Diagram-view extension (additive, optional)
+
+The diagram view promotes state data structures to first-class canvas
+entities at the top, and draws read/write arrows from each block down
+to the DS it touches. To populate it, fill THREE OPTIONAL groups of
+fields:
+
+1. `diagram.data_structures[]` — top-level declaration of primary state
+   (each with a `shape` describing its visual kind)
+2. `block.inputs[]` / `block.outputs[]` — typed I/O ports for the block card
+3. `block.state_effects[]` — links each block to the DSes it reads/writes
+
+The source and swimlane templates ignore all three; they're rendered
+ONLY in diagram view. A JSON that omits them still renders cleanly
+under source (default) or swimlane — diagram-view fields are purely
+additive.
 
 ## Top level
 
@@ -204,6 +242,60 @@ prefer tokens to literal hex values unless a custom palette is needed.
 
 A custom token can be declared inline by providing a hex `color`.
 
+### data_structures (diagram view, NEW)
+
+The diagram view (`render.py --view diagram`) renders persistent state objects
+as first-class entities at the top of the canvas; logic blocks below them
+connect via read/write arrows. This is OPTIONAL: omit `data_structures` and
+the swimlane view (default template) is unaffected.
+
+```jsonc
+"data_structures": [
+  {
+    "id":     "string (referenced by blocks via state_effects[].ds_id)",
+    "name":   "string (display name, e.g. 'scheduler.waiting')",
+    "type":   "string (type signature, e.g. 'deque[Sequence]')",
+    "role":   "string (1-line role, e.g. 'FIFO of unstarted requests')",
+    "shape":  Shape,
+    "ops_r":  ["string", ...],   // read operations the code performs on this DS
+    "ops_w":  ["string", ...]    // write operations
+  }
+]
+```
+
+#### Shape — symbolic visual of the data structure's kind
+
+The renderer draws each kind as a compact GLYPH (type-level), not as a
+filled-in instance. No placeholder slots. No counts. Whichever kind matches
+your DS, fill those fields:
+
+```jsonc
+{ "kind": "deque",     "item_type": "Sequence" }
+{ "kind": "list",      "item_type": "Block", "capacity": 16, "access": "random access by index" }
+{ "kind": "set",       "item_type": "int (block_id)" }
+{ "kind": "dict",      "key_label": "chained hash", "value_label": "block_id" }
+{ "kind": "scalar",    "value_type": "int" }
+{ "kind": "composite", "pieces": [ {"name": "field", ...Shape fields} ] }
+```
+
+`composite` is for class-like containers (e.g. a `BlockManager` whose fields
+are themselves containers). Each `piece` IS a Shape (recursive), with an
+added `name` for the field label. Renders as a 2-col table:
+`{ .field_name | shape glyph }`.
+
+#### Picking which DSes to declare (a primary-state heuristic)
+
+A data structure is "primary state" if it:
+- Lives across calls (an `__init__` attribute on a long-lived object, not a local)
+- Mutates during execution (push/pop/add/remove/etc.) — not a read-only config
+- Has named operations the code performs on it (not just a tuple of values)
+
+For nano-vllm the natural primaries are: `scheduler.waiting`, `scheduler.running`,
+`block_manager` (composite), `hash_to_block_id`.
+
+What's NOT primary state: tokenizer, model weights, config flags, sampling_params
+(they're inputs/configuration, not state the code is reshaping).
+
 ## Block
 
 A small chunk of code within a column (typically 3–10 lines).
@@ -256,9 +348,62 @@ A small chunk of code within a column (typically 3–10 lines).
       { "name": "string", "shape": "string", "role": "string" }
     ],
     "prerequisites":       [ Prerequisite ]
-  }
+  },
+
+  // ---- NEW for diagram view (all OPTIONAL; ignored by swimlane template) ----
+  "inputs":  [ ["key", "type"] ],          // typed input ports for the block
+  "outputs": [ ["key", "value-or-delta"] ],// typed output ports; use Δ prefix for state changes
+  "state_effects": [                       // links the block to top-level diagram.data_structures
+    { "ds_id": "string", "op": "string", "kind": "read|write|rw" }
+  ]
 }
 ```
+
+### inputs / outputs / state_effects — diagram view extensions
+
+These three fields are consumed ONLY by the diagram-view template. They are
+optional everywhere; if present, they enrich the block-card visualization
+with explicit ▸in / out▸ port sections and the SVG arrows from block →
+data structure.
+
+**`inputs`** — what this block READS as a precondition. Form: `[["name", "type"]]`.
+
+  - Use TYPE SIGNATURES, not specific values: `["seq", "Sequence"]`, not `["seq", "seq 0"]`.
+  - Skip incidental locals; only what matters to this block's contract.
+
+**`outputs`** — what this block PRODUCES (return values + state mutations).
+Form: `[["name", "value-or-delta"]]`.
+
+  - For return values: `["num_cached", "int (≥0 or -1)"]`.
+  - For state mutations: `["Δ free_block_ids", "↓ by (num_blocks - num_cached)"]`.
+    The `Δ` prefix signals "this is a mutation to existing state."
+  - Describe deltas in terms of INPUTS/STATE, never as concrete numbers.
+
+**`state_effects`** — links between this block and the top-level
+`data_structures`. Form: `[{ds_id, op, kind}]`.
+
+  - `ds_id` must match a `data_structures[].id` on the same diagram.
+  - `op` is the short operation label shown on the arrow (e.g. `"popleft"`,
+    `"register hash"`, `"peek[0]"`). Keep it terse — it's the arrow label.
+  - `kind`: `"read"` (peek/len/get), `"write"` (mutation), or `"rw"` (genuine
+    read-and-write in one logical op; rarely the right choice — prefer two
+    separate entries when reads and writes are conceptually distinct).
+
+#### state_effects vs right_panel.key_data_structures
+
+These look similar; they're not redundant. Disambiguation:
+
+- **`state_effects`** is **structural**: every block-→-DS relationship is a
+  link the renderer draws as an arrow. List EVERY DS this block touches.
+- **`right_panel.key_data_structures`** is **narrative**: a short prose
+  description of the data structures the reader needs to keep in mind to
+  understand THIS block. Often empty; populate only when one specific DS's
+  shape/role is the key to grasping the block (e.g. when a block uses a
+  non-obvious property of the underlying type).
+
+If a block touches a DS, prefer `state_effects` (the renderer surfaces it
+automatically via the arrow). Reach for `key_data_structures` only when a
+prose paragraph on the side panel adds something the arrow can't.
 
 ### Block sizing guidance
 
@@ -343,8 +488,12 @@ Empty/null fields render as nothing. Don't pad.
 - `right_panel.touches` (chips for cross-block / external references)
 - `right_panel.failure_mode` (bullets — or explicit "No failure mode" sentence)
 - `right_panel.invariants`
-- `right_panel.key_data_structures`
+- `right_panel.key_data_structures` (use SPARINGLY — see disambiguation in the inputs/outputs/state_effects section)
 - `right_panel.prerequisites`
+
+**Populate for diagram view** (required when emitting for `render.py --view diagram`):
+- top-level `diagram.data_structures[]` with a `shape` per kind
+- per-block `inputs`, `outputs`, `state_effects` (state_effects ds_id must resolve to one of `data_structures[].id`)
 
 A trivial guard block may have just `what_it_does` + `why_its_here`. A
 core-algorithm block likely populates `touches` + `failure_mode` +
@@ -394,3 +543,18 @@ In addition to JSON-shape validation:
 - Exactly one storyline of any given `id`
 - `scope.mode` is `"files"` or `"topic"`
 - Each `block.phase` resolves to one of `diagram.phases[].id`
+
+**Source-content check (mechanical, enforced by `render.py`):**
+Every `code_view.lines[].content` MUST match the actual source file's
+content at that `line_num` exactly (including whitespace). `render.py`
+opens each cited file under `--source-root` and diffs claimed vs actual;
+mismatches abort the render with a per-block report. Bypass with
+`--no-source-check` only if you're rendering a JSON that was hand-edited
+for illustration. Same shape as code-review-narrative's coverage gate.
+
+**Diagram-view extension checks** (when `data_structures` is present):
+- Every `block.state_effects[].ds_id` resolves to a `data_structures[].id`
+  on the same diagram
+- Each `data_structure.shape.kind` is one of `deque | list | set | dict |
+  scalar | composite`
+- A `composite` shape's `pieces[]` are themselves valid Shapes

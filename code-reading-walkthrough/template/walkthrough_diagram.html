@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Code walkthrough — diagram view</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+
+    --blk-bg:#fefefe;
+    --blk-border:#d0d7de;
+    --blk-active-bg:#fff8c5;
+    --blk-active-border:#bf8700;
+
+    --ds-waiting:#fff8e0;  --ds-waiting-border:#c79a09;
+    --ds-running:#e7dff5;  --ds-running-border:#5b3e9c;
+    --ds-pool:#dfeaf7;     --ds-pool-border:#205493;
+    --ds-cache:#dff0df;    --ds-cache-border:#1f883d;
+
+    --arrow-read:#5b6cff;
+    --arrow-write:#a4332a;
+    --arrow-rw:#8a5a14;
+
+    --port-in:#3d8a5c;
+    --port-out:#a4332a;
+
+    --code-bg:#fbfaf7;
+
+    --tok-kw:#5b3e9c; --tok-type:#205493; --tok-str:#8a5a14;
+    --tok-num:#2b6b5e; --tok-com:#8b949e; --tok-fn:#2f7a2f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "tabs   tabs"
+      "canvas side";
+    height: 100vh;
+  }
+  .topbar { grid-area: topbar; }
+  .tabs   { grid-area: tabs; }
+  .canvas { grid-area: canvas; }
+  .side   { grid-area: side; }
+
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .legend { margin-left: auto; display: flex; gap: 14px; font-size: 11px; color: var(--fg-soft); }
+  .topbar .legend .swatch {
+    display: inline-block; width: 16px; height: 2px;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  .tabs {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex; padding: 0 22px; gap: 4px;
+  }
+  .tab {
+    padding: 9px 16px;
+    cursor: pointer; font-size: 12.5px; color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    border-top: 1px solid transparent;
+    border-left: 1px solid transparent;
+    border-right: 1px solid transparent;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -1px;
+    user-select: none;
+    transition: all 120ms;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg); background: var(--bg);
+    border-color: var(--border);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint); margin-right: 5px;
+    padding: 1px 5px; border-radius: 3px; background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+  .tab .tab-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+  }
+
+  .canvas {
+    overflow: auto;
+    background-image: radial-gradient(circle, #e1e4e8 1px, transparent 1px);
+    background-size: 18px 18px;
+    background-position: 0 0;
+    position: relative;
+  }
+  .canvas-inner {
+    position: relative;
+    padding: 14px 22px 26px;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .fn-banner {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+  }
+  .fn-banner.b-ST1 { border-left-color: var(--ds-waiting-border); }
+  .fn-banner.b-ST2 { border-left-color: #cf80c2; }
+  .fn-banner.b-ST3 { border-left-color: var(--ds-pool-border); }
+  .fn-banner.b-ST4 { border-left-color: var(--ds-cache-border); }
+  .fn-banner.b-ST5 { border-left-color: var(--ds-running-border); }
+  .fn-banner .b-title {
+    font-family: ui-monospace, monospace;
+    font-size: 14px; font-weight: 700; color: var(--fg);
+    margin-bottom: 2px;
+  }
+  .fn-banner .b-title .keyword { color: var(--tok-kw); font-weight: 600; }
+  .fn-banner .b-source {
+    margin-left: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-weight: 400;
+  }
+
+  /* Data structures — schemas (operations, not values) */
+  .ds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .ds-box {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    position: relative;
+  }
+  .ds-box.waiting { border-color: var(--ds-waiting-border); background: var(--ds-waiting); }
+  .ds-box.running { border-color: var(--ds-running-border); background: var(--ds-running); }
+  .ds-box.pool    { border-color: var(--ds-pool-border);    background: var(--ds-pool); grid-column: 1 / 3; }
+  .ds-box.cache   { border-color: var(--ds-cache-border);   background: var(--ds-cache); grid-column: 1 / 3; }
+  .ds-box.touched { box-shadow: 0 0 0 3px rgba(91,108,255,0.10), 0 1px 3px rgba(0,0,0,0.04); }
+  .ds-box.untouched { opacity: 0.40; }
+  .ds-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 5px; flex-wrap: wrap;
+  }
+  .ds-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; font-weight: 700;
+    color: var(--fg);
+  }
+  .ds-type {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--tok-type);
+  }
+  .ds-role {
+    margin-left: auto;
+    font-size: 10.5px; color: var(--fg-soft);
+    font-style: italic;
+  }
+  .ds-ops {
+    display: flex; gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .op-chip {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    background: rgba(255,255,255,0.6);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--fg);
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+  .op-chip.r { color: var(--arrow-read); }
+  .op-chip.w { color: var(--arrow-write); }
+  .ds-shape {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--fg);
+    margin-top: 5px;
+    display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap;
+  }
+  .ds-shape .endpoint {
+    color: var(--fg-faint); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .ds-shape .placeholder {
+    color: var(--fg-faint); font-style: italic;
+  }
+  .ds-shape .schema-piece {
+    background: rgba(255,255,255,0.55);
+    border: 1px dashed rgba(0,0,0,0.18);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 10.5px;
+  }
+
+  /* ---------- Per-kind shape visualizations (compact, type-level) ----------
+     Each shape is a SYMBOL of the type/semantics, not a rendered instance.
+     No placeholder slots implying counts. No instance content. ~20px tall. */
+  .shape-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-family: ui-monospace, monospace; font-size: 11px;
+    margin-top: 4px;
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  .shape-row .note {
+    color: var(--fg-faint); font-style: italic; font-size: 10px;
+    font-family: -apple-system, sans-serif;
+  }
+  .shape-row .type {
+    color: var(--tok-type);
+  }
+
+  /* deque: two operation-labeled endpoints connected by a thin line */
+  .shape-deque-line {
+    display: flex; align-items: center; gap: 0;
+    flex: 0 1 auto;
+  }
+  .shape-deque-end {
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 10px;
+    color: var(--fg);
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .shape-deque-end .end-label {
+    color: var(--fg-faint); font-size: 8.5px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    display: block; margin-top: -2px;
+    font-weight: 400;
+  }
+  .shape-deque-track {
+    flex: 1; min-width: 60px; max-width: 140px;
+    height: 0;
+    border-top: 1.5px dashed rgba(0,0,0,0.25);
+    margin: 0 -1px;
+  }
+
+  /* grid (fixed-size array): just type[capacity], no cells */
+  .shape-list-glyph {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+  }
+  .shape-list-glyph .bracket { color: var(--fg-faint); font-weight: 700; }
+  .shape-list-glyph .mul { color: var(--fg-faint); }
+
+  /* set: curly braces + type */
+  .shape-set-glyph {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+  }
+  .shape-set-glyph .brace { color: var(--fg-faint); font-weight: 700; font-size: 13px; }
+
+  /* dict: key → value */
+  .shape-dict-glyph {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 11px;
+  }
+  .shape-dict-glyph .key { font-style: italic; color: var(--fg-soft); }
+  .shape-dict-glyph .map-arrow { color: var(--fg-faint); font-weight: 700; }
+  .shape-dict-glyph .val { color: var(--fg); }
+
+  /* scalar: just a type chip */
+  .shape-scalar-glyph {
+    display: inline-block;
+    background: rgba(255,255,255,0.55);
+    border: 1.2px solid rgba(0,0,0,0.22);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+    color: var(--tok-type);
+  }
+
+  /* composite: 2-col table of {field: name, shape: visual} */
+  .shape-composite-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .shape-composite-table td {
+    padding: 4px 8px;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    vertical-align: middle;
+  }
+  .shape-composite-table tr:first-child td { border-top: 0; }
+  .shape-composite-table td.field {
+    color: var(--fg); font-weight: 600;
+    white-space: nowrap; width: 1%;
+  }
+  .shape-composite-table td.shape-cell { width: auto; }
+
+  /* Function header — anchors a swimlane with "what does this function do?" */
+  .col-header {
+    margin-top: 14px;
+    padding: 8px 12px 9px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+  }
+  .col-header:first-child { margin-top: 4px; }
+  .col-sig {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    margin-bottom: 3px;
+  }
+  .col-sig .col-kw { color: var(--tok-kw); font-weight: 600; margin-right: 5px; }
+  .col-sig .col-fn { color: var(--fg); font-weight: 700; }
+  .col-sig .col-paren { color: var(--fg-faint); }
+  .col-desc {
+    font-size: 12px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+
+  /* Logic blocks — code-walkthrough flavour */
+  .blocks-area {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    overflow-x: auto;
+    padding: 4px 4px 8px;
+  }
+  .blk {
+    background: var(--blk-bg);
+    border: 1.5px solid var(--blk-border);
+    border-radius: 8px;
+    padding: 0;
+    min-width: 280px;
+    max-width: 320px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 120ms, box-shadow 120ms;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .blk:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.10); }
+  .blk.active {
+    background: var(--blk-active-bg);
+    border-color: var(--blk-active-border);
+    border-width: 2px;
+    box-shadow: 0 0 0 4px rgba(191,135,0,0.22);
+  }
+
+  .blk-head {
+    background: rgba(0,0,0,0.04);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .blk.active .blk-head { background: rgba(191,135,0,0.16); border-color: var(--blk-active-border); }
+  .blk-step {
+    position: absolute;
+    top: 4px; right: 6px;
+    min-width: 22px; height: 22px; padding: 0 6px;
+    border-radius: 11px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--blk-border);
+    color: var(--fg-soft);
+    font-family: ui-monospace, monospace;
+    font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    z-index: 2;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+  .blk-step::before { content: '#'; opacity: 0.5; margin-right: 1px; }
+  .blk.active .blk-step {
+    background: var(--blk-active-border);
+    border-color: var(--blk-active-border);
+    color: #fff;
+  }
+  .blk-tag {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .blk-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12.5px;
+    color: var(--fg);
+  }
+
+  .blk-body { padding: 7px 10px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 9px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    line-height: 1.5;
+    /* Wrap long lines instead of silently clipping them. Python indentation
+       is preserved via white-space: pre-wrap; continuation lines hang from
+       a small left indent so the wrap is visible but not jarring. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    color: var(--fg);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .code-block .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  .code-block .tok-type { color: var(--tok-type); }
+  .code-block .tok-str { color: var(--tok-str); }
+  .code-block .tok-com { color: var(--tok-com); font-style: italic; }
+  .code-block .tok-fn { color: var(--tok-fn); }
+
+  .blk-says {
+    font-size: 12px;
+    color: var(--fg);
+    line-height: 1.5;
+    font-weight: 500;
+  }
+  .blk-code-label {
+    font-family: ui-monospace, monospace;
+    font-size: 8.5px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-faint);
+    margin-bottom: -2px;
+  }
+
+  .port-section {
+    border-radius: 4px;
+    padding: 4px 7px;
+    font-size: 10.5px;
+    line-height: 1.4;
+  }
+  .port-section.in  { background: rgba(61,138,92,0.07);  border-left: 2.5px solid var(--port-in); }
+  .port-section.out { background: rgba(164,51,42,0.06);  border-left: 2.5px solid var(--port-out); }
+  .port-label {
+    font-family: ui-monospace, monospace;
+    font-size: 8.5px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .port-section.in  .port-label { color: var(--port-in); }
+  .port-section.out .port-label { color: var(--port-out); }
+  .port-item {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+    display: block;
+    margin-top: 1px;
+  }
+  .port-item .key { color: var(--fg-soft); }
+  .port-item .type { color: var(--tok-type); }
+
+  .blk-source {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    text-align: right;
+  }
+
+  .flow-arrow {
+    align-self: center;
+    color: var(--fg-faint);
+    font-size: 14px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  /* Side panel */
+  .side {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 16px 30px;
+  }
+  .side h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
+  }
+
+  .step-nav {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .step-nav .step-counter {
+    color: var(--fg-soft); flex: 1;
+  }
+  .step-nav .step-counter strong { color: var(--fg); font-weight: 700; }
+  .step-nav button {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    color: var(--fg);
+    cursor: pointer;
+    transition: all 80ms;
+  }
+  .step-nav button:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .step-nav button:disabled {
+    color: var(--fg-faint); cursor: default; opacity: 0.5;
+  }
+  .step-nav kbd {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    background: rgba(0,0,0,0.05);
+    border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 3px;
+    padding: 0 3px;
+    color: var(--fg-faint);
+    margin-left: 4px;
+  }
+
+  .next-hint {
+    margin-top: 12px; padding: 8px 10px;
+    background: var(--bg-soft);
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    line-height: 1.4;
+  }
+  .next-hint .nh-label {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    display: block; margin-bottom: 2px;
+  }
+  .next-hint .nh-link {
+    color: var(--accent); cursor: pointer;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+  }
+  .next-hint .nh-link:hover { text-decoration: underline; }
+  .next-hint .nh-kind {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    background: rgba(91,108,255,0.10);
+    color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+    margin-left: 6px;
+    letter-spacing: 0.05em;
+  }
+  .next-hint .nh-kind.async {
+    background: rgba(207,128,194,0.18); color: #a64798;
+  }
+  .next-hint .nh-kind.error {
+    background: rgba(197,67,67,0.15); color: #c54343;
+  }
+  .focus-name {
+    font-family: ui-monospace, monospace;
+    font-size: 16px; font-weight: 700; margin-bottom: 4px;
+    color: var(--blk-active-border);
+  }
+  .focus-purpose {
+    font-size: 12.5px; color: var(--fg);
+    margin-bottom: 12px; line-height: 1.5;
+  }
+  .reads-writes { margin-bottom: 12px; font-size: 11.5px; line-height: 1.5; }
+  .reads-writes .rw-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .reads-writes .rw-chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    background: var(--bg-soft);
+    padding: 1px 6px; border-radius: 3px;
+    margin-right: 4px; margin-top: 2px;
+    border: 1px solid var(--border);
+  }
+  .reads-writes .rw-chip.read  { color: var(--arrow-read); border-color: #c5d0fc; background:#eef0ff; }
+  .reads-writes .rw-chip.write { color: var(--arrow-write); border-color: #f8c5c5; background:#fff0f0; }
+  pre.code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.55;
+    overflow-x: auto;
+    margin: 0 0 10px;
+    color: var(--fg);
+  }
+  pre.code .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  pre.code .tok-type { color: var(--tok-type); }
+  pre.code .tok-str { color: var(--tok-str); }
+  pre.code .tok-com { color: var(--tok-com); font-style: italic; }
+  pre.code .tok-fn { color: var(--tok-fn); }
+  .code-loc {
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    margin-bottom: 5px;
+  }
+
+  svg.arrows {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
+  }
+
+  .placeholder {
+    margin: 80px auto 0; max-width: 480px; text-align: center;
+    color: var(--fg-faint); font-style: italic;
+  }
+  .placeholder strong { color: var(--fg-soft); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1 id="hdr-title">📐 Code walkthrough</h1>
+    <div class="crumb" id="hdr-crumb"></div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--arrow-read)"></span>reads</span>
+      <span><span class="swatch" style="background:var(--arrow-write)"></span>writes</span>
+      <span><span class="swatch" style="background:var(--arrow-rw)"></span>reads + writes</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+  <section class="canvas"><div class="canvas-inner" id="canvas-inner"></div></section>
+  <aside class="side" id="side">
+    <div class="step-nav" id="step-nav">
+      <span class="step-counter" id="step-counter">—</span>
+      <button id="btn-prev" title="Previous step (←)">◀ Prev</button>
+      <button id="btn-next" title="Next step (→)">Next ▶</button>
+    </div>
+    <h2>Selected logic block</h2>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-purpose" id="focus-purpose">Click any block on the canvas, or use ◀ / ▶ to walk through.</div>
+    <div class="reads-writes" id="focus-rw"></div>
+    <div class="code-loc" id="focus-loc"></div>
+    <pre class="code" id="focus-code"></pre>
+    <div id="focus-next"></div>
+  </aside>
+</div>
+
+
+<script>
+  const WALKTHROUGH_DATA = /*WALKTHROUGH_DATA_PLACEHOLDER*/;
+
+  // ---------- State ----------
+  const STATE = {
+    activeStorylineId: null,
+    activeBlockId: null,
+  };
+
+  // ---------- Adapt v0.5-reading storyline → v4-mock-style view object ----------
+  // Each storyline.diagram has:
+  //   data_structures: [{id, name, type, role, schema_pieces?, ops_r?, ops_w?}]
+  //   cols:            [{id, function, label, description, blocks}]
+  //   edges:           [{from, to, label, style, color}]   (control flow, kept but not primary in this view)
+  // Each block additionally may carry (NEW for diagram view):
+  //   inputs:          [[key, type]]
+  //   outputs:         [[key, value]]
+  //   state_effects:   [{ds_id, op, kind: read|write|rw}]
+  //
+  // We derive: which DSes this storyline touches, the flat block sequence with col labels,
+  // and the connection list (block_id → ds_id).
+  function viewForStoryline(sl) {
+    const diag = sl.diagram || {};
+    const cols = diag.cols || [];
+    const blocksFlat = [];
+    cols.forEach(col => {
+      (col.blocks || []).forEach((b, bi) => {
+        blocksFlat.push({ ...b, _col: col, _step: blocksFlat.length + 1 });
+      });
+    });
+    const stepById = {};
+    blocksFlat.forEach(b => { stepById[b.id] = b._step; });
+    const touches = new Set();
+    blocksFlat.forEach(b => (b.state_effects || []).forEach(e => touches.add(e.ds_id)));
+    const connections = [];
+    blocksFlat.forEach(b => (b.state_effects || []).forEach(e => connections.push({
+      from: b.id, to: e.ds_id, kind: e.kind || 'rw', label: e.op || ''
+    })));
+    // Block→block edges (cross-column flow): CALL, ON SUCCESS, ON ERROR, call_soon, etc.
+    // Filter to edges whose endpoints are both blocks in this storyline.
+    const blockIds = new Set(blocksFlat.map(b => b.id));
+    const flowEdges = (diag.edges || []).filter(e => blockIds.has(e.from) && blockIds.has(e.to));
+    return {
+      id: sl.id,
+      title: sl.title,
+      source: (sl.files_touched || [])[0] || '',
+      summary: sl.summary || '',
+      placeholder: sl.depth === 'summary' || !sl.diagram,
+      touches,
+      data_structures: diag.data_structures || [],
+      cols,
+      blocks: blocksFlat,
+      stepById,
+      connections,
+      edges: flowEdges,
+      defaultActive: blocksFlat[0]?.id || null,
+    };
+  }
+
+  // ---------- Tabs ----------
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    (WALKTHROUGH_DATA.storylines || []).forEach(sl => {
+      const t = document.createElement('div');
+      t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
+      t.innerHTML = '<span class="tab-num">' + esc(sl.id) + '</span><span class="tab-name">' + esc(sl.title) + '</span>';
+      t.onclick = () => setStoryline(sl.id);
+      root.appendChild(t);
+    });
+  }
+
+  // ---------- Data structures grid ----------
+  function renderDS(view) {
+    const grid = document.createElement('div');
+    grid.className = 'ds-grid';
+    view.data_structures.forEach((ds, i) => {
+      const touched = view.touches.has(ds.id);
+      const box = document.createElement('div');
+      // Use "pool" cls for any wide DS (every other slot if many); otherwise alternate waiting/running/cache
+      const cls = ds.cls || ['waiting', 'running', 'pool', 'cache'][i % 4];
+      box.className = 'ds-box ' + cls + (touched ? ' touched' : ' untouched');
+      box.id = 'ds-' + ds.id;
+      const opsR = (ds.ops_r || []).map(o => '<span class="op-chip r">' + esc(o) + '</span>').join('');
+      const opsW = (ds.ops_w || []).map(o => '<span class="op-chip w">' + esc(o) + '</span>').join('');
+      // Shape visual: prefer structured `shape` field over legacy schema_pieces
+      let shapeHtml;
+      if (ds.shape && typeof ds.shape === 'object') {
+        shapeHtml = renderShape(ds.shape);
+      } else if (ds.schema_pieces && ds.schema_pieces.length) {
+        shapeHtml = '<div class="ds-shape">' +
+          ds.schema_pieces.map(p => '<span class="schema-piece">' + esc(p) + '</span>').join('') +
+          '</div>';
+      } else {
+        shapeHtml = '<div class="ds-shape"><span class="placeholder">…</span></div>';
+      }
+      box.innerHTML =
+        '<div class="ds-head">' +
+          '<span class="ds-name">' + esc(ds.name) + '</span>' +
+          (ds.type ? '<span class="ds-type">: ' + esc(ds.type) + '</span>' : '') +
+          (ds.role ? '<span class="ds-role">' + esc(ds.role) + '</span>' : '') +
+        '</div>' +
+        shapeHtml +
+        ((opsR || opsW) ? '<div class="ds-ops">' + opsR + opsW + '</div>' : '');
+      grid.appendChild(box);
+    });
+    return grid;
+  }
+
+  // ---------- Logic blocks (grouped by col) ----------
+  function renderBlocksArea(view) {
+    const area = document.createElement('div');
+    area.style.display = 'flex';
+    area.style.flexDirection = 'column';
+    area.style.gap = '12px';
+
+    view.cols.forEach((col, ci) => {
+      const colHeader = document.createElement('div');
+      colHeader.className = 'col-header';
+      const sigHtml =
+        '<div class="col-sig">' +
+          '<span class="col-kw">def</span> ' +
+          '<span class="col-fn">' + esc(col.function || col.label || col.id) + '</span>' +
+          '<span class="col-paren">(…)</span>' +
+        '</div>';
+      const descHtml = col.description
+        ? '<div class="col-desc">' + esc(col.description) + '</div>'
+        : '';
+      colHeader.innerHTML = sigHtml + descHtml;
+      area.appendChild(colHeader);
+
+      const row = document.createElement('div');
+      row.className = 'blocks-area';
+      (col.blocks || []).forEach((b, bi) => {
+        if (bi > 0) {
+          const arr = document.createElement('div');
+          arr.className = 'flow-arrow';
+          arr.textContent = '▶';
+          row.appendChild(arr);
+        }
+        // Decorate with _step + _col so renderBlock sees them
+        const decorated = { ...b, _col: col, _step: view.stepById[b.id] };
+        row.appendChild(renderBlock(decorated, view));
+      });
+      area.appendChild(row);
+    });
+    return area;
+  }
+
+  function renderBlock(b, view) {
+    const blk = document.createElement('div');
+    blk.className = 'blk' + (STATE.activeBlockId === b.id ? ' active' : '');
+    blk.id = b.id;
+    const inputsHtml = (b.inputs || []).map(([k, v]) =>
+      '<span class="port-item"><span class="key">' + esc(k) + ':</span> <span class="type">' + esc(v) + '</span></span>').join('');
+    const outputsHtml = (b.outputs || []).map(([k, v]) =>
+      '<span class="port-item"><span class="key">' + esc(k) + ':</span> ' + esc(v) + '</span>').join('');
+    // The "code" is either an explicit block.code field OR the first ~6 lines of code_view.lines
+    let codeHtml = '';
+    if (b.code) {
+      codeHtml = b.code;  // pre-formatted HTML allowed
+    } else if (b.code_view && b.code_view.lines) {
+      const range = parseRange(b.line_range);
+      const inRange = (l) => !range || (l.line_num >= range[0] && l.line_num <= range[1]);
+      codeHtml = b.code_view.lines
+        .filter(inRange)
+        .slice(0, 8)
+        .map(l => highlight(l.content))
+        .join('\n');
+    }
+    blk.innerHTML =
+      '<div class="blk-head">' +
+        (b._step ? '<div class="blk-step">' + b._step + '</div>' : '') +
+        '<div class="blk-tag">' + esc(b.phase || '') + (b.line_range ? ' · ' + esc(b.line_range) : '') + '</div>' +
+        '<div class="blk-name">' + esc(b.title || b.name || b.id) + '</div>' +
+      '</div>' +
+      '<div class="blk-body">' +
+        (b.one_liner ? '<div class="blk-says">' + esc(b.one_liner) + '</div>' : '') +
+        (inputsHtml ? '<div class="port-section in"><div class="port-label">▸ in</div>' + inputsHtml + '</div>' : '') +
+        (outputsHtml ? '<div class="port-section out"><div class="port-label">out ▸</div>' + outputsHtml + '</div>' : '') +
+        (codeHtml ? '<div class="blk-code-label">code</div><pre class="code-block">' + codeHtml + '</pre>' : '') +
+      '</div>';
+    blk.onclick = () => { STATE.activeBlockId = b.id; renderCanvas(); renderSidePanel(); };
+    return blk;
+  }
+
+  // ---------- Canvas ----------
+  function renderCanvas() {
+    const inner = document.getElementById('canvas-inner');
+    inner.innerHTML = '';
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) { inner.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
+    const view = viewForStoryline(sl);
+
+    const banner = document.createElement('div');
+    banner.className = 'fn-banner b-' + sl.id;
+    banner.innerHTML =
+      '<div class="b-title">' + esc(sl.title) +
+      (view.source ? ' <span class="b-source">' + esc(view.source) + '</span>' : '') +
+      '</div>' +
+      '<div>' + esc(view.summary) + '</div>';
+    inner.appendChild(banner);
+
+    if (view.placeholder) {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.innerHTML = '<strong>' + esc(sl.title) + '</strong> — summary-only storyline.<br>' + esc(view.summary);
+      inner.appendChild(p);
+      return;
+    }
+
+    if (view.data_structures.length) inner.appendChild(renderDS(view));
+    inner.appendChild(renderBlocksArea(view));
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'arrows'); svg.id = 'arrows';
+    inner.appendChild(svg);
+    requestAnimationFrame(() => drawArrows(view));
+  }
+
+  // Classify an edge label/style into a flow kind: call | async | error | success | return | plain
+  function edgeKind(e) {
+    const lbl = String(e.label || '').toUpperCase();
+    const style = String(e.style || '').toLowerCase();
+    if (/ERROR|EXCEPT|RAISE|CATCH/.test(lbl)) return 'error';
+    if (style === 'dashed' || /ASYNC|CALL_SOON|SIGNAL|NOTIFY|SCHEDULE|ENQUEUE|RESUME|CALLBACK/.test(lbl)) return 'async';
+    if (/SUCCESS|OK|THEN/.test(lbl)) return 'success';
+    if (/RETURN|RET\b/.test(lbl)) return 'return';
+    if (/CALL|INVOKE/.test(lbl)) return 'call';
+    return 'plain';
+  }
+  const EDGE_COLOR = {
+    call:    '#2f7a2f', async:   '#a64798', error:   '#c54343',
+    success: '#2f7a2f', return:  '#5b6cff', plain:   '#57606a',
+  };
+
+  function drawArrows(view) {
+    const svg = document.getElementById('arrows');
+    if (!svg) return;
+    const canvas = document.getElementById('canvas-inner');
+    const rect = canvas.getBoundingClientRect();
+    svg.setAttribute('viewBox', '0 0 ' + canvas.scrollWidth + ' ' + canvas.scrollHeight);
+    svg.setAttribute('width', canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+
+    const defs = '<defs>' +
+      '<marker id="m-read"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>' +
+      '<marker id="m-write" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a4332a" /></marker>' +
+      '<marker id="m-rw"    markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#8a5a14" /></marker>' +
+      '<marker id="m-flow-call"    markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#2f7a2f" /></marker>' +
+      '<marker id="m-flow-async"   markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a64798" /></marker>' +
+      '<marker id="m-flow-error"   markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#c54343" /></marker>' +
+      '<marker id="m-flow-success" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#2f7a2f" /></marker>' +
+      '<marker id="m-flow-return"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>' +
+      '<marker id="m-flow-plain"   markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#57606a" /></marker>' +
+      '</defs>';
+    const parts = [];
+
+    // 1) Block→block flow edges (always visible — they're the narrative spine)
+    (view.edges || []).forEach(e => {
+      const fromEl = document.getElementById(e.from);
+      const toEl   = document.getElementById(e.to);
+      if (!fromEl || !toEl) return;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const kind = edgeKind(e);
+      const color = EDGE_COLOR[kind];
+      const isActive = (e.from === STATE.activeBlockId || e.to === STATE.activeBlockId);
+      const dashed = (kind === 'async');
+
+      // Anchor points: bottom-center of `from`, top-center of `to`.
+      // Falls back to right→left for same-row neighbors.
+      const sameRow = Math.abs((fr.top + fr.height/2) - (tr.top + tr.height/2)) < fr.height/2;
+      let x1, y1, x2, y2, d;
+      if (sameRow) {
+        x1 = fr.right - rect.left;
+        y1 = fr.top + fr.height/2 - rect.top;
+        x2 = tr.left  - rect.left;
+        y2 = tr.top  + tr.height/2 - rect.top;
+        const midX = (x1 + x2) / 2;
+        d = 'M ' + x1 + ' ' + y1 + ' C ' + midX + ' ' + y1 + ', ' + midX + ' ' + y2 + ', ' + x2 + ' ' + y2;
+      } else {
+        x1 = fr.left + fr.width/2 - rect.left;
+        y1 = fr.bottom - rect.top;
+        x2 = tr.left + tr.width/2 - rect.left;
+        y2 = tr.top - rect.top;
+        const midY = (y1 + y2) / 2;
+        d = 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + midY + ', ' + x2 + ' ' + midY + ', ' + x2 + ' ' + y2;
+      }
+      const strokeW = isActive ? 2.4 : 1.6;
+      const opacity = isActive ? 1.0 : 0.45;
+      const dashAttr = dashed ? ' stroke-dasharray="6 4"' : '';
+      parts.push('<path d="' + d + '" stroke="' + color + '" stroke-width="' + strokeW + '" fill="none" ' +
+        'marker-end="url(#m-flow-' + kind + ')" opacity="' + opacity + '"' + dashAttr + ' />');
+
+      if (e.label) {
+        const lx = sameRow ? (x1 + x2) / 2 : (x1 + x2) / 2;
+        const ly = sameRow ? ((y1 + y2) / 2 - 4) : ((y1 + y2) / 2);
+        const w = String(e.label).length * 5.4 + 14;
+        const bg = kind === 'error' ? '#fff0f0'
+                 : kind === 'async' ? '#fbeefa'
+                 : kind === 'call' || kind === 'success' ? '#eef9ee'
+                 : '#eef0ff';
+        parts.push('<rect x="' + (lx - w/2) + '" y="' + (ly - 8) + '" width="' + w + '" height="14" rx="3" ' +
+          'fill="' + bg + '" stroke="' + color + '" stroke-width="0.7" opacity="' + opacity + '" />');
+        parts.push('<text x="' + lx + '" y="' + (ly + 2) + '" text-anchor="middle" fill="' + color +
+          '" font-family="ui-monospace, monospace" font-size="9.5" font-weight="700" opacity="' + opacity + '">' +
+          esc(e.label) + '</text>');
+      }
+    });
+
+    // 2) Block→data-structure arrows (only for the active block, as before)
+    view.connections.forEach(c => {
+      if (c.from !== STATE.activeBlockId) return;
+      const fromEl = document.getElementById(c.from);
+      const toEl = document.getElementById('ds-' + c.to);
+      if (!fromEl || !toEl) return;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const x1 = fr.left - rect.left + fr.width / 2;
+      const y1 = fr.top - rect.top;
+      const dsLeft = tr.left - rect.left;
+      const dsRight = tr.right - rect.left;
+      const dsBottom = tr.bottom - rect.top;
+      const x2 = Math.max(dsLeft + 25, Math.min(dsRight - 25, x1));
+      const y2 = dsBottom;
+      const midY = (y1 + y2) / 2;
+      const d = 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + midY + ', ' + x2 + ' ' + midY + ', ' + x2 + ' ' + y2;
+      const color = c.kind === 'read' ? '#5b6cff' : c.kind === 'write' ? '#a4332a' : '#8a5a14';
+      const marker = c.kind === 'read' ? 'm-read' : c.kind === 'write' ? 'm-write' : 'm-rw';
+      parts.push('<path d="' + d + '" stroke="' + color + '" stroke-width="2.4" fill="none" marker-end="url(#' + marker + ')" />');
+      if (c.label) {
+        const lx = (x1 + x2) / 2, ly = midY - 4;
+        const w = c.label.length * 5.4 + 12;
+        parts.push('<rect x="' + (lx - w/2) + '" y="' + (ly - 9) + '" width="' + w + '" height="14" rx="3" fill="' +
+          (color === '#5b6cff' ? '#eef0ff' : color === '#a4332a' ? '#fff0f0' : '#fff8dd') +
+          '" stroke="' + color + '" stroke-width="0.7"/>');
+        parts.push('<text x="' + lx + '" y="' + (ly + 1) + '" text-anchor="middle" fill="' + color +
+          '" font-family="ui-monospace, monospace" font-size="9.5" font-weight="700">' + esc(c.label) + '</text>');
+      }
+    });
+    svg.innerHTML = defs + parts.join('');
+  }
+
+  // ---------- Step navigation ----------
+  // The "next" block is computed as: the first outgoing flow edge from the active
+  // block (preferring CALL/SUCCESS/PLAIN over ERROR/ASYNC so the happy path wins),
+  // OR if there's no outgoing edge, the next block in source order within the storyline.
+  function nextStep(view, blockId) {
+    const outs = (view.edges || []).filter(e => e.from === blockId);
+    if (outs.length) {
+      const ranked = outs.slice().sort((a, b) => {
+        const order = { call: 0, success: 0, plain: 1, return: 2, async: 3, error: 4 };
+        return (order[edgeKind(a)] ?? 5) - (order[edgeKind(b)] ?? 5);
+      });
+      return { id: ranked[0].to, via: ranked[0], alternates: ranked.slice(1) };
+    }
+    const i = view.blocks.findIndex(b => b.id === blockId);
+    const nb = view.blocks[i + 1];
+    return nb ? { id: nb.id, via: null, alternates: [] } : null;
+  }
+  function prevStep(view, blockId) {
+    const ins = (view.edges || []).filter(e => e.to === blockId);
+    if (ins.length) {
+      const ranked = ins.slice().sort((a, b) => {
+        const order = { call: 0, success: 0, plain: 1, return: 2, async: 3, error: 4 };
+        return (order[edgeKind(a)] ?? 5) - (order[edgeKind(b)] ?? 5);
+      });
+      return { id: ranked[0].from };
+    }
+    const i = view.blocks.findIndex(b => b.id === blockId);
+    const pb = view.blocks[i - 1];
+    return pb ? { id: pb.id } : null;
+  }
+
+  function gotoBlock(blockId) {
+    if (!blockId) return;
+    STATE.activeBlockId = blockId;
+    renderCanvas();
+    renderSidePanel();
+    // Scroll the active block into view
+    const el = document.getElementById(blockId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
+
+  // ---------- Side panel ----------
+  function renderSidePanel() {
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) return;
+    const view = viewForStoryline(sl);
+    const b = view.blocks.find(b => b.id === STATE.activeBlockId);
+    const f = id => document.getElementById(id);
+
+    // Step nav bar
+    const total = view.blocks.length;
+    const stepNum = b ? b._step : 0;
+    const prev = b ? prevStep(view, b.id) : null;
+    const next = b ? nextStep(view, b.id) : null;
+    f('step-counter').innerHTML = b
+      ? 'Step <strong>' + stepNum + '</strong> / ' + total
+      : '—';
+    const btnP = f('btn-prev'); const btnN = f('btn-next');
+    btnP.disabled = !prev;
+    btnN.disabled = !next;
+    btnP.onclick = () => prev && gotoBlock(prev.id);
+    btnN.onclick = () => next && gotoBlock(next.id);
+
+    if (!b) {
+      f('focus-name').textContent = '—';
+      f('focus-purpose').textContent = 'Click any block, or use ◀ / ▶ to walk through.';
+      f('focus-rw').innerHTML = '';
+      f('focus-loc').textContent = '';
+      f('focus-code').textContent = '';
+      f('focus-next').innerHTML = '';
+      return;
+    }
+    const rp = b.right_panel || {};
+    f('focus-name').textContent = b.title || b.name || b.id;
+    f('focus-purpose').textContent = rp.what_it_does || b.one_liner || '';
+    const why = rp.why_its_here ? '<div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--fg-soft);"><strong style="color: var(--fg);">Why it\'s here:</strong> ' + esc(rp.why_its_here) + '</div>' : '';
+    const touches = (rp.touches || []).map(t => '<span class="rw-chip">' + esc(t.label) + '</span>').join('');
+    const stateEffects = (b.state_effects || []).map(e => {
+      const cls = e.kind === 'read' ? 'read' : e.kind === 'write' ? 'write' : '';
+      return '<span class="rw-chip ' + cls + '">' + esc(e.op || '') + ' → ' + esc(e.ds_id) + '</span>';
+    }).join('');
+    const failureMode = (rp.failure_mode || []).map(s => '<div style="margin-top:4px; padding-left:8px; border-left: 2px solid #f5cdc6; font-size: 11.5px; color: var(--fg-soft);">' + esc(s) + '</div>').join('');
+    f('focus-rw').innerHTML =
+      (stateEffects ? '<div><span class="rw-label">state effects</span>' + stateEffects + '</div>' : '') +
+      (touches ? '<div style="margin-top:4px"><span class="rw-label">touches</span>' + touches + '</div>' : '') +
+      why +
+      (failureMode ? '<div style="margin-top:10px; padding-top:8px; border-top: 1px solid var(--border);"><div class="rw-label" style="margin-bottom:4px;">failure mode</div>' + failureMode + '</div>' : '');
+    f('focus-loc').textContent = (b.code_view ? b.code_view.file + ':' + (b.line_range || '') : '');
+    if (b.code_view && b.code_view.lines) {
+      f('focus-code').textContent = b.code_view.lines.map(l => l.content).join('\n');
+    } else {
+      f('focus-code').textContent = '';
+    }
+
+    // Next-step hint(s): primary + any alternates (e.g. ON SUCCESS vs ON ERROR)
+    if (next) {
+      const nextBlock = view.blocks.find(x => x.id === next.id);
+      const primary = renderNextLink('Next', next, nextBlock);
+      const altLinks = next.alternates.map(e => {
+        const ab = view.blocks.find(x => x.id === e.to);
+        const kind = edgeKind(e);
+        const kindCls = (kind === 'async' || kind === 'error') ? kind : '';
+        const kindLabel = e.label || kind.toUpperCase();
+        return ab ? '<div style="margin-top:6px;"><span class="nh-kind ' + kindCls + '">' + esc(kindLabel) + '</span> ' +
+          '<span class="nh-link" data-go="' + esc(ab.id) + '">→ #' + ab._step + ' ' + esc(ab.title || ab.id) + '</span></div>' : '';
+      }).join('');
+      f('focus-next').innerHTML = primary + altLinks;
+      f('focus-next').querySelectorAll('[data-go]').forEach(el => {
+        el.onclick = () => gotoBlock(el.getAttribute('data-go'));
+      });
+    } else {
+      f('focus-next').innerHTML = '<div class="next-hint" style="opacity:0.7"><span class="nh-label">End of storyline</span>This is the last step in this storyline.</div>';
+    }
+  }
+
+  function renderNextLink(label, step, block) {
+    if (!block) return '';
+    const kind = step.via ? edgeKind(step.via) : 'plain';
+    const kindCls = (kind === 'async' || kind === 'error') ? kind : '';
+    const viaLabel = step.via && step.via.label ? step.via.label : (step.via ? kind.toUpperCase() : 'in source order');
+    return '<div class="next-hint">' +
+      '<span class="nh-label">' + esc(label) + ' &mdash; <kbd>→</kbd></span>' +
+      '<span class="nh-kind ' + kindCls + '">' + esc(viaLabel) + '</span> ' +
+      '<span class="nh-link" data-go="' + esc(block.id) + '">→ #' + block._step + ' ' + esc(block.title || block.id) + '</span>' +
+      '</div>';
+  }
+
+  // ---------- Shape renderers (compact, type-level, no instance content) ----------
+  function renderShape(shape) {
+    if (!shape || !shape.kind) return '<div class="shape-row"><span class="note">…</span></div>';
+    switch (shape.kind) {
+      case 'deque':     return renderDequeShape(shape);
+      case 'grid':      return renderListShape(shape);   // grid = fixed-size list
+      case 'list':      return renderListShape(shape);
+      case 'set':       return renderSetShape(shape);
+      case 'dict':      return renderDictShape(shape);
+      case 'scalar':    return renderScalarShape(shape);
+      case 'composite': return renderCompositeShape(shape);
+      default:          return '<div class="shape-row"><span class="note">' + esc(shape.kind) + '</span></div>';
+    }
+  }
+  // deque: HEAD endpoint with popleft op ─── TAIL endpoint with append op
+  // No slots. Just shows the two ends, their direction, and item type.
+  function renderDequeShape(s) {
+    const it = s.item_type ? ' <span class="type">' + esc(s.item_type) + '</span>' : '';
+    return '<div class="shape-row">' +
+      '<div class="shape-deque-line">' +
+        '<div class="shape-deque-end">◀ popleft<span class="end-label">HEAD</span></div>' +
+        '<div class="shape-deque-track"></div>' +
+        '<div class="shape-deque-end">append ▶<span class="end-label">TAIL</span></div>' +
+      '</div>' +
+      (it ? '<span class="note">items:</span>' + it : '') +
+      '</div>';
+  }
+  // list/grid: [Type × N], no cells drawn
+  function renderListShape(s) {
+    const n = s.capacity != null ? ' <span class="mul">× ' + s.capacity + '</span>' : '';
+    const t = s.item_type ? '<span class="type">' + esc(s.item_type) + '</span>' : '<span class="type">item</span>';
+    const note = s.access || (s.capacity != null ? 'random access by index' : 'ordered');
+    return '<div class="shape-row">' +
+      '<div class="shape-list-glyph"><span class="bracket">[</span>' + t + n + '<span class="bracket">]</span></div>' +
+      '<span class="note">' + esc(note) + '</span>' +
+      '</div>';
+  }
+  // set: {Type}, unordered/unique
+  function renderSetShape(s) {
+    const t = s.item_type ? '<span class="type">' + esc(s.item_type) + '</span>' : '<span class="type">item</span>';
+    return '<div class="shape-row">' +
+      '<div class="shape-set-glyph"><span class="brace">{</span>' + t + '<span class="brace">}</span></div>' +
+      '<span class="note">unordered, unique; O(1) membership</span>' +
+      '</div>';
+  }
+  // dict: key ──→ value
+  function renderDictShape(s) {
+    const k = '<span class="key">' + esc(s.key_label || s.key_type || 'key') + '</span>';
+    const v = '<span class="val">' + esc(s.value_label || s.value_type || 'value') + '</span>';
+    return '<div class="shape-row">' +
+      '<div class="shape-dict-glyph">' + k + '<span class="map-arrow">──▶</span>' + v + '</div>' +
+      '<span class="note">O(1) lookup</span>' +
+      '</div>';
+  }
+  // scalar: just the type
+  function renderScalarShape(s) {
+    return '<div class="shape-row">' +
+      '<div class="shape-scalar-glyph">' + esc(s.value_type || 'value') + '</div>' +
+      '</div>';
+  }
+  // composite: 2-col table — field name | shape glyph
+  function renderCompositeShape(s) {
+    const rows = (s.pieces || []).map(p =>
+      '<tr>' +
+        '<td class="field">.' + esc(p.name) + '</td>' +
+        '<td class="shape-cell">' + renderShape(p) + '</td>' +
+      '</tr>'
+    ).join('');
+    return '<table class="shape-composite-table">' + rows + '</table>';
+  }
+
+  function setStoryline(id) {
+    STATE.activeStorylineId = id;
+    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === id);
+    const v = sl ? viewForStoryline(sl) : null;
+    STATE.activeBlockId = v ? v.defaultActive : null;
+    renderTabs();
+    renderCanvas();
+    renderSidePanel();
+  }
+
+  // ---------- Helpers ----------
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function parseRange(s) {
+    if (!s) return null;
+    const m = String(s).match(/L?(\d+)[–\-—](\d+)/);
+    if (m) return [+m[1], +m[2]];
+    const single = String(s).match(/L?(\d+)/);
+    if (single) return [+single[1], +single[1]];
+    return null;
+  }
+  // Python syntax highlighter. Tokenize first on the RAW source, then esc
+  // each token's text and wrap in <span> — avoids the bug where a string
+  // regex matches inside class="tok-kw" attributes we'd inserted earlier.
+  const PY_KEYWORDS = new Set(['def','class','if','elif','else','return','while','for','in','not','and','or','break','continue','import','from','as','with','try','except','finally','raise','yield','lambda','self','None','True','False','pass','assert']);
+  function highlight(line) {
+    const src = String(line == null ? '' : line);
+    const out = [];
+    let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '#') { out.push(['com', src.slice(i)]); break; }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < src.length && src[j] !== c) {
+          if (src[j] === '\\') j += 2; else j++;
+        }
+        out.push(['str', src.slice(i, Math.min(j + 1, src.length))]);
+        i = Math.min(j + 1, src.length); continue;
+      }
+      if (/[0-9]/.test(c) && (i === 0 || !/[A-Za-z_]/.test(src[i-1]))) {
+        let j = i;
+        while (j < src.length && /[0-9._]/.test(src[j])) j++;
+        out.push(['num', src.slice(i, j)]);
+        i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        out.push([PY_KEYWORDS.has(word) ? 'kw' : null, word]);
+        i = j; continue;
+      }
+      out.push([null, c]); i++;
+    }
+    return out.map(([cls, text]) =>
+      cls ? '<span class="tok-' + cls + '">' + esc(text) + '</span>' : esc(text)
+    ).join('');
+  }
+
+  // ---------- Init ----------
+  function renderTopbar() {
+    const md = WALKTHROUGH_DATA.metadata || {};
+    const t = document.getElementById('hdr-title');
+    if (t) t.textContent = '📐 ' + (md.title || 'Code walkthrough');
+    const c = document.getElementById('hdr-crumb');
+    if (c) {
+      const parts = [];
+      if (md.repo) parts.push('<code>' + esc(md.repo) + '</code>');
+      const sm = WALKTHROUGH_DATA.summary || {};
+      if (sm.one_line) parts.push(esc(sm.one_line));
+      c.innerHTML = parts.join(' · ');
+    }
+  }
+
+  function init() {
+    if (!WALKTHROUGH_DATA || !WALKTHROUGH_DATA.storylines) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No walkthrough data injected.</div>';
+      return;
+    }
+    renderTopbar();
+    const firstFull = (WALKTHROUGH_DATA.storylines || []).find(s => s.depth !== 'summary' && s.diagram);
+    if (!firstFull) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No full-depth storyline with diagram found.</div>'; return; }
+    setStoryline(firstFull.id);
+    window.addEventListener('resize', () => {
+      const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (sl) drawArrows(viewForStoryline(sl));
+    });
+    // Keyboard navigation: ←/→ to walk the storyline
+    window.addEventListener('keydown', (ev) => {
+      if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (!sl) return;
+      const view = viewForStoryline(sl);
+      if (!STATE.activeBlockId) return;
+      const step = ev.key === 'ArrowRight'
+        ? nextStep(view, STATE.activeBlockId)
+        : prevStep(view, STATE.activeBlockId);
+      if (step) { ev.preventDefault(); gotoBlock(step.id); }
+    });
+  }
+  init();
+</script>
+
+</body>
+</html>

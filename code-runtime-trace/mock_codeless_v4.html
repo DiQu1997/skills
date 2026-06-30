@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock v4 — code walkthrough (not example walkthrough)</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+
+    --blk-bg:#fefefe;
+    --blk-border:#d0d7de;
+    --blk-active-bg:#fff8c5;
+    --blk-active-border:#bf8700;
+
+    --ds-waiting:#fff8e0;  --ds-waiting-border:#c79a09;
+    --ds-running:#e7dff5;  --ds-running-border:#5b3e9c;
+    --ds-pool:#dfeaf7;     --ds-pool-border:#205493;
+    --ds-cache:#dff0df;    --ds-cache-border:#1f883d;
+
+    --arrow-read:#5b6cff;
+    --arrow-write:#a4332a;
+    --arrow-rw:#8a5a14;
+
+    --port-in:#3d8a5c;
+    --port-out:#a4332a;
+
+    --code-bg:#fbfaf7;
+
+    --tok-kw:#5b3e9c; --tok-type:#205493; --tok-str:#8a5a14;
+    --tok-num:#2b6b5e; --tok-com:#8b949e; --tok-fn:#2f7a2f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "tabs   tabs"
+      "canvas side";
+    height: 100vh;
+  }
+  .topbar { grid-area: topbar; }
+  .tabs   { grid-area: tabs; }
+  .canvas { grid-area: canvas; }
+  .side   { grid-area: side; }
+
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .legend { margin-left: auto; display: flex; gap: 14px; font-size: 11px; color: var(--fg-soft); }
+  .topbar .legend .swatch {
+    display: inline-block; width: 16px; height: 2px;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  .tabs {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex; padding: 0 22px; gap: 4px;
+  }
+  .tab {
+    padding: 9px 16px;
+    cursor: pointer; font-size: 12.5px; color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    border-top: 1px solid transparent;
+    border-left: 1px solid transparent;
+    border-right: 1px solid transparent;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -1px;
+    user-select: none;
+    transition: all 120ms;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg); background: var(--bg);
+    border-color: var(--border);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint); margin-right: 5px;
+    padding: 1px 5px; border-radius: 3px; background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+  .tab .tab-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px;
+  }
+
+  .canvas {
+    overflow: auto;
+    background-image: radial-gradient(circle, #e1e4e8 1px, transparent 1px);
+    background-size: 18px 18px;
+    background-position: 0 0;
+    position: relative;
+  }
+  .canvas-inner {
+    position: relative;
+    padding: 14px 22px 26px;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .fn-banner {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+  }
+  .fn-banner.b-ST1 { border-left-color: var(--ds-waiting-border); }
+  .fn-banner.b-ST2 { border-left-color: #cf80c2; }
+  .fn-banner.b-ST3 { border-left-color: var(--ds-pool-border); }
+  .fn-banner.b-ST4 { border-left-color: var(--ds-cache-border); }
+  .fn-banner.b-ST5 { border-left-color: var(--ds-running-border); }
+  .fn-banner .b-title {
+    font-family: ui-monospace, monospace;
+    font-size: 14px; font-weight: 700; color: var(--fg);
+    margin-bottom: 2px;
+  }
+  .fn-banner .b-title .keyword { color: var(--tok-kw); font-weight: 600; }
+  .fn-banner .b-source {
+    margin-left: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-weight: 400;
+  }
+
+  /* Data structures — schemas (operations, not values) */
+  .ds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .ds-box {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    position: relative;
+  }
+  .ds-box.waiting { border-color: var(--ds-waiting-border); background: var(--ds-waiting); }
+  .ds-box.running { border-color: var(--ds-running-border); background: var(--ds-running); }
+  .ds-box.pool    { border-color: var(--ds-pool-border);    background: var(--ds-pool); grid-column: 1 / 3; }
+  .ds-box.cache   { border-color: var(--ds-cache-border);   background: var(--ds-cache); grid-column: 1 / 3; }
+  .ds-box.touched { box-shadow: 0 0 0 3px rgba(91,108,255,0.10), 0 1px 3px rgba(0,0,0,0.04); }
+  .ds-box.untouched { opacity: 0.40; }
+  .ds-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 5px; flex-wrap: wrap;
+  }
+  .ds-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; font-weight: 700;
+    color: var(--fg);
+  }
+  .ds-type {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--tok-type);
+  }
+  .ds-role {
+    margin-left: auto;
+    font-size: 10.5px; color: var(--fg-soft);
+    font-style: italic;
+  }
+  .ds-ops {
+    display: flex; gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .op-chip {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    background: rgba(255,255,255,0.6);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--fg);
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+  .op-chip.r { color: var(--arrow-read); }
+  .op-chip.w { color: var(--arrow-write); }
+  .ds-shape {
+    font-family: ui-monospace, monospace;
+    font-size: 11px; color: var(--fg);
+    margin-top: 5px;
+    display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap;
+  }
+  .ds-shape .endpoint {
+    color: var(--fg-faint); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .ds-shape .placeholder {
+    color: var(--fg-faint); font-style: italic;
+  }
+  .ds-shape .schema-piece {
+    background: rgba(255,255,255,0.55);
+    border: 1px dashed rgba(0,0,0,0.18);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 10.5px;
+  }
+
+  /* Logic blocks — code-walkthrough flavour */
+  .blocks-area {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    overflow-x: auto;
+    padding: 4px 4px 8px;
+  }
+  .blk {
+    background: var(--blk-bg);
+    border: 1.5px solid var(--blk-border);
+    border-radius: 8px;
+    padding: 0;
+    min-width: 230px;
+    max-width: 260px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 120ms, box-shadow 120ms;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .blk:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.10); }
+  .blk.active {
+    background: var(--blk-active-bg);
+    border-color: var(--blk-active-border);
+    border-width: 2px;
+    box-shadow: 0 0 0 4px rgba(191,135,0,0.22);
+  }
+
+  .blk-head {
+    background: rgba(0,0,0,0.04);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .blk.active .blk-head { background: rgba(191,135,0,0.16); border-color: var(--blk-active-border); }
+  .blk-tag {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .blk-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12.5px;
+    color: var(--fg);
+  }
+
+  .blk-body { padding: 7px 10px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    line-height: 1.45;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--fg);
+  }
+  .code-block .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  .code-block .tok-type { color: var(--tok-type); }
+  .code-block .tok-str { color: var(--tok-str); }
+  .code-block .tok-com { color: var(--tok-com); font-style: italic; }
+  .code-block .tok-fn { color: var(--tok-fn); }
+
+  .blk-says {
+    font-size: 11px;
+    color: var(--fg-soft);
+    line-height: 1.45;
+    border-left: 2px solid var(--border);
+    padding-left: 7px;
+  }
+
+  .port-section {
+    border-radius: 4px;
+    padding: 4px 7px;
+    font-size: 10.5px;
+    line-height: 1.4;
+  }
+  .port-section.in  { background: rgba(61,138,92,0.07);  border-left: 2.5px solid var(--port-in); }
+  .port-section.out { background: rgba(164,51,42,0.06);  border-left: 2.5px solid var(--port-out); }
+  .port-label {
+    font-family: ui-monospace, monospace;
+    font-size: 8.5px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .port-section.in  .port-label { color: var(--port-in); }
+  .port-section.out .port-label { color: var(--port-out); }
+  .port-item {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+    display: block;
+    margin-top: 1px;
+  }
+  .port-item .key { color: var(--fg-soft); }
+  .port-item .type { color: var(--tok-type); }
+
+  .blk-source {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    text-align: right;
+  }
+
+  .flow-arrow {
+    align-self: center;
+    color: var(--fg-faint);
+    font-size: 14px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  /* Side panel */
+  .side {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 16px 30px;
+  }
+  .side h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
+  }
+  .focus-name {
+    font-family: ui-monospace, monospace;
+    font-size: 16px; font-weight: 700; margin-bottom: 4px;
+    color: var(--blk-active-border);
+  }
+  .focus-purpose {
+    font-size: 12.5px; color: var(--fg);
+    margin-bottom: 12px; line-height: 1.5;
+  }
+  .reads-writes { margin-bottom: 12px; font-size: 11.5px; line-height: 1.5; }
+  .reads-writes .rw-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .reads-writes .rw-chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    background: var(--bg-soft);
+    padding: 1px 6px; border-radius: 3px;
+    margin-right: 4px; margin-top: 2px;
+    border: 1px solid var(--border);
+  }
+  .reads-writes .rw-chip.read  { color: var(--arrow-read); border-color: #c5d0fc; background:#eef0ff; }
+  .reads-writes .rw-chip.write { color: var(--arrow-write); border-color: #f8c5c5; background:#fff0f0; }
+  pre.code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.55;
+    overflow-x: auto;
+    margin: 0 0 10px;
+    color: var(--fg);
+  }
+  pre.code .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  pre.code .tok-type { color: var(--tok-type); }
+  pre.code .tok-str { color: var(--tok-str); }
+  pre.code .tok-com { color: var(--tok-com); font-style: italic; }
+  pre.code .tok-fn { color: var(--tok-fn); }
+  .code-loc {
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    margin-bottom: 5px;
+  }
+
+  svg.arrows {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
+  }
+
+  .placeholder {
+    margin: 80px auto 0; max-width: 480px; text-align: center;
+    color: var(--fg-faint); font-style: italic;
+  }
+  .placeholder strong { color: var(--fg-soft); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1>📐 Mock v4 — code walkthrough (parameterized, not example-bound)</h1>
+    <div class="crumb">
+      <code>nano-vllm</code> · explaining what the code does, no specific input baked in
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--arrow-read)"></span>reads</span>
+      <span><span class="swatch" style="background:var(--arrow-write)"></span>writes</span>
+      <span><span class="swatch" style="background:var(--arrow-rw)"></span>reads + writes</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+  <section class="canvas"><div class="canvas-inner" id="canvas-inner"></div></section>
+  <aside class="side" id="side">
+    <h2>Selected logic block</h2>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-purpose" id="focus-purpose">Click any block on the canvas.</div>
+    <div class="reads-writes" id="focus-rw"></div>
+    <div class="code-loc" id="focus-loc"></div>
+    <pre class="code" id="focus-code"></pre>
+  </aside>
+</div>
+
+<script>
+  // ============ Code walkthrough data ============
+  // Tabs are CODE PATHS, not scenarios. Blocks describe what THE CODE DOES,
+  // parameterized over inputs. Data structures shown as SCHEMAS (type +
+  // operations the code performs on them), not as specific values.
+  //
+  // Compare with v3 where blocks said "ALLOC-3 → block_table=[0,1,2]". Here
+  // they say "ALLOCATE: for each block in range(num_cached, num_blocks),
+  // popleft from free_deque, mark used, append to seq.block_table".
+
+  const STORYLINES = {
+
+    ST1: {
+      title: "add_request + generate",
+      source: "llm_engine.py:43-90",
+      summary: "Entry point. generate() loops add_request to enqueue prompts, then pumps step() until done.",
+      placeholder: true,
+    },
+
+    ST2: {
+      title: "step",
+      source: "llm_engine.py:49-55",
+      summary: "Per-tick orchestrator. Calls schedule, then forward, then postprocess.",
+      placeholder: true,
+    },
+
+    ST3: {
+      title: "schedule (prefill loop)",
+      source: "scheduler.py:25-56",
+      summary: "Drains the waiting deque while batch has token budget. Probes the prefix cache, allocates blocks, sets per-seq schedule, and promotes WAITING→RUNNING when a seq is fully scheduled in this batch.",
+      touches: new Set(['ds-waiting', 'ds-running', 'ds-pool', 'ds-cache']),
+      schema: {
+        waiting: { ops_r: ['peek[0]', 'len'], ops_w: ['popleft'] },
+        running: { ops_w: ['append'] },
+        pool:    { ops_r: ['can_allocate', 'hash_to_block_id.get', 'blocks[i].token_ids', 'free_block_ids'],
+                   ops_w: ['allocate', 'free_block_ids.popleft', 'used_block_ids.add', 'blocks[i].ref_count++'] },
+        cache:   { ops_r: ['get'] },
+      },
+      blocks: [
+        {
+          id: 'b-loop', tag: 'L1 · ENTRY', name: 'LOOP_GUARD',
+          code: `<span class="tok-kw">while</span> <span class="tok-kw">self</span>.waiting <span class="tok-kw">and</span> <span class="tok-fn">len</span>(scheduled_seqs) &lt; <span class="tok-kw">self</span>.max_num_seqs:`,
+          says: 'Continue while there are queued seqs AND the batch has room for more sequences (max_num_seqs cap).',
+          inputs:  [['waiting', 'deque[Sequence]'], ['scheduled_seqs', 'list[Sequence]'], ['max_num_seqs', 'int']],
+          outputs: [['(control)', 'enter body / fall out']],
+          source: 'scheduler.py:25',
+        },
+        {
+          id: 'b-peek', tag: 'L2 · INSPECT', name: 'PEEK_AND_BUDGET',
+          code: `seq = <span class="tok-kw">self</span>.waiting[<span class="tok-num">0</span>]
+remaining = <span class="tok-kw">self</span>.max_num_batched_tokens \\
+            - num_batched_tokens
+<span class="tok-kw">if</span> remaining == <span class="tok-num">0</span>: <span class="tok-kw">break</span>`,
+          says: 'Peek the oldest waiting seq (no commit). Compute remaining per-step token budget. Bail if no budget.',
+          inputs:  [['waiting', 'deque[Sequence]'], ['num_batched_tokens', 'int']],
+          outputs: [['seq', 'Sequence'], ['remaining', 'int']],
+          source: 'scheduler.py:26-29',
+        },
+        {
+          id: 'b-probe', tag: 'L3 · LOOKUP', name: 'PROBE_CACHE',
+          code: `<span class="tok-kw">if not</span> seq.block_table:
+    num_cached_blocks = (
+        <span class="tok-kw">self</span>.block_manager.can_allocate(seq))
+    <span class="tok-kw">if</span> num_cached_blocks == -<span class="tok-num">1</span>:
+        <span class="tok-kw">break</span>
+    num_tokens = seq.num_tokens \\
+                 - num_cached_blocks * block_size
+<span class="tok-kw">else</span>:
+    num_tokens = seq.num_tokens \\
+                 - seq.num_cached_tokens`,
+          says: 'For a new seq, ask block_manager how many of its blocks already exist in the prefix cache. -1 means pool is too full to allocate. Then compute how many tokens still need a forward pass.',
+          inputs:  [['seq', 'Sequence'], ['block_manager', 'BlockManager']],
+          outputs: [['num_cached_blocks', 'int (≥0 or break)'], ['num_tokens', 'int']],
+          source: 'scheduler.py:30-37',
+        },
+        {
+          id: 'b-chunked', tag: 'L4 · GATE', name: 'CHUNKED_GUARD',
+          code: `<span class="tok-kw">if</span> remaining &lt; num_tokens <span class="tok-kw">and</span> scheduled_seqs:
+    <span class="tok-kw">break</span>`,
+          says: 'Chunked-prefill rule. Only the first seq in a batch is allowed to be partially scheduled; if remaining < what this seq needs AND batch is non-empty, defer this seq to the next step.',
+          inputs:  [['remaining', 'int'], ['num_tokens', 'int'], ['scheduled_seqs', 'list[Sequence]']],
+          outputs: [['(control)', 'continue / break']],
+          source: 'scheduler.py:38-39',
+        },
+        {
+          id: 'b-alloc', tag: 'L5 · COMMIT_MEM', name: 'ALLOCATE',
+          code: `<span class="tok-kw">if not</span> seq.block_table:
+    <span class="tok-kw">self</span>.block_manager.allocate(
+        seq, num_cached_blocks)`,
+          says: 'Install seq.block_table. For cached blocks, refcount-bump the existing physical block. For remaining (num_blocks - num_cached_blocks) blocks, popleft from free_block_ids and append to seq.block_table. Idempotent on already-allocated seqs (the if guard).',
+          inputs:  [['seq', 'Sequence'], ['num_cached_blocks', 'int']],
+          outputs: [['Δ seq.block_table', 'extended'], ['Δ free_block_ids', '↓ by (num_blocks - num_cached)'], ['Δ ref_count', '↑ for cached + 1 for fresh']],
+          source: 'scheduler.py:40-41 (calls block_manager.py:75)',
+        },
+        {
+          id: 'b-schedule', tag: 'L6 · COMMIT_BATCH', name: 'SCHEDULE_TOKENS',
+          code: `seq.num_scheduled_tokens = <span class="tok-fn">min</span>(
+    num_tokens, remaining)
+num_batched_tokens += seq.num_scheduled_tokens`,
+          says: 'Commit how many of this seq\'s tokens will be forwarded in THIS batch. Caps at remaining budget (this is the actual chunking; the previous guard only decided whether to do it at all).',
+          inputs:  [['num_tokens', 'int'], ['remaining', 'int']],
+          outputs: [['Δ seq.num_scheduled_tokens', '← min(num_tokens, remaining)'], ['Δ num_batched_tokens', '↑ by seq.num_scheduled_tokens']],
+          source: 'scheduler.py:42-43',
+        },
+        {
+          id: 'b-promote', tag: 'L7 · TRANSITION', name: 'PROMOTE_OR_LEAVE',
+          code: `<span class="tok-kw">if</span> (seq.num_cached_tokens
+        + seq.num_scheduled_tokens
+        == seq.num_tokens):
+    seq.status = SequenceStatus.RUNNING
+    <span class="tok-kw">self</span>.waiting.popleft()
+    <span class="tok-kw">self</span>.running.append(seq)`,
+          says: 'If all of seq\'s tokens are covered (cached + scheduled-this-step), transition WAITING→RUNNING. Commit the popleft from waiting (the peek at L2 was non-committing). Else leave seq in waiting for next step to continue its chunked prefill.',
+          inputs:  [['seq', 'Sequence']],
+          outputs: [['Δ seq.status', 'WAITING → RUNNING (if fully scheduled)'], ['Δ waiting', 'popleft (if fully scheduled)'], ['Δ running', 'append (if fully scheduled)']],
+          source: 'scheduler.py:44-47',
+        },
+        {
+          id: 'b-append', tag: 'L8 · TRACK', name: 'APPEND_TO_BATCH',
+          code: `scheduled_seqs.append(seq)`,
+          says: 'Include seq in this step\'s return value (for the forward pass + postprocess). The loop then re-checks the guard at L1.',
+          inputs:  [['seq', 'Sequence']],
+          outputs: [['Δ scheduled_seqs', 'append']],
+          source: 'scheduler.py:48',
+        },
+      ],
+      defaultActive: 'b-alloc',
+      connections: [
+        { from: 'b-loop',     to: 'ds-waiting', kind: 'read',  label: 'len + truthy' },
+        { from: 'b-peek',     to: 'ds-waiting', kind: 'read',  label: 'peek[0]' },
+        { from: 'b-probe',    to: 'ds-cache',   kind: 'read',  label: 'hash chain lookup' },
+        { from: 'b-probe',    to: 'ds-pool',    kind: 'read',  label: 'capacity check' },
+        { from: 'b-alloc',    to: 'ds-pool',    kind: 'write', label: 'popleft fresh + refcount++' },
+        { from: 'b-promote',  to: 'ds-waiting', kind: 'write', label: 'popleft' },
+        { from: 'b-promote',  to: 'ds-running', kind: 'write', label: 'append' },
+      ],
+      detail: {
+        'b-loop': {
+          name: 'LOOP_GUARD',
+          purpose: 'Entry guard of the prefill while-loop. Two AND-ed conditions: (a) there are seqs waiting, (b) the batch has not yet hit the max_num_seqs ceiling. Either failing exits the loop.',
+          reads: ['scheduler.waiting', 'len(scheduled_seqs)', 'config.max_num_seqs'],
+          writes: ['(none)'],
+          loc: 'scheduler.py:25',
+          code: `# prefill\nwhile self.waiting and len(scheduled_seqs) < self.max_num_seqs:\n    ...`,
+        },
+        'b-peek': {
+          name: 'PEEK_AND_BUDGET',
+          purpose: 'Pull the oldest waiting seq as a CANDIDATE (no commit — the actual popleft happens later in PROMOTE_OR_LEAVE if and only if the seq is fully scheduled in this batch). Compute remaining per-step token budget; bail early if no budget.',
+          reads: ['scheduler.waiting', 'config.max_num_batched_tokens', 'num_batched_tokens (local)'],
+          writes: ['(none — peek, not pop)'],
+          loc: 'scheduler.py:26-29',
+          code: `seq = self.waiting[0]\nremaining = self.max_num_batched_tokens - num_batched_tokens\nif remaining == 0:\n    break`,
+        },
+        'b-probe': {
+          name: 'PROBE_CACHE',
+          purpose: 'Two cases: (1) New seq, no block_table yet — query block_manager.can_allocate which walks the seq\'s logical blocks computing chained hashes and looking each up in hash_to_block_id; -1 means the pool can\'t fit even after counting cached blocks. (2) Resumed chunked prefill — block_table already exists, just compute remaining uncached tokens.',
+          reads: ['seq.block_table', 'seq.num_tokens', 'seq.num_cached_tokens', 'block_manager.hash_to_block_id', 'block_manager.blocks[i].token_ids', 'block_manager.free_block_ids'],
+          writes: ['(pure read into block_manager)'],
+          loc: 'scheduler.py:30-37',
+          code: `if not seq.block_table:\n    num_cached_blocks = self.block_manager.can_allocate(seq)\n    if num_cached_blocks == -1:\n        break\n    num_tokens = seq.num_tokens - num_cached_blocks * self.block_size\nelse:\n    num_tokens = seq.num_tokens - seq.num_cached_tokens`,
+        },
+        'b-chunked': {
+          name: 'CHUNKED_GUARD',
+          purpose: 'Restricts chunked prefill to the FIRST seq in a batch. If this isn\'t the first seq (scheduled_seqs non-empty) AND remaining budget can\'t fit this seq fully, defer it to the next step. The first seq IS allowed to be partial (this guard doesn\'t fire when scheduled_seqs is empty).',
+          reads: ['remaining (local)', 'num_tokens (local)', 'scheduled_seqs (length)'],
+          writes: ['(none)'],
+          loc: 'scheduler.py:38-39',
+          code: `if remaining < num_tokens and scheduled_seqs:\n    break`,
+        },
+        'b-alloc': {
+          name: 'ALLOCATE',
+          purpose: 'Install seq.block_table. Guarded by "not seq.block_table" so resumed chunked-prefill seqs don\'t re-allocate. Inside allocate(), for each cached block: refcount++ (or popleft + add to used if it was free-but-cached). For each new block: popleft fresh from free_block_ids and append to seq.block_table.',
+          reads: ['seq.block_table', 'block_manager.free_block_ids', 'block_manager.hash_to_block_id'],
+          writes: ['seq.block_table', 'block_manager.free_block_ids', 'block_manager.used_block_ids', 'block_manager.blocks[i].ref_count'],
+          loc: 'scheduler.py:40-41 (delegates to block_manager.py:75)',
+          code: `if not seq.block_table:\n    self.block_manager.allocate(seq, num_cached_blocks)\n\n# inside block_manager.allocate:\nfor i in range(num_cached_blocks):\n    # refcount-bump or migrate from free→used\n    ...\nfor i in range(num_cached_blocks, seq.num_blocks):\n    seq.block_table.append(self._allocate_block())`,
+        },
+        'b-schedule': {
+          name: 'SCHEDULE_TOKENS',
+          purpose: 'Commit how many of this seq\'s tokens this step\'s forward pass will compute KV for. Caps at remaining budget (this is where the actual chunking decision lands). Accumulates into the running batch counter.',
+          reads: ['num_tokens (local)', 'remaining (local)'],
+          writes: ['seq.num_scheduled_tokens', 'num_batched_tokens (local)'],
+          loc: 'scheduler.py:42-43',
+          code: `seq.num_scheduled_tokens = min(num_tokens, remaining)\nnum_batched_tokens += seq.num_scheduled_tokens`,
+        },
+        'b-promote': {
+          name: 'PROMOTE_OR_LEAVE',
+          purpose: 'If all of seq\'s tokens are now covered (cached + scheduled-this-step == num_tokens), commit the WAITING→RUNNING transition. The popleft here is the matching commit to the L2 peek. If not fully scheduled (chunked prefill is mid-progress), seq stays in waiting for the next step.',
+          reads: ['seq.num_cached_tokens', 'seq.num_scheduled_tokens', 'seq.num_tokens'],
+          writes: ['seq.status', 'scheduler.waiting (popleft)', 'scheduler.running (append)'],
+          loc: 'scheduler.py:44-47',
+          code: `if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:\n    seq.status = SequenceStatus.RUNNING\n    self.waiting.popleft()\n    self.running.append(seq)`,
+        },
+        'b-append': {
+          name: 'APPEND_TO_BATCH',
+          purpose: 'Include seq in the batch the scheduler will return to step(). The loop then re-checks the guard at L1 — if there\'s still room and waiting non-empty, the next iteration starts.',
+          reads: ['(none)'],
+          writes: ['scheduled_seqs (local)'],
+          loc: 'scheduler.py:48',
+          code: `scheduled_seqs.append(seq)`,
+        },
+      },
+    },
+
+    ST4: {
+      title: "schedule (decode loop)",
+      source: "scheduler.py:52-67",
+      summary: "Only runs if prefill admitted nothing. Pops each running seq, preempts if memory pressure, may_append for the new token, schedules 1 token, restores queue order.",
+      placeholder: true,
+    },
+
+    ST5: {
+      title: "postprocess + deallocate",
+      source: "scheduler.py:74-88",
+      summary: "After forward: hash filled blocks, append sampled token, check EOS/max_tokens. On finish: deallocate seq's blocks (refcount--, free when 0).",
+      placeholder: true,
+    },
+  };
+
+  const STATE = { activeStoryline: 'ST3', activeBlock: null };
+
+  function el(tag, cls, html) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    for (const id of Object.keys(STORYLINES)) {
+      const sl = STORYLINES[id];
+      const t = el('div', 'tab t-' + id + (id === STATE.activeStoryline ? ' active' : ''));
+      t.innerHTML = `<span class="tab-num">${id}</span><span class="tab-name">${sl.title}</span>`;
+      t.onclick = () => setStoryline(id);
+      root.appendChild(t);
+    }
+  }
+
+  function renderDS(sl) {
+    const grid = el('div', 'ds-grid');
+
+    function box(id, cls, name, type, role, schemaPieces, schema) {
+      const touched = sl.touches && sl.touches.has(id);
+      const b = el('div', 'ds-box ' + cls + (touched ? ' touched' : ' untouched'));
+      b.id = id;
+      const opsR = (schema && schema.ops_r || []).map(o => `<span class="op-chip r">${o}</span>`).join('');
+      const opsW = (schema && schema.ops_w || []).map(o => `<span class="op-chip w">${o}</span>`).join('');
+      b.innerHTML = `
+        <div class="ds-head">
+          <span class="ds-name">${name}</span>
+          <span class="ds-type">: ${type}</span>
+          <span class="ds-role">${role}</span>
+        </div>
+        <div class="ds-shape">${schemaPieces}</div>
+        ${opsR || opsW ? `<div class="ds-ops">${opsR}${opsW}</div>` : ''}
+      `;
+      return b;
+    }
+    const W = (sl.schema || {}).waiting;
+    const R = (sl.schema || {}).running;
+    const P = (sl.schema || {}).pool;
+    const C = (sl.schema || {}).cache;
+
+    grid.appendChild(box('ds-waiting', 'waiting',
+      'waiting', 'deque[Sequence]',
+      'FIFO of unstarted requests',
+      '<span class="endpoint">head→</span> <span class="placeholder">… Sequence …</span> <span class="endpoint">←tail</span>',
+      W));
+
+    grid.appendChild(box('ds-running', 'running',
+      'running', 'deque[Sequence]',
+      'currently decoding',
+      '<span class="endpoint">head→</span> <span class="placeholder">… Sequence …</span> <span class="endpoint">←tail</span>',
+      R));
+
+    grid.appendChild(box('ds-pool', 'pool',
+      'block_manager', 'BlockManager',
+      'physical KV cache + prefix index',
+      `<span class="schema-piece">blocks: list[Block(N)]</span>
+       <span class="schema-piece">free_block_ids: deque[int]</span>
+       <span class="schema-piece">used_block_ids: set[int]</span>
+       <span class="schema-piece">block_size: int</span>`,
+      P));
+
+    grid.appendChild(box('ds-cache', 'cache',
+      'hash_to_block_id', 'dict[int, int]',
+      'prefix cache (chained hash → physical block_id)',
+      `<span class="placeholder">empty initially; populated by postprocess.hash_blocks after each full block</span>`,
+      C));
+    return grid;
+  }
+
+  function renderBlock(b) {
+    const blk = el('div', 'blk' + (STATE.activeBlock === b.id ? ' active' : ''));
+    blk.id = b.id;
+    const inputsHtml = (b.inputs || []).map(([k, v]) =>
+      `<span class="port-item"><span class="key">${k}:</span> <span class="type">${v}</span></span>`).join('');
+    const outputsHtml = (b.outputs || []).map(([k, v]) =>
+      `<span class="port-item"><span class="key">${k}:</span> ${v}</span>`).join('');
+    blk.innerHTML = `
+      <div class="blk-head">
+        <div class="blk-tag">${b.tag}</div>
+        <div class="blk-name">${b.name}</div>
+      </div>
+      <div class="blk-body">
+        <pre class="code-block">${b.code}</pre>
+        ${b.says ? `<div class="blk-says">${b.says}</div>` : ''}
+        ${inputsHtml ? `<div class="port-section in"><div class="port-label">▸ in</div>${inputsHtml}</div>` : ''}
+        ${outputsHtml ? `<div class="port-section out"><div class="port-label">out ▸</div>${outputsHtml}</div>` : ''}
+        <div class="blk-source">${b.source}</div>
+      </div>`;
+    blk.onclick = () => { STATE.activeBlock = b.id; renderCanvas(); renderSidePanel(); };
+    return blk;
+  }
+
+  function renderCanvas() {
+    const inner = document.getElementById('canvas-inner');
+    inner.innerHTML = '';
+    const sl = STORYLINES[STATE.activeStoryline];
+
+    inner.appendChild(el('div', 'fn-banner b-' + STATE.activeStoryline,
+      `<div class="b-title"><span class="keyword">def</span> ${sl.title} <span class="b-source">${sl.source}</span></div><div>${sl.summary}</div>`));
+
+    if (sl.placeholder) {
+      inner.appendChild(el('div', 'placeholder',
+        `<strong>${sl.title}</strong> not detailed in this mock — would render the same way<br>` +
+        '(data structure schemas top, logic blocks bottom with real code excerpts,<br>' +
+        'labeled arrows to data structures it touches).'));
+      return;
+    }
+
+    inner.appendChild(renderDS(sl));
+
+    const blocksArea = el('div', 'blocks-area');
+    sl.blocks.forEach((b, idx) => {
+      if (idx > 0) blocksArea.appendChild(el('div', 'flow-arrow', '▶'));
+      blocksArea.appendChild(renderBlock(b));
+    });
+    inner.appendChild(blocksArea);
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'arrows'); svg.id = 'arrows';
+    inner.appendChild(svg);
+    requestAnimationFrame(drawArrows);
+  }
+
+  function drawArrows() {
+    const sl = STORYLINES[STATE.activeStoryline];
+    const svg = document.getElementById('arrows');
+    if (!svg || sl.placeholder) return;
+    const canvas = document.getElementById('canvas-inner');
+    const rect = canvas.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${canvas.scrollWidth} ${canvas.scrollHeight}`);
+    svg.setAttribute('width', canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+
+    const defs = `<defs>
+      <marker id="m-read"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>
+      <marker id="m-write" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a4332a" /></marker>
+    </defs>`;
+
+    const items = [];
+    (sl.connections || []).forEach(c => {
+      const isActive = c.from === STATE.activeBlock;
+      if (!isActive) return;  // v4: only draw arrows for active block — much cleaner
+      const fromEl = document.getElementById(c.from);
+      const toEl = document.getElementById(c.to);
+      if (!fromEl || !toEl) return;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const x1 = fr.left - rect.left + fr.width / 2;
+      const y1 = fr.top - rect.top;
+      const dsLeft = tr.left - rect.left;
+      const dsRight = tr.right - rect.left;
+      const dsBottom = tr.bottom - rect.top;
+      const x2 = Math.max(dsLeft + 25, Math.min(dsRight - 25, x1));
+      const y2 = dsBottom;
+      const midY = (y1 + y2) / 2;
+      const d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+      const color = c.kind === 'read' ? '#5b6cff' : '#a4332a';
+      const marker = c.kind === 'read' ? 'm-read' : 'm-write';
+      items.push(`<path d="${d}" stroke="${color}" stroke-width="2.4" fill="none" marker-end="url(#${marker})" opacity="1" />`);
+      if (c.label) {
+        const lx = (x1 + x2) / 2;
+        const ly = midY - 4;
+        const w = c.label.length * 5.4 + 12;
+        items.push(`<rect x="${lx - w/2}" y="${ly - 9}" width="${w}" height="14" rx="3" fill="${color === '#5b6cff' ? '#eef0ff' : '#fff0f0'}" stroke="${color}" stroke-width="0.7"/>`);
+        items.push(`<text x="${lx}" y="${ly + 1}" text-anchor="middle" fill="${color}" font-family="ui-monospace, monospace" font-size="9.5" font-weight="700">${c.label}</text>`);
+      }
+    });
+    svg.innerHTML = defs + items.join('');
+  }
+
+  function renderSidePanel() {
+    const sl = STORYLINES[STATE.activeStoryline];
+    const detail = (sl.detail || {})[STATE.activeBlock];
+    if (!detail) {
+      document.getElementById('focus-name').textContent = '—';
+      document.getElementById('focus-purpose').textContent =
+        sl.placeholder ? '(Placeholder code path.)' : 'Click any block.';
+      document.getElementById('focus-rw').innerHTML = '';
+      document.getElementById('focus-loc').textContent = '';
+      document.getElementById('focus-code').textContent = '';
+      return;
+    }
+    document.getElementById('focus-name').textContent = detail.name;
+    document.getElementById('focus-purpose').textContent = detail.purpose;
+    document.getElementById('focus-rw').innerHTML =
+      '<div><span class="rw-label">reads</span>' +
+      detail.reads.map(s => '<span class="rw-chip read">' + s + '</span>').join('') + '</div>' +
+      '<div style="margin-top:4px"><span class="rw-label">writes</span>' +
+      detail.writes.map(s => '<span class="rw-chip write">' + s + '</span>').join('') + '</div>';
+    document.getElementById('focus-loc').textContent = detail.loc;
+    document.getElementById('focus-code').textContent = detail.code;
+  }
+
+  function setStoryline(id) {
+    STATE.activeStoryline = id;
+    STATE.activeBlock = STORYLINES[id].defaultActive || null;
+    renderTabs();
+    renderCanvas();
+    renderSidePanel();
+  }
+
+  setStoryline('ST3');
+  window.addEventListener('resize', drawArrows);
+</script>
+
+</body>
+</html>
