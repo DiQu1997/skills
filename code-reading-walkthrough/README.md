@@ -1,16 +1,20 @@
 # code-reading-walkthrough skill
 
 Skill that produces interactive HTML walkthroughs of existing source code,
-organized by **logical groups (storylines)** ranked by importance. Each
-full-depth storyline becomes an interactive **flow inspector** — a
-left-to-right canvas of small phase-tagged code blocks the reader clicks
-to expand inline. The rest land as summary cards the reader can promote
-later.
+organized by **logical groups (storylines)** ranked by importance. One JSON
+schema (`v0.5-reading`), three render targets — pick the view that fits the
+storyline:
+
+| View | Best for | `render.py` flag |
+|------|----------|------------------|
+| **source** (default) | "read this code with me" — continuous file display with each block as a colored highlight band and a 1–2 sentence margin annotation; click → detail panel | (no flag) |
+| **diagram** | state-centric stories — data structures sit at the top of the canvas as persistent glyphs (queue, dict, set…), each block draws read/write arrows | `--view diagram` |
+| **swimlane** | flow-inspector layout — phase-tagged block cards in horizontal swim lanes with CALL/CATCH/FINALLY edges | `--view swimlane` |
 
 The reading-oriented sibling of `code-review-narrative`. Storyline
 selection and importance scoring are shared with that skill; the per-
-storyline UI is different — flow diagram + clickable blocks + slide-in
-right dock, rather than a linear step walk.
+storyline UI is different — code with annotations / flow diagram / state
+canvas, rather than a linear step walk.
 
 ## Two modes
 
@@ -23,24 +27,30 @@ right dock, rather than a linear step walk.
 
 ## What you get
 
-A single self-contained HTML file with two views:
+A single self-contained HTML file with a tab per storyline.
 
-- **Reading overview**: storyline cards with importance badges, scope
-  panel showing what was read and why.
-- **Flow inspector (per storyline)**: a top header (file badge +
-  subtitle + color legend), a canvas of left-to-right columns
-  (auto-numbered STEP 1 / STEP 2 / ... — one column per function by
-  default), each column a vertical stack of phase-tagged block cards.
-  Click any block to expand its code inline. Click any block to also
-  open the right-side dock with `What it does` / `Why it's here` /
-  `Touches` (chips) / `Failure mode` (bullets), plus optional
-  `Invariants` / `Key data structures` / `Prerequisites` / per-block
-  Q&A. SVG overlay draws control-flow edges between blocks
-  (CALL / CATCH / FINALLY / EMIT) with labeled bezier curves.
+**Source view (default)** opens each storyline with a prologue card —
+the `mental_model_anchor` (keystone framing) as a hero quote, the
+storyline's role / involved modules / data flow as structured context,
+and ◀ Previously / Coming up ▶ bridges to adjacent storylines (前情提要
+pattern, no schema change). Below the prologue: the source file rendered
+continuously with real line numbers, each block as a colored highlight
+band over its `line_range`, a 1–2 sentence annotation chip in the right
+margin, and a detail panel on click with `What it does` / `Why it's
+here` / inputs / outputs / state effects / failure mode / full code.
+`←/→` walks the next/prev block in narrative order (follows edges first,
+falls back to source order).
 
-Multiple blocks can be expanded simultaneously — each toggles
-independently. The dock follows the most recently expanded block; its
-× button closes the dock without collapsing anything.
+**Diagram view** promotes state to first-class: queues drawn as queues,
+dicts as `key→value`, composites as schema tables. Each block carries
+typed I/O ports and draws SVG arrows to the data structures it
+reads/writes. Cross-block CALL / SUCCESS / ERROR / ASYNC edges connect
+blocks across columns. Use when "what state does this touch" matters
+more than "what's the source say."
+
+**Swimlane view** keeps the original flow-inspector layout: phase-tagged
+block cards in horizontal columns, multi-block expansion, slide-in
+right dock. Best when the cross-function control flow is the main story.
 
 State (view, expanded blocks, focused block) persists in
 localStorage per-walkthrough.
@@ -64,21 +74,25 @@ stored in the JSON and rendered in the UI.
 ## Try it
 
 ```bash
-python3 render.py demo/toy.json /tmp/toy.html
+# Source view (default) — continuous code with margin annotations:
+python3 render.py demo/kafka_consumer_group.json /tmp/kafka.html
+open /tmp/kafka.html
 
-# Static — open the file directly, no Q&A:
-open /tmp/toy.html
+# Diagram view — state-centric canvas:
+python3 render.py demo/kafka_consumer_group.json /tmp/kafka_diag.html --view diagram
 
-# OR live — companion server enables a per-block Q&A section:
-python3 server/live_walkthrough.py /tmp/toy.html
-# Detached server stays up after this script exits. Stop with:
-#   python3 server/live_walkthrough.py --stop /tmp/toy.html
+# Swimlane view — original flow inspector:
+python3 render.py demo/kafka_consumer_group.json /tmp/kafka_swim.html --view swimlane
+
+# OR live mode (swimlane only currently) — companion server enables per-block Q&A:
+python3 server/live_walkthrough.py /tmp/kafka.html
+#   Stop with: python3 server/live_walkthrough.py --stop /tmp/kafka.html
 ```
 
-`demo/toy.json` is a hand-authored fixture (a fake `turn-runner.ts`
-lifecycle) that exercises every schema feature — phases, cols, blocks,
-edges, full right-panel content. It's a developer-facing example, not
-a real codebase walkthrough.
+`demo/kafka_consumer_group.json` is a fresh-agent run on kafka-python's
+consumer coordinator (8 storylines, 40 blocks, 16 data structures) —
+useful as a real-world reference output. `demo/toy.json` is a smaller
+hand-authored fixture exercising every schema feature.
 
 ## Live mode
 
@@ -116,7 +130,9 @@ code-reading-walkthrough/
 │   ├── schema.md                   ← v0.5-reading JSON schema
 │   └── analyze_code.md             ← analysis prompt (diagram-centric)
 ├── template/
-│   └── walkthrough.html            ← single-file HTML/CSS/JS template (live-mode Q&A baked in)
+│   ├── walkthrough_source.html     ← default: continuous code + margin annotations
+│   ├── walkthrough_diagram.html    ← state-centric canvas (data structures as glyphs)
+│   └── walkthrough.html            ← original swimlane flow inspector (live-mode Q&A baked in)
 ├── server/
 │   ├── live_server.py              ← live-mode HTTP server (/__alive, /followups, /ask, /promotions, /promote, /promote/revert)
 │   ├── live_walkthrough.py         ← wrapper: starts/reuses server, opens browser
