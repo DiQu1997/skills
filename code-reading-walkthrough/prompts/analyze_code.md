@@ -288,6 +288,13 @@ small (1-2 line slivers) and blocks too big (20+ line mega-blocks).
   into one block.
 - **Don't lump** distinct phases together. A guard, the main logic,
   and a cleanup are three different concerns — three blocks.
+- **Align boundaries with source structure.** Pick `line_range`
+  endpoints that fall on natural code seams: end of a `try` arm, end
+  of an `if`/`else` branch, end of a `for`/`while` body, end of a
+  function call group. The source view paints `line_range` as a
+  highlight band, so a band that spans `if cond:` plus *half* of the
+  `else:` arm reads as a bug. Prefer to split (or extend) so each band
+  wraps a clean logical chunk.
 - **The one_liner test**: if you can describe the block in a single
   `one_liner` without using "and" (or with a single "and" that's
   pairing two halves of the same concern, like "setup the controller
@@ -376,6 +383,34 @@ The single FileView for this block's code:
   lines on each side)
 - `lines[]` — every line in `[context_start_line, context_end_line]`
   with `line_num`, `content`, `change: "unchanged"`
+
+**Coverage discipline for the source view.** The default render is the
+source view, which stitches all blocks in a column into a continuous
+file display with each block's `line_range` shown as a colored highlight
+band. Lines covered by some block's `code_view.lines` render as plain
+context; lines NOT covered render as "lines N–M elided" markers.
+
+For a function-level walkthrough this means:
+- Across the blocks of a single column, the union of their
+  `code_view.lines` should densely cover the function. Aim for ZERO
+  elision within a function. If block A's `code_view` ends at L348 and
+  block B's begins at L355, lines 349–354 vanish from the reader's view.
+- Easiest pattern: each block's `code_view` spans `[col_min..col_max]`
+  (the whole function) and the `line_range` selects the highlight. The
+  source view will dedupe by `line_num` so the column's combined view
+  is naturally one copy of the function.
+- Lighter pattern: each block extends its `code_view` to cover the gap
+  to the next block (`context_end_line = next_block.line_range_start - 1`).
+- Acceptable to elide: very large gaps (>20 lines) that are clearly
+  out-of-scope for the storyline. Mark them by leaving them uncovered;
+  the renderer's "lines N–M elided" stub is informative.
+
+**Source-content fidelity matters more than ever in source view.** The
+reader sees the actual source displayed; a paraphrased or off-by-one
+`lines[].content` is glaring (the highlight bands won't align). Use the
+Read tool with `offset`/`limit` to lift the exact lines, or generate the
+walkthrough JSON from a small Python builder script that reads the file
+and emits the lines verbatim by `line_num`.
 
 #### `right_panel`
 

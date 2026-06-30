@@ -4,10 +4,22 @@ render.py — Inject a walkthrough JSON into the HTML template to produce
 a self-contained code-reading walkthrough document.
 
 Usage:
-    python3 render.py <input.json> <output.html>                       # swimlane view (default)
-    python3 render.py <input.json> <output.html> --view diagram
+    python3 render.py <input.json> <output.html>                       # source view (default)
+    python3 render.py <input.json> <output.html> --view diagram        # state-centric canvas
+    python3 render.py <input.json> <output.html> --view swimlane       # legacy flow inspector
     python3 render.py <in.json> <out.html> --source-root /path/to/repo # validate code_view content
     python3 render.py <in.json> <out.html> --no-source-check           # skip content validation
+
+The three views read the same JSON; they differ in how they show it:
+    source   — continuous code top-to-bottom with colored highlight bands
+               around each block and 1-2 sentence margin annotations.
+               Best for "read this code with me" — the default.
+    diagram  — data structures sit at the top of the canvas as persistent
+               glyphs (queues drawn as queues, dicts as key→value, ...);
+               each block draws SVG arrows to the state it touches.
+               Best when the storyline is state-centric.
+    swimlane — original flow inspector: phase-tagged blocks in horizontal
+               columns with cross-block CALL/CATCH/FINALLY edges.
 """
 
 import json
@@ -119,7 +131,7 @@ def report_source_mismatches(n_checked, mismatches):
 
 def main():
     raw = sys.argv[1:]
-    view = "swimlane"
+    view = "source"
     source_root = Path(".")
     no_source_check = False
     args = []

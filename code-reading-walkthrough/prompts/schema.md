@@ -6,34 +6,55 @@ for the `code-reading-walkthrough` skill — the reading-oriented sibling of
 
 ## What changed from v0.4
 
-v0.5 replaces the linear `steps[]` model with a **flow inspector**: each
-full-depth storyline is rendered as a swimlane-style canvas where columns
-are functions / lanes, blocks are small chunks within a column (3–10 lines
-each), and edges between blocks visualize control flow (calls, catches,
-finally branches). Clicking a block expands its code inline; a right-side
-dock surfaces what / why / touches / failure-mode for the selected block.
+v0.5 replaces the linear `steps[]` model with the **flow-inspector
+schema**: each full-depth storyline carries a `diagram` of columns
+(functions or lanes) and blocks (3–10 line chunks within a column) with
+optional edges. Three render targets read this same JSON:
+
+| View | Render command | Shape |
+|------|---------------|-------|
+| **source** (default) | `python3 render.py …` | continuous code top-to-bottom with each block as a colored highlight band over its `line_range` and a 1–2 sentence annotation chip in the right margin |
+| **diagram** | `… --view diagram` | data structures as canvas entities at the top, blocks with typed I/O ports, read/write arrows to DSes |
+| **swimlane** | `… --view swimlane` | original flow-inspector cards in horizontal swim lanes with CALL/CATCH/FINALLY edges |
 
 Storyline-level fields (`mental_model_anchor`, `purpose`,
 `architectural_context`, `change_overview`) carry over unchanged. The
 `code_view` shape, `function_purpose`, and `walkthrough` annotation
 structures from v0.4 carry over as building blocks for per-block content.
 
+### Source view (default)
+
+The source view stitches all blocks in a column into one continuous
+file display with each `line_range` shown as a colored band. Lines that
+appear in some block's `code_view.lines` render as plain context; lines
+NOT covered by any block render as "lines N–M elided" markers. For a
+function-level walkthrough, aim for ZERO elision within a function —
+either (a) extend each block's `code_view` to cover the gap to the
+next block, or (b) author every block's `code_view` to span the whole
+function (the renderer dedupes by `line_num`). See Phase 7 in
+`analyze_code.md` for the coverage pattern.
+
+The source view also makes `code_view.lines[].content` source-fidelity
+glaring — the actual source is displayed; a paraphrased or off-by-one
+line breaks the highlight alignment. Lift lines verbatim with `Read`
+offset/limit or via a small builder script.
+
 ### Diagram-view extension (additive, optional)
 
-v0.5 also defines a second rendering: **diagram view** (`render.py --view
-diagram`). Same JSON, different template. The diagram view promotes state
-data structures to first-class canvas entities at the top, and draws
-read/write arrows from each block down to the DS it touches. To populate
-it, fill THREE OPTIONAL groups of fields:
+The diagram view promotes state data structures to first-class canvas
+entities at the top, and draws read/write arrows from each block down
+to the DS it touches. To populate it, fill THREE OPTIONAL groups of
+fields:
 
 1. `diagram.data_structures[]` — top-level declaration of primary state
    (each with a `shape` describing its visual kind)
 2. `block.inputs[]` / `block.outputs[]` — typed I/O ports for the block card
 3. `block.state_effects[]` — links each block to the DSes it reads/writes
 
-The swimlane template ignores all three; they're rendered ONLY in diagram
-view. So a JSON that omits them still renders cleanly under the default
-template — diagram-view fields are purely additive.
+The source and swimlane templates ignore all three; they're rendered
+ONLY in diagram view. A JSON that omits them still renders cleanly
+under source (default) or swimlane — diagram-view fields are purely
+additive.
 
 ## Top level
 

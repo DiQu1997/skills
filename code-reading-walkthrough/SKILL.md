@@ -165,17 +165,32 @@ Just `id`, `title`, `kind`, `depth`, `importance_scores`, `summary`,
 ### Phase 11: Render to HTML
 
 ```bash
-# Default = swimlane view (the flow inspector described above):
+# Default = source view: continuous code top-to-bottom with colored
+# highlight bands around each block and margin annotations.
 python3 render.py walkthrough.json output.html --source-root /path/to/repo
 
-# Alternate = diagram view (data-structures-as-canvas-entities; see below):
-python3 render.py walkthrough.json output.html --view diagram --source-root /path/to/repo
+# Alternates:
+python3 render.py walkthrough.json output.html --view diagram   --source-root /path/to/repo
+python3 render.py walkthrough.json output.html --view swimlane  --source-root /path/to/repo
 ```
 
-The renderer finds the `/*WALKTHROUGH_DATA_PLACEHOLDER*/` in
-`template/walkthrough.html` (or `template/walkthrough_diagram.html` for
-diagram view), injects the JSON via `json.dumps()` with `</` → `<\/`
-escaping, and writes the output.
+Three templates, one JSON schema. Pick the view that fits the storyline:
+
+- **source** (default) — reading-mode: the file as the file, with logical
+  blocks tinted in place and 1–2-sentence annotations in the right margin.
+  Click a band → side panel with full detail. Best when the user wants
+  to *read the code with you*.
+- **diagram** — state-centric: data structures live at the top of the
+  canvas as persistent glyphs; each block draws arrows to the state it
+  reads/writes. Best when the storyline IS the state evolution.
+- **swimlane** — original flow inspector: phase-tagged cards in
+  horizontal columns with CALL/CATCH/FINALLY edges. Best when the
+  control flow across functions is the main thing to show.
+
+The renderer finds the `/*WALKTHROUGH_DATA_PLACEHOLDER*/` in the chosen
+template (`template/walkthrough_source.html`, `walkthrough_diagram.html`,
+or `walkthrough.html`), injects the JSON via `json.dumps()` with
+`</` → `<\/` escaping, and writes the output.
 
 **`--source-root <PATH>`** (recommended): the renderer diffs every
 `code_view.lines[].content` against the actual source file at the cited
@@ -186,19 +201,32 @@ are relative to (e.g. if `code_view.file == "nanovllm/engine/scheduler.py"`,
 pass `--source-root /tmp/nano-vllm`). Bypass with `--no-source-check`
 ONLY when intentionally rendering hand-edited illustration data.
 
-**`--view diagram`** picks the alternate template. Same JSON, different
-visualization: data structures sit at the top of the canvas as
-persistent entities (queues drawn as queues, sets as `{T}`, dicts as
-`key→value`, composites as schema tables), and each block draws SVG
-arrows down to the DSes it reads/writes. Use when the storyline is
-state-centric and seeing "which state does each block touch" matters
-more than "what's the control flow." To populate the diagram view, the
-JSON must include the optional `diagram.data_structures[]`,
-`block.inputs[]`, `block.outputs[]`, `block.state_effects[]` fields —
-see Phase 8B in `prompts/analyze_code.md` and the `### data_structures`
-+ `### inputs / outputs / state_effects` sections in `prompts/schema.md`.
-The swimlane (default) template IGNORES those fields, so a JSON without
-them still renders cleanly under either template.
+**`--view source`** (default) renders the file as a file: continuous
+code with line numbers, each block as a colored highlight band over
+its `line_range`, the block's `one_liner` as an annotation chip in the
+right margin, and the full `right_panel` as the click-target detail.
+Coverage gaps between adjacent blocks render as "lines N–M elided"
+markers — fine for narrow slices, but for a function-level walkthrough
+the agent should aim for contiguous `code_view.lines` across the column
+(see Phase 7 in `prompts/analyze_code.md`).
+
+**`--view diagram`** renders state-centric: data structures sit at the
+top of the canvas as persistent entities (queues drawn as queues, sets
+as `{T}`, dicts as `key→value`, composites as schema tables), and each
+block draws SVG arrows down to the DSes it reads/writes. Use when the
+storyline IS the state evolution and "which state does each block
+touch" matters more than "what's the source say." Requires the optional
+`diagram.data_structures[]`, `block.inputs[]`, `block.outputs[]`,
+`block.state_effects[]` fields — see Phase 8B in
+`prompts/analyze_code.md` and the `### data_structures` +
+`### inputs / outputs / state_effects` sections in `prompts/schema.md`.
+
+**`--view swimlane`** renders the original flow-inspector layout —
+phase-tagged cards in horizontal columns with CALL/CATCH/FINALLY edges.
+
+All three views read the same JSON; only the diagram view requires
+the additive fields above. A JSON without them still renders cleanly
+under source or swimlane.
 
 ### Phase 12: Open in live mode (default behavior)
 
