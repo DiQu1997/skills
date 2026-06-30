@@ -15,7 +15,11 @@
     "mode": "files",
     "input": "src/turn-runner.ts",
     "discovered_scope": [
-      { "path": "src/turn-runner.ts", "reason": "core-flow", "note": "the lifecycle wrapper" }
+      {
+        "path": "src/turn-runner.ts",
+        "reason": "core-flow",
+        "note": "the lifecycle wrapper"
+      }
     ],
     "excluded": [],
     "importance_criteria": "Single file, two storylines hand-authored for schema validation."
@@ -35,7 +39,9 @@
         "rationale": "Pervasive (every turn goes through it); public entry point."
       },
       "summary": "How startTurn / runWithLifecycle / handleRunFailure / finishRun compose one turn.",
-      "files_touched": ["src/turn-runner.ts"],
+      "files_touched": [
+        "src/turn-runner.ts"
+      ],
       "mental_model_anchor": "Think of it as a try/finally wrapped around an executor. startTurn validates and hands off; runWithLifecycle owns the streaming + abort state; handleRunFailure converts thrown errors into synthetic assistant messages; finishRun is the idempotent finalizer.",
       "purpose": {
         "stated": "Run one agent turn from input to terminal event.",
@@ -45,8 +51,14 @@
       "architectural_context": {
         "system_role": "Agent loop — sits between the public Agent.send() API and the model-call executor.",
         "involved_modules": [
-          { "module": "Agent", "role_in_storyline": "owns the lifecycle and event bus" },
-          { "module": "executor", "role_in_storyline": "the user-supplied turn implementation" }
+          {
+            "module": "Agent",
+            "role_in_storyline": "owns the lifecycle and event bus"
+          },
+          {
+            "module": "executor",
+            "role_in_storyline": "the user-supplied turn implementation"
+          }
         ],
         "data_flow": "turn input → startTurn (guard + bind) → runWithLifecycle (streaming on, executor runs, errors → handleRunFailure, finally → finishRun) → terminal event"
       },
@@ -55,12 +67,36 @@
         "file_badge": "turn-runner.ts",
         "subtitle": "four functions, one lifecycle",
         "phases": [
-          { "id": "guard",   "label": "Guard",   "color": "guard" },
-          { "id": "setup",   "label": "Setup",   "color": "setup" },
-          { "id": "main",    "label": "Main",    "color": "main" },
-          { "id": "handoff", "label": "Handoff", "color": "handoff" },
-          { "id": "cleanup", "label": "Cleanup", "color": "cleanup" },
-          { "id": "error",   "label": "Error",   "color": "error" }
+          {
+            "id": "guard",
+            "label": "Guard",
+            "color": "guard"
+          },
+          {
+            "id": "setup",
+            "label": "Setup",
+            "color": "setup"
+          },
+          {
+            "id": "main",
+            "label": "Main",
+            "color": "main"
+          },
+          {
+            "id": "handoff",
+            "label": "Handoff",
+            "color": "handoff"
+          },
+          {
+            "id": "cleanup",
+            "label": "Cleanup",
+            "color": "cleanup"
+          },
+          {
+            "id": "error",
+            "label": "Error",
+            "color": "error"
+          }
         ],
         "cols": [
           {
@@ -81,23 +117,53 @@
                   "context_start_line": 411,
                   "context_end_line": 415,
                   "lines": [
-                    { "line_num": 411, "content": "async startTurn(input: TurnInput): Promise<void> {", "change": "unchanged" },
-                    { "line_num": 412, "content": "  if (this.closed) {", "change": "unchanged" },
-                    { "line_num": 413, "content": "    throw new Error('agent is closed');", "change": "unchanged" },
-                    { "line_num": 414, "content": "  }", "change": "unchanged" },
-                    { "line_num": 415, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 411,
+                      "content": "async startTurn(input: TurnInput): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 412,
+                      "content": "  if (this.closed) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 413,
+                      "content": "    throw new Error('agent is closed');",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 414,
+                      "content": "  }",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 415,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
                   "what_it_does": "Checks the closed flag and throws synchronously if the agent has already been shut down.",
                   "why_its_here": "Every downstream block assumes a live instance and a working event bus. Failing fast here avoids zombie turns that try to emit events into a dead bus.",
                   "touches": [
-                    { "label": "this.closed", "kind": "variable", "block": null }
+                    {
+                      "label": "this.closed",
+                      "kind": "variable",
+                      "block": null
+                    }
                   ],
                   "failure_mode": [
                     "Throws Error('agent is closed') — caller's responsibility to catch."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "startTurn",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B2",
@@ -111,10 +177,26 @@
                   "context_start_line": 415,
                   "context_end_line": 418,
                   "lines": [
-                    { "line_num": 415, "content": "", "change": "unchanged" },
-                    { "line_num": 416, "content": "  const executor = (signal: AbortSignal) =>", "change": "unchanged" },
-                    { "line_num": 417, "content": "    this.loop(input, signal);", "change": "unchanged" },
-                    { "line_num": 418, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 415,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 416,
+                      "content": "  const executor = (signal: AbortSignal) =>",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 417,
+                      "content": "    this.loop(input, signal);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 418,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
@@ -134,17 +216,37 @@
                   "context_start_line": 418,
                   "context_end_line": 421,
                   "lines": [
-                    { "line_num": 418, "content": "", "change": "unchanged" },
-                    { "line_num": 419, "content": "  return this.runWithLifecycle(executor);", "change": "unchanged" },
-                    { "line_num": 420, "content": "}", "change": "unchanged" },
-                    { "line_num": 421, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 418,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 419,
+                      "content": "  return this.runWithLifecycle(executor);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 420,
+                      "content": "}",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 421,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
                   "what_it_does": "Tail-calls runWithLifecycle and returns its promise verbatim.",
                   "why_its_here": "Callers await the full turn (including listener flush) by awaiting this promise. Returning verbatim — not awaiting and re-throwing — preserves the promise's identity for cancellation handles.",
                   "touches": [
-                    { "label": "runWithLifecycle", "kind": "function", "block": "B4" }
+                    {
+                      "label": "runWithLifecycle",
+                      "kind": "function",
+                      "block": "B4"
+                    }
                   ]
                 }
               }
@@ -168,11 +270,31 @@
                   "context_start_line": 450,
                   "context_end_line": 454,
                   "lines": [
-                    { "line_num": 450, "content": "async runWithLifecycle(executor: Executor): Promise<void> {", "change": "unchanged" },
-                    { "line_num": 451, "content": "  if (this.activeRun) {", "change": "unchanged" },
-                    { "line_num": 452, "content": "    throw new Error('turn already in flight');", "change": "unchanged" },
-                    { "line_num": 453, "content": "  }", "change": "unchanged" },
-                    { "line_num": 454, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 450,
+                      "content": "async runWithLifecycle(executor: Executor): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 451,
+                      "content": "  if (this.activeRun) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 452,
+                      "content": "    throw new Error('turn already in flight');",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 453,
+                      "content": "  }",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 454,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
@@ -181,7 +303,13 @@
                   "failure_mode": [
                     "Throws Error('turn already in flight') — caller may catch and queue, retry, or surface."
                   ]
-                }
+                },
+                "defines": [
+                  {
+                    "name": "runWithLifecycle",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B5",
@@ -195,22 +323,62 @@
                   "context_start_line": 454,
                   "context_end_line": 461,
                   "lines": [
-                    { "line_num": 454, "content": "", "change": "unchanged" },
-                    { "line_num": 455, "content": "  const controller = new AbortController();", "change": "unchanged" },
-                    { "line_num": 456, "content": "  const lifecycle = Promise.withResolvers<void>();", "change": "unchanged" },
-                    { "line_num": 457, "content": "  this.activeRun = { controller, lifecycle };", "change": "unchanged" },
-                    { "line_num": 458, "content": "  this.isStreaming = true;", "change": "unchanged" },
-                    { "line_num": 459, "content": "  this.emit('turn_start');", "change": "unchanged" },
-                    { "line_num": 460, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 454,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 455,
+                      "content": "  const controller = new AbortController();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 456,
+                      "content": "  const lifecycle = Promise.withResolvers<void>();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 457,
+                      "content": "  this.activeRun = { controller, lifecycle };",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 458,
+                      "content": "  this.isStreaming = true;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 459,
+                      "content": "  this.emit('turn_start');",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 460,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
                   "what_it_does": "Sets up the abort controller, the deferred lifecycle promise, registers them in activeRun, flips the streaming flag, and emits turn_start.",
                   "why_its_here": "Centralizes 'a turn is in flight' state in one place. Subscribers re-render on the isStreaming flip; emit() drives any external listeners; controller.signal threads through executor for cooperative cancellation.",
                   "touches": [
-                    { "label": "AbortController", "kind": "external", "block": null },
-                    { "label": "this.activeRun", "kind": "variable", "block": null },
-                    { "label": "emit", "kind": "function", "block": null }
+                    {
+                      "label": "AbortController",
+                      "kind": "external",
+                      "block": null
+                    },
+                    {
+                      "label": "this.activeRun",
+                      "kind": "variable",
+                      "block": null
+                    },
+                    {
+                      "label": "emit",
+                      "kind": "function",
+                      "block": null
+                    }
                   ],
                   "invariants": [
                     "this.activeRun is non-null until finishRun clears it.",
@@ -230,23 +398,67 @@
                   "context_start_line": 465,
                   "context_end_line": 473,
                   "lines": [
-                    { "line_num": 465, "content": "  try {", "change": "unchanged" },
-                    { "line_num": 466, "content": "    await executor(controller.signal);", "change": "unchanged" },
-                    { "line_num": 467, "content": "  } catch (error) {", "change": "unchanged" },
-                    { "line_num": 468, "content": "    await this.handleRunFailure(error);", "change": "unchanged" },
-                    { "line_num": 469, "content": "  } finally {", "change": "unchanged" },
-                    { "line_num": 470, "content": "    this.finishRun();", "change": "unchanged" },
-                    { "line_num": 471, "content": "  }", "change": "unchanged" },
-                    { "line_num": 472, "content": "  return lifecycle.promise;", "change": "unchanged" },
-                    { "line_num": 473, "content": "}", "change": "unchanged" }
+                    {
+                      "line_num": 465,
+                      "content": "  try {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 466,
+                      "content": "    await executor(controller.signal);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 467,
+                      "content": "  } catch (error) {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 468,
+                      "content": "    await this.handleRunFailure(error);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 469,
+                      "content": "  } finally {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 470,
+                      "content": "    this.finishRun();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 471,
+                      "content": "  }",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 472,
+                      "content": "  return lifecycle.promise;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 473,
+                      "content": "}",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
                   "what_it_does": "try { run executor } catch { handleRunFailure } finally { finishRun }. Returns the lifecycle promise so callers can await the full turn including post-loop listener flushing.",
                   "why_its_here": "Errors are converted into a synthetic assistant_message so subscribers always see a clean message_start → message_end → turn_end → agent_end sequence regardless of how the loop ended. The finally guarantees finishRun runs on both paths.",
                   "touches": [
-                    { "label": "handleRunFailure", "kind": "function", "block": "B7" },
-                    { "label": "finishRun",        "kind": "function", "block": "B10" }
+                    {
+                      "label": "handleRunFailure",
+                      "kind": "function",
+                      "block": "B7"
+                    },
+                    {
+                      "label": "finishRun",
+                      "kind": "function",
+                      "block": "B10"
+                    }
                   ],
                   "failure_mode": [
                     "No throw — handled & emitted as synthetic message."
@@ -273,16 +485,38 @@
                   "context_start_line": 487,
                   "context_end_line": 490,
                   "lines": [
-                    { "line_num": 487, "content": "async handleRunFailure(error: unknown): Promise<void> {", "change": "unchanged" },
-                    { "line_num": 488, "content": "  const aborted = this.activeRun?.controller.signal.aborted;", "change": "unchanged" },
-                    { "line_num": 489, "content": "  const kind = aborted ? 'aborted' : 'error';", "change": "unchanged" },
-                    { "line_num": 490, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 487,
+                      "content": "async handleRunFailure(error: unknown): Promise<void> {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 488,
+                      "content": "  const aborted = this.activeRun?.controller.signal.aborted;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 489,
+                      "content": "  const kind = aborted ? 'aborted' : 'error';",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 490,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
                   "what_it_does": "Reads the abort signal and picks 'aborted' vs 'error' as the failure kind.",
                   "why_its_here": "controller.signal.aborted is set by agent.abort() and is the only reliable signal that this was a user-initiated cancel — exception type alone isn't sufficient because abort can manifest as DOMException, AbortError, or wrapped variants."
-                }
+                },
+                "defines": [
+                  {
+                    "name": "handleRunFailure",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B8",
@@ -296,12 +530,36 @@
                   "context_start_line": 490,
                   "context_end_line": 496,
                   "lines": [
-                    { "line_num": 490, "content": "", "change": "unchanged" },
-                    { "line_num": 491, "content": "  this.emit('message_start', { role: 'assistant' });", "change": "unchanged" },
-                    { "line_num": 492, "content": "  const errorMessage = aborted ? '' : String(error);", "change": "unchanged" },
-                    { "line_num": 493, "content": "  this.emit('message_chunk', { text: errorMessage });", "change": "unchanged" },
-                    { "line_num": 494, "content": "  this.emit('message_end', { kind, errorMessage });", "change": "unchanged" },
-                    { "line_num": 495, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 490,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 491,
+                      "content": "  this.emit('message_start', { role: 'assistant' });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 492,
+                      "content": "  const errorMessage = aborted ? '' : String(error);",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 493,
+                      "content": "  this.emit('message_chunk', { text: errorMessage });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 494,
+                      "content": "  this.emit('message_end', { kind, errorMessage });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 495,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
@@ -324,9 +582,21 @@
                   "context_start_line": 496,
                   "context_end_line": 498,
                   "lines": [
-                    { "line_num": 496, "content": "", "change": "unchanged" },
-                    { "line_num": 497, "content": "  await this.transcript.append({ role: 'assistant', kind, content: errorMessage });", "change": "unchanged" },
-                    { "line_num": 498, "content": "}", "change": "unchanged" }
+                    {
+                      "line_num": 496,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 497,
+                      "content": "  await this.transcript.append({ role: 'assistant', kind, content: errorMessage });",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 498,
+                      "content": "}",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
@@ -354,15 +624,33 @@
                   "context_start_line": 505,
                   "context_end_line": 507,
                   "lines": [
-                    { "line_num": 505, "content": "finishRun(): void {", "change": "unchanged" },
-                    { "line_num": 506, "content": "  if (!this.activeRun) return;", "change": "unchanged" },
-                    { "line_num": 507, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 505,
+                      "content": "finishRun(): void {",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 506,
+                      "content": "  if (!this.activeRun) return;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 507,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
                   "what_it_does": "Returns early if there's no activeRun.",
                   "why_its_here": "Both runWithLifecycle's finally AND Agent.close() call finishRun. Making it idempotent means callers don't need to coordinate."
-                }
+                },
+                "defines": [
+                  {
+                    "name": "finishRun",
+                    "kind": "function"
+                  }
+                ]
               },
               {
                 "id": "B11",
@@ -376,11 +664,31 @@
                   "context_start_line": 507,
                   "context_end_line": 511,
                   "lines": [
-                    { "line_num": 507, "content": "", "change": "unchanged" },
-                    { "line_num": 508, "content": "  const run = this.activeRun;", "change": "unchanged" },
-                    { "line_num": 509, "content": "  this.activeRun = null;", "change": "unchanged" },
-                    { "line_num": 510, "content": "  this.isStreaming = false;", "change": "unchanged" },
-                    { "line_num": 511, "content": "", "change": "unchanged" }
+                    {
+                      "line_num": 507,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 508,
+                      "content": "  const run = this.activeRun;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 509,
+                      "content": "  this.activeRun = null;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 510,
+                      "content": "  this.isStreaming = false;",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 511,
+                      "content": "",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
@@ -404,10 +712,26 @@
                   "context_start_line": 511,
                   "context_end_line": 514,
                   "lines": [
-                    { "line_num": 511, "content": "", "change": "unchanged" },
-                    { "line_num": 512, "content": "  run.lifecycle.resolve();", "change": "unchanged" },
-                    { "line_num": 513, "content": "  this.emit('turn_end');", "change": "unchanged" },
-                    { "line_num": 514, "content": "}", "change": "unchanged" }
+                    {
+                      "line_num": 511,
+                      "content": "",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 512,
+                      "content": "  run.lifecycle.resolve();",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 513,
+                      "content": "  this.emit('turn_end');",
+                      "change": "unchanged"
+                    },
+                    {
+                      "line_num": 514,
+                      "content": "}",
+                      "change": "unchanged"
+                    }
                   ]
                 },
                 "right_panel": {
@@ -419,9 +743,27 @@
           }
         ],
         "edges": [
-          { "from": "B3", "to": "B4",  "label": "CALL",    "style": "solid",  "color": "#c54343" },
-          { "from": "B6", "to": "B7",  "label": "CATCH",   "style": "solid",  "color": "#c54343" },
-          { "from": "B6", "to": "B10", "label": "FINALLY", "style": "dashed", "color": "#7a5cc4" }
+          {
+            "from": "B3",
+            "to": "B4",
+            "label": "CALL",
+            "style": "solid",
+            "color": "#c54343"
+          },
+          {
+            "from": "B6",
+            "to": "B7",
+            "label": "CATCH",
+            "style": "solid",
+            "color": "#c54343"
+          },
+          {
+            "from": "B6",
+            "to": "B10",
+            "label": "FINALLY",
+            "style": "dashed",
+            "color": "#7a5cc4"
+          }
         ]
       }
     },
@@ -439,7 +781,9 @@
         "rationale": "Standard pub/sub pattern; only included for context."
       },
       "summary": "A thin EventEmitter wrapper used by the lifecycle code above. Subscribers call agent.on('event', handler); the lifecycle blocks call this.emit(name, payload) to push updates. Implementation is a Map<string, Set<Handler>> with synchronous iteration; no buffering, no replay. Listed as summary-depth because there's no project-specific design in it — promote-to-full to see the implementation walk-through.",
-      "files_touched": ["src/event-bus.ts"]
+      "files_touched": [
+        "src/event-bus.ts"
+      ]
     }
   ]
 }

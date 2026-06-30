@@ -311,6 +311,16 @@ A small chunk of code within a column (typically 3–10 lines).
 
   "code_view": FileView,   // shown when the block is expanded (clicked)
 
+  // Optional. Top-level symbols this block INTRODUCES (function/type/class
+  // declarations, exported constants). Used by the renderer to make matching
+  // identifiers in any other block's code clickable — clicking opens a
+  // popover with the defining block's source snippet + a "jump to block"
+  // link. Don't list internal locals; only declarations a reader might want
+  // to jump to.
+  "defines": [
+    { "name": "string (e.g. 'runWithLifecycle', 'AgentTool')", "kind": "function | type | class | const" }
+  ],
+
   "right_panel": {
     "what_it_does":    "string (paragraph — factual mechanics)",
     "why_its_here":    "string (paragraph — design rationale: why this exists in the flow, what would break without it)",

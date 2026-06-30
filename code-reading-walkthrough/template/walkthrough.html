@@ -251,7 +251,14 @@
     line-height: 1.55;
     background: var(--code-bg);
     border-radius: 4px;
-    overflow-x: auto;
+    overflow: auto;
+    /* User can drag the bottom-right corner to resize the code panel.
+       ResizeObserver in JS persists the chosen size per block + redraws
+       edges so the SVG overlay tracks the new layout. */
+    resize: both;
+    min-height: 80px;
+    max-height: 80vh;
+    min-width: 240px;
   }
   .code-line { display: flex; gap: 12px; padding: 0 8px; }
   .code-line .ln {
@@ -550,6 +557,96 @@
   .touch-chip.linked { cursor: pointer; }
   .touch-chip.linked:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 
+  /* ------- Symbol peek (inline identifiers + popover) ------- */
+  .sym {
+    cursor: pointer;
+    text-decoration: underline dotted var(--accent);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  .sym:hover {
+    background: var(--accent-soft);
+    text-decoration-style: solid;
+    border-radius: 2px;
+  }
+
+  .sym-popover {
+    position: fixed;
+    z-index: 100;
+    width: 480px;
+    max-width: calc(100vw - 32px);
+    background: var(--bg-card);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    padding: 12px 14px 10px;
+    font-size: 13px;
+  }
+  .sym-popover[hidden] { display: none; }
+  .sym-popover-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .sym-popover-name {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .sym-popover-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: var(--fg-faint);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+  .sym-popover-close:hover { color: var(--fg); }
+  .sym-popover-meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--fg-soft);
+  }
+  .sym-popover-meta strong { color: var(--fg); font-weight: 600; }
+  .sym-popover-code {
+    margin-top: 10px;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 8px 0;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    max-height: 240px;
+    overflow: auto;
+  }
+  .sym-popover-line { display: flex; gap: 10px; padding: 0 10px; }
+  .sym-popover-line .ln {
+    color: var(--fg-faint);
+    user-select: none;
+    text-align: right;
+    min-width: 30px;
+    flex-shrink: 0;
+  }
+  .sym-popover-line .src { white-space: pre; }
+  .sym-popover-foot {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .sym-popover-jump {
+    font-size: 11px;
+    padding: 4px 10px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .sym-popover-jump:hover { filter: brightness(0.92); }
+
   .kds-item { margin-bottom: 10px; }
   .kds-item .name {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -686,6 +783,7 @@
     <div class="canvas" id="canvas"></div>
     <aside class="dock" id="dock"></aside>
   </main>
+  <div class="sym-popover" id="sym-popover" hidden></div>
 </div>
 
 <script>
@@ -709,6 +807,18 @@
     promotions: {},
     pendingPromotions: new Set(),
     promotionErrors: {},     // storyline_id → last error message
+
+    // Per-block code-panel sizes, set by the user dragging the resize
+    // handle on .block-code. Keyed by block id; { width, height } as raw
+    // CSS strings (e.g. "640px"). Re-applied on re-render so a block keeps
+    // its size across selections + page reloads.
+    blockSizes: {},
+
+    // Aggregated symbol index built from every block's defines[]. Maps
+    // a symbol name to { storylineId, colId, blockId, kind, storylineTitle,
+    // blockTitle, snippetLines }. Used by the highlighter to flag clickable
+    // identifiers and by the peek popover to show the definition snippet.
+    symbolIndex: {},
   };
 
   const STORAGE_PREFIX = 'walkthrough.v0.5.' +
@@ -722,6 +832,7 @@
         storylineId: state.storylineId,
         expandedBlockIds: state.expandedBlockIds,
         focusedBlockId: state.focusedBlockId,
+        blockSizes: state.blockSizes,
       }));
     } catch (e) {}
   }
@@ -732,6 +843,7 @@
       const v = JSON.parse(raw);
       Object.assign(state, v);
       if (!Array.isArray(state.expandedBlockIds)) state.expandedBlockIds = [];
+      if (!state.blockSizes || typeof state.blockSizes !== 'object') state.blockSizes = {};
     } catch (e) {}
   }
 
@@ -753,6 +865,40 @@
   }
   function getPhaseDef(storyline, phaseId) {
     return (storyline?.diagram?.phases ?? []).find(p => p.id === phaseId);
+  }
+
+  // -------- Symbol index --------
+  // Walk every block.defines[] across all storylines (honoring promotions
+  // via getStoryline) and build a name → entry map. Used by the syntax
+  // highlighter to flag clickable identifiers and by the peek popover.
+  function buildSymbolIndex() {
+    const idx = {};
+    for (const orig of WALKTHROUGH_DATA?.storylines ?? []) {
+      const sl = getStoryline(orig.id) ?? orig;
+      const cols = sl?.diagram?.cols ?? [];
+      for (const col of cols) {
+        for (const block of col.blocks ?? []) {
+          for (const def of block.defines ?? []) {
+            if (!def?.name) continue;
+            // First definition wins. If a name is declared in multiple
+            // blocks, the LLM was instructed to declare it only once at
+            // the actual declaration site.
+            if (idx[def.name]) continue;
+            idx[def.name] = {
+              name: def.name,
+              kind: def.kind || 'symbol',
+              storylineId: sl.id,
+              storylineTitle: sl.title || sl.id,
+              colId: col.id,
+              blockId: block.id,
+              blockTitle: block.title || block.id,
+              block, // keep reference for snippet rendering
+            };
+          }
+        }
+      }
+    }
+    state.symbolIndex = idx;
   }
   function phaseColorVars(phaseTokenOrColor) {
     const namedTokens = ['guard','setup','main','handoff','cleanup','error','persist','emit'];
@@ -950,6 +1096,8 @@
       </div>
     `;
     bindBlockClicks();
+    bindSymClicks();
+    observeBlockCodePanels();
     renderEdges(storyline);
   }
 
@@ -1004,7 +1152,52 @@
       const srcHtml = highlighted[i] ?? escapeHtml(l.content ?? '');
       return `<div class="code-line${inRange ? '' : ' context'}"><span class="ln">${l.line_num}</span><span class="src">${srcHtml}</span></div>`;
     }).join('');
-    return `<div class="block-code">${html}</div>`;
+    // Re-apply any user-chosen resize from previous interactions so the
+    // panel doesn't snap back to default on every re-render.
+    const saved = state.blockSizes[block.id];
+    const sizeStyle = saved
+      ? `style="${saved.width ? `width:${escapeAttr(saved.width)};` : ''}${saved.height ? `height:${escapeAttr(saved.height)};` : ''}"`
+      : '';
+    return `<div class="block-code" data-block-code-for="${escapeAttr(block.id)}" ${sizeStyle}>${html}</div>`;
+  }
+
+  // Single ResizeObserver shared across all .block-code panels. Fires when
+  // the user drags the bottom-right corner; saves the new dimensions per
+  // block and triggers an edges redraw so the SVG overlay tracks the new
+  // layout. Created lazily on first use to avoid SSR issues.
+  let _blockResizeObserver = null;
+  function getBlockResizeObserver() {
+    if (_blockResizeObserver) return _blockResizeObserver;
+    _blockResizeObserver = new ResizeObserver(entries => {
+      let changed = false;
+      for (const entry of entries) {
+        const el = entry.target;
+        const blockId = el.dataset.blockCodeFor;
+        if (!blockId) continue;
+        // Element.style.width/height are only set after the user actually
+        // drags; if empty, skip (the change was a layout-driven reflow not
+        // a user resize).
+        const w = el.style.width || '';
+        const h = el.style.height || '';
+        if (!w && !h) continue;
+        const prev = state.blockSizes[blockId] || {};
+        if (prev.width === w && prev.height === h) continue;
+        state.blockSizes[blockId] = { width: w, height: h };
+        changed = true;
+      }
+      if (changed) saveState();
+      // Always recompute edges — block height can change from any reflow
+      // (selection, expansion, resize), and stale SVG positions look broken.
+      if (state.view === 'storyline') {
+        requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
+      }
+    });
+    return _blockResizeObserver;
+  }
+
+  function observeBlockCodePanels() {
+    const ro = getBlockResizeObserver();
+    document.querySelectorAll('#canvas .block-code').forEach(el => ro.observe(el));
   }
 
   // -------- Syntax highlighter (TS/JS/Python) --------
@@ -1114,7 +1307,10 @@
           while (k < n && source[k] === ' ') k++;
           if (source[k] === '(') cls = 'fn';
         }
-        parts.push({ type: cls, text: word });
+        // Tag identifiers that match an indexed symbol so the HTML emit
+        // can wrap them with a clickable .sym span + data-sym attribute.
+        const sym = (state.symbolIndex && state.symbolIndex[word]) ? word : null;
+        parts.push({ type: cls, text: word, sym });
         i = j;
         continue;
       }
@@ -1137,22 +1333,24 @@
     }
 
     // Re-assemble as HTML, splitting on newlines into one entry per line.
+    // tokenHtml wraps a single segment with the right combination of
+    // tok-<type> and sym classes plus the data-sym attribute when needed.
+    function tokenHtml(p, text) {
+      const classes = [];
+      if (p.type) classes.push(`tok-${p.type}`);
+      if (p.sym)  classes.push('sym');
+      if (!classes.length) return escapeHtml(text);
+      const attrs = p.sym ? ` data-sym="${escapeAttr(p.sym)}"` : '';
+      return `<span class="${classes.join(' ')}"${attrs}>${escapeHtml(text)}</span>`;
+    }
     const lines = [['']];
     for (const p of parts) {
-      const html = p.type
-        ? `<span class="tok-${p.type}">${escapeHtml(p.text)}</span>`
-        : escapeHtml(p.text);
-      // We need to break on raw '\n' in the text, not in the html.
       const segments = p.text.split('\n');
       if (segments.length === 1) {
-        lines[lines.length - 1][0] += html;
+        lines[lines.length - 1][0] += tokenHtml(p, p.text);
       } else {
         for (let s = 0; s < segments.length; s++) {
-          const seg = segments[s];
-          const segHtml = p.type
-            ? `<span class="tok-${p.type}">${escapeHtml(seg)}</span>`
-            : escapeHtml(seg);
-          lines[lines.length - 1][0] += segHtml;
+          lines[lines.length - 1][0] += tokenHtml(p, segments[s]);
           if (s < segments.length - 1) lines.push(['']);
         }
       }
@@ -1172,9 +1370,136 @@
   function bindBlockClicks() {
     document.querySelectorAll('#canvas .block').forEach(el => {
       el.onclick = (e) => {
+        // Symbol clicks inside the expanded code panel get their own
+        // handler — don't fall through to block toggle, which would
+        // collapse the panel just as the user tries to peek.
+        if (e.target.closest('.sym')) return;
         e.stopPropagation();
         toggleBlock(el.dataset.blockId);
       };
+    });
+  }
+
+  // -------- Symbol peek --------
+
+  function bindSymClicks() {
+    document.querySelectorAll('#canvas .sym').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        showSymbolPeek(el.dataset.sym, e);
+      };
+    });
+  }
+
+  // Captured at document level so clicks outside the popover dismiss it.
+  // Wired once in init(); skip if the click landed inside the popover or
+  // on a .sym (which has its own handler).
+  function bindGlobalDocumentClicks() {
+    document.addEventListener('mousedown', (e) => {
+      const popover = document.getElementById('sym-popover');
+      if (!popover || popover.hasAttribute('hidden')) return;
+      if (e.target.closest('#sym-popover') || e.target.closest('.sym')) return;
+      hideSymbolPeek();
+    });
+  }
+
+  function showSymbolPeek(symName, anchorEvent) {
+    if (!symName) return;
+    const entry = state.symbolIndex?.[symName];
+    if (!entry) return;
+    const popover = document.getElementById('sym-popover');
+    if (!popover) return;
+
+    // Pull the defining block from the (possibly promoted) storyline so the
+    // snippet reflects the latest version.
+    const targetSl = getStoryline(entry.storylineId);
+    const hit = targetSl ? findBlock(targetSl, entry.blockId) : null;
+    const block = hit?.block ?? entry.block;
+    if (!block) return;
+
+    // Show the block's in-range core lines only — keeps the popover tight.
+    const range = parseLineRange(block.line_range);
+    const lines = block.code_view?.lines ?? [];
+    const coreLines = range
+      ? lines.filter(l => l.line_num >= range[0] && l.line_num <= range[1])
+      : lines;
+    const lang = (block.code_view?.language || '').toLowerCase();
+    const joined = coreLines.map(l => l.content ?? '').join('\n');
+    const highlighted = highlightCode(joined, lang);
+    const codeHtml = coreLines.map((l, i) => {
+      const src = highlighted[i] ?? escapeHtml(l.content ?? '');
+      return `<div class="sym-popover-line"><span class="ln">${l.line_num}</span><span class="src">${src}</span></div>`;
+    }).join('');
+
+    popover.innerHTML = `
+      <div class="sym-popover-head">
+        <div class="sym-popover-name">${escapeHtml(symName)}</div>
+        <button class="sym-popover-close" id="sym-popover-close" title="Close (Esc)">×</button>
+      </div>
+      <div class="sym-popover-meta">
+        ${escapeHtml(entry.kind || 'symbol')} · Defined in
+        <strong>${escapeHtml(entry.storylineTitle)}</strong>
+        → ${escapeHtml(entry.blockTitle)}
+        <span style="color:var(--fg-faint)"> · ${escapeHtml(block.line_range || '')}</span>
+      </div>
+      <div class="sym-popover-code">${codeHtml}</div>
+      <div class="sym-popover-foot">
+        <button class="sym-popover-jump" id="sym-popover-jump">→ Jump to block</button>
+      </div>
+    `;
+    popover.removeAttribute('hidden');
+
+    // Position the popover near the click point, clamped to viewport.
+    // Measure after unhide; default position before measure to avoid flash.
+    popover.style.left = '0px';
+    popover.style.top = '0px';
+    requestAnimationFrame(() => {
+      const r = popover.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const margin = 12;
+      let x = anchorEvent.clientX + 8;
+      let y = anchorEvent.clientY + 12;
+      if (x + r.width > vw - margin) x = Math.max(margin, vw - r.width - margin);
+      if (y + r.height > vh - margin) y = Math.max(margin, anchorEvent.clientY - r.height - 8);
+      popover.style.left = x + 'px';
+      popover.style.top = y + 'px';
+    });
+
+    document.getElementById('sym-popover-close').onclick = (e) => {
+      e.stopPropagation();
+      hideSymbolPeek();
+    };
+    document.getElementById('sym-popover-jump').onclick = (e) => {
+      e.stopPropagation();
+      hideSymbolPeek();
+      jumpToBlock(entry.storylineId, entry.blockId);
+    };
+  }
+
+  function hideSymbolPeek() {
+    const popover = document.getElementById('sym-popover');
+    if (popover) {
+      popover.setAttribute('hidden', '');
+      popover.innerHTML = '';
+    }
+  }
+
+  // Cross-storyline navigation: focus a specific block in (possibly) a
+  // different storyline. Expands the block, scrolls it into view, and
+  // makes it the dock's focus.
+  function jumpToBlock(storylineId, blockId) {
+    state.view = 'storyline';
+    state.storylineId = storylineId;
+    if (!state.expandedBlockIds.includes(blockId)) {
+      state.expandedBlockIds.push(blockId);
+    }
+    state.focusedBlockId = blockId;
+    saveState();
+    render();
+    requestAnimationFrame(() => {
+      scrollBlockIntoView(blockId);
+      requestAnimationFrame(() => renderEdges(getStoryline(state.storylineId)));
     });
   }
 
@@ -1301,15 +1626,20 @@
     }
 
     if (TL > FR) {
-      // Forward inter-column → horizontal bezier right→left
+      // Forward inter-column. Both bezier control points sit at the gutter's
+      // horizontal midpoint, so the curve stays in the inter-column whitespace
+      // even when the gap is small (typical 28px CSS gap). The previous logic
+      // pushed control points outward by `sweep`, which on tight grids landed
+      // them INSIDE the opposite column and pulled the bezier across block
+      // bodies / code panels.
       const startX = FR;
       const startY = fromCY;
       const endX   = TL;
       const endY   = toCY;
-      const sweep  = Math.max(40, (endX - startX) * 0.4);
+      const midX   = (startX + endX) / 2;
       return {
-        d: `M ${startX} ${startY} C ${startX + sweep} ${startY}, ${endX - sweep} ${endY}, ${endX} ${endY}`,
-        labelX: (startX + endX) / 2,
+        d: `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`,
+        labelX: midX,
         labelY: (startY + endY) / 2,
       };
     }
@@ -1609,6 +1939,7 @@
         throw new Error('server returned no storyline');
       }
       state.promotions[storylineId] = payload.storyline;
+      buildSymbolIndex();
     } catch (err) {
       state.promotionErrors[storylineId] = err.message ?? String(err);
     } finally {
@@ -1622,6 +1953,7 @@
     // immediately; if the server delete fails the user can re-promote.
     delete state.promotions[storylineId];
     delete state.promotionErrors[storylineId];
+    buildSymbolIndex();
     if (state.view === 'overview') renderOverview();
     if (state.storylineId === storylineId && state.view === 'storyline') {
       goToOverview();
@@ -1720,6 +2052,8 @@
       const tag = document.activeElement?.tagName;
       if (tag === 'TEXTAREA' || tag === 'INPUT') return;
       if (e.key === 'Escape') {
+        const popover = document.getElementById('sym-popover');
+        if (popover && !popover.hasAttribute('hidden')) { hideSymbolPeek(); return; }
         if (state.focusedBlockId) closeDock();
         else if (state.expandedBlockIds.length) collapseAll();
         else if (state.view === 'storyline') goToOverview();
@@ -1802,14 +2136,17 @@
       state.expandedBlockIds = [];
       state.focusedBlockId = null;
     }
+    buildSymbolIndex();
     render();
     bindKeyboard();
+    bindGlobalDocumentClicks();
     setupResize();
     const info = await preflight();
     if (info) {
       state.liveMode = true;
       state.serverInfo = info;
       await Promise.all([loadFollowups(), loadPromotions()]);
+      buildSymbolIndex();  // promotions can add new defines
       render();
     }
   }
