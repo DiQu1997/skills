@@ -109,13 +109,27 @@
     border: 1px solid var(--border);
     border-left: 5px solid var(--accent);
     border-radius: 6px;
-    padding: 12px 16px;
+    padding: 14px 18px;
     margin-bottom: 18px;
   }
+  .storyline-banner .b-position {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .storyline-banner .b-position .pos-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    margin: 0 2px; vertical-align: middle;
+  }
+  .storyline-banner .b-position .pos-dot.active { background: var(--accent); transform: scale(1.4); }
+  .storyline-banner .b-position .pos-dot.done   { background: var(--fg-faint); }
   .storyline-banner .b-title {
     font-family: ui-monospace, monospace;
-    font-size: 15px; font-weight: 700;
-    margin-bottom: 4px;
+    font-size: 17px; font-weight: 700;
+    margin-bottom: 6px;
   }
   .storyline-banner .b-source {
     margin-left: 10px;
@@ -125,6 +139,139 @@
   }
   .storyline-banner .b-summary {
     font-size: 12.5px; color: var(--fg-soft); line-height: 1.55;
+    margin-bottom: 10px;
+  }
+
+  /* Mental-model-anchor: the keystone framing of the storyline. Italic
+     pull-quote treatment with a subtle left bar. */
+  .storyline-banner .b-anchor {
+    margin: 10px 0;
+    padding: 8px 14px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 4px 4px 0;
+    font-size: 13.5px; font-style: italic;
+    color: var(--fg);
+    line-height: 1.55;
+  }
+  .storyline-banner .b-anchor::before {
+    content: '💡 ';
+    margin-right: 2px;
+    font-style: normal;
+  }
+
+  /* Architectural context — small, structured facts */
+  .b-context {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+  .b-context dt {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin: 0; padding-top: 2px;
+    white-space: nowrap;
+  }
+  .b-context dd { margin: 0; }
+  .b-context .module-chip {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg);
+    margin: 1px 3px 1px 0;
+  }
+  .b-context .module-chip .role {
+    color: var(--fg-faint);
+    font-style: italic;
+    margin-left: 5px;
+    font-family: -apple-system, sans-serif;
+    font-size: 10px;
+  }
+
+  /* Prev / next storyline bridge — "前情提要" / "coming up" navigation */
+  .storyline-bridge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+  }
+  .storyline-bridge .bridge-cell {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms;
+  }
+  .storyline-bridge .bridge-cell:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .storyline-bridge .bridge-cell.empty {
+    background: transparent; cursor: default; border-style: dashed; opacity: 0.5;
+  }
+  .storyline-bridge .bridge-cell.empty:hover { background: transparent; border-color: var(--border); }
+  .storyline-bridge .bridge-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 3px;
+  }
+  .storyline-bridge .bridge-cell.next .bridge-label { text-align: right; }
+  .storyline-bridge .bridge-title {
+    font-family: ui-monospace, monospace;
+    font-size: 12px; font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 3px;
+  }
+  .storyline-bridge .bridge-cell.next .bridge-title { text-align: right; }
+  .storyline-bridge .bridge-summary {
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Top-level walkthrough description (above storyline banner, only on first storyline) */
+  .walkthrough-intro {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    line-height: 1.6;
+  }
+  .walkthrough-intro .wi-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 4px;
+  }
+  .walkthrough-intro details { margin-top: 6px; }
+  .walkthrough-intro summary {
+    cursor: pointer; color: var(--accent);
+    font-size: 11.5px;
+    font-family: ui-monospace, monospace;
+    user-select: none;
+  }
+  .walkthrough-intro details[open] summary { color: var(--fg-soft); }
+  .walkthrough-intro .wi-desc {
+    margin-top: 6px; padding-top: 6px;
+    border-top: 1px solid var(--border);
   }
 
   /* Compact DS strip at top of main */
@@ -940,17 +1087,31 @@
   function renderMain() {
     const main = document.getElementById('main');
     main.innerHTML = '';
-    const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    const storylines = WALKTHROUGH_DATA.storylines || [];
+    const sl = storylines.find(s => s.id === STATE.activeStorylineId);
     if (!sl) { main.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
+    const slIdx = storylines.indexOf(sl);
     const view = viewForStoryline(sl);
 
-    const banner = document.createElement('div');
-    banner.className = 'storyline-banner';
-    banner.innerHTML =
-      '<div class="b-title">' + esc(sl.title) +
-      (view.files[0] ? '<span class="b-source">' + esc(view.files[0]) + '</span>' : '') +
-      '</div>' +
-      (view.summary ? '<div class="b-summary">' + esc(view.summary) + '</div>' : '');
+    // Walkthrough intro — only on the first storyline (top-level orientation).
+    if (slIdx === 0) {
+      const sm = WALKTHROUGH_DATA.summary || {};
+      if (sm.one_line || sm.description) {
+        const intro = document.createElement('div');
+        intro.className = 'walkthrough-intro';
+        const longDesc = sm.description && sm.description !== sm.one_line
+          ? '<details><summary>What this walkthrough covers in full</summary><div class="wi-desc">' + esc(sm.description) + '</div></details>'
+          : '';
+        intro.innerHTML =
+          '<div class="wi-label">📖 Walkthrough</div>' +
+          (sm.one_line ? esc(sm.one_line) : '') +
+          longDesc;
+        main.appendChild(intro);
+      }
+    }
+
+    // Storyline banner — the prologue card.
+    const banner = renderStorylineBanner(sl, slIdx, storylines, view);
     main.appendChild(banner);
 
     if (view.placeholder) {
@@ -970,6 +1131,85 @@
       layoutAnnotations();
       renderActiveState();
     });
+  }
+
+  // ---------- Storyline prologue card ----------
+  // Built from existing schema fields: mental_model_anchor (the hero quote),
+  // summary (one-line), architectural_context.system_role + involved_modules
+  // (where this fits), plus prev/next storyline bridges (the "前情提要" /
+  // "coming up" navigation).
+  function renderStorylineBanner(sl, slIdx, storylines, view) {
+    const banner = document.createElement('div');
+    banner.className = 'storyline-banner';
+
+    // Position dots: ●○○○○○○○ showing where we are in the arc.
+    const dots = storylines.map((s, i) => {
+      const cls = i === slIdx ? 'active' : (i < slIdx ? 'done' : '');
+      return '<span class="pos-dot ' + cls + '" title="' + esc(s.id + ': ' + s.title) + '"></span>';
+    }).join('');
+    const position = '<div class="b-position">Storyline ' +
+      (slIdx + 1) + ' of ' + storylines.length + '   ' + dots + '</div>';
+
+    // Title + source
+    const title = '<div class="b-title">' + esc(sl.title) +
+      (view.files[0] ? '<span class="b-source">' + esc(view.files[0]) + '</span>' : '') +
+      '</div>';
+
+    // Mental model anchor — the keystone quote
+    const anchor = sl.mental_model_anchor
+      ? '<div class="b-anchor">' + esc(sl.mental_model_anchor) + '</div>'
+      : '';
+
+    // Summary
+    const summary = view.summary ? '<div class="b-summary">' + esc(view.summary) + '</div>' : '';
+
+    // Architectural context — system role + involved modules + data flow
+    const ac = sl.architectural_context || {};
+    const contextRows = [];
+    if (ac.system_role) {
+      contextRows.push('<dt>Role</dt><dd>' + esc(ac.system_role) + '</dd>');
+    }
+    if (Array.isArray(ac.involved_modules) && ac.involved_modules.length) {
+      const chips = ac.involved_modules.map(m =>
+        '<span class="module-chip">' + esc(m.module || '') +
+        (m.role_in_storyline ? '<span class="role">— ' + esc(m.role_in_storyline) + '</span>' : '') +
+        '</span>'
+      ).join('');
+      contextRows.push('<dt>Modules</dt><dd>' + chips + '</dd>');
+    }
+    if (ac.data_flow) {
+      contextRows.push('<dt>Data flow</dt><dd><code style="font-size:11px">' + esc(ac.data_flow) + '</code></dd>');
+    }
+    const context = contextRows.length
+      ? '<dl class="b-context">' + contextRows.join('') + '</dl>'
+      : '';
+
+    // Bridges to previous / next storylines
+    const prev = slIdx > 0 ? storylines[slIdx - 1] : null;
+    const next = slIdx < storylines.length - 1 ? storylines[slIdx + 1] : null;
+    const prevHtml = prev
+      ? '<div class="bridge-cell" data-go-sl="' + esc(prev.id) + '">' +
+          '<div class="bridge-label">◀ Previously · ' + esc(prev.id) + '</div>' +
+          '<div class="bridge-title">' + esc(prev.title) + '</div>' +
+          (prev.summary ? '<div class="bridge-summary">' + esc(prev.summary) + '</div>' : '') +
+        '</div>'
+      : '<div class="bridge-cell empty"><div class="bridge-label">— start of walkthrough —</div></div>';
+    const nextHtml = next
+      ? '<div class="bridge-cell next" data-go-sl="' + esc(next.id) + '">' +
+          '<div class="bridge-label">Coming up · ' + esc(next.id) + ' ▶</div>' +
+          '<div class="bridge-title">' + esc(next.title) + '</div>' +
+          (next.summary ? '<div class="bridge-summary">' + esc(next.summary) + '</div>' : '') +
+        '</div>'
+      : '<div class="bridge-cell next empty"><div class="bridge-label">— end of walkthrough —</div></div>';
+    const bridge = '<div class="storyline-bridge">' + prevHtml + nextHtml + '</div>';
+
+    banner.innerHTML = position + title + anchor + summary + context + bridge;
+
+    // Wire bridge clicks
+    banner.querySelectorAll('[data-go-sl]').forEach(el => {
+      el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+    });
+    return banner;
   }
 
   function setStoryline(id) {
