@@ -360,7 +360,7 @@
     cursor: pointer;
     transition: transform 120ms, box-shadow 120ms;
     display: flex; flex-direction: column;
-    overflow: hidden;
+    position: relative;
   }
   .blk:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.10); }
   .blk.active {
@@ -374,8 +374,29 @@
     background: rgba(0,0,0,0.04);
     padding: 6px 10px;
     border-bottom: 1px solid var(--border);
+    position: relative;
   }
   .blk.active .blk-head { background: rgba(191,135,0,0.16); border-color: var(--blk-active-border); }
+  .blk-step {
+    position: absolute;
+    top: 4px; right: 6px;
+    min-width: 22px; height: 22px; padding: 0 6px;
+    border-radius: 11px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--blk-border);
+    color: var(--fg-soft);
+    font-family: ui-monospace, monospace;
+    font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    z-index: 2;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+  .blk-step::before { content: '#'; opacity: 0.5; margin-right: 1px; }
+  .blk.active .blk-step {
+    background: var(--blk-active-border);
+    border-color: var(--blk-active-border);
+    color: #fff;
+  }
   .blk-tag {
     font-family: ui-monospace, monospace;
     font-size: 9px; color: var(--fg-faint);
@@ -468,6 +489,85 @@
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
   }
+
+  .step-nav {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .step-nav .step-counter {
+    color: var(--fg-soft); flex: 1;
+  }
+  .step-nav .step-counter strong { color: var(--fg); font-weight: 700; }
+  .step-nav button {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    color: var(--fg);
+    cursor: pointer;
+    transition: all 80ms;
+  }
+  .step-nav button:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .step-nav button:disabled {
+    color: var(--fg-faint); cursor: default; opacity: 0.5;
+  }
+  .step-nav kbd {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    background: rgba(0,0,0,0.05);
+    border: 1px solid rgba(0,0,0,0.1);
+    border-radius: 3px;
+    padding: 0 3px;
+    color: var(--fg-faint);
+    margin-left: 4px;
+  }
+
+  .next-hint {
+    margin-top: 12px; padding: 8px 10px;
+    background: var(--bg-soft);
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    line-height: 1.4;
+  }
+  .next-hint .nh-label {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    display: block; margin-bottom: 2px;
+  }
+  .next-hint .nh-link {
+    color: var(--accent); cursor: pointer;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+  }
+  .next-hint .nh-link:hover { text-decoration: underline; }
+  .next-hint .nh-kind {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    background: rgba(91,108,255,0.10);
+    color: var(--accent);
+    padding: 1px 5px; border-radius: 3px;
+    margin-left: 6px;
+    letter-spacing: 0.05em;
+  }
+  .next-hint .nh-kind.async {
+    background: rgba(207,128,194,0.18); color: #a64798;
+  }
+  .next-hint .nh-kind.error {
+    background: rgba(197,67,67,0.15); color: #c54343;
+  }
   .focus-name {
     font-family: ui-monospace, monospace;
     font-size: 16px; font-weight: 700; margin-bottom: 4px;
@@ -545,12 +645,18 @@
   <nav class="tabs" id="tabs"></nav>
   <section class="canvas"><div class="canvas-inner" id="canvas-inner"></div></section>
   <aside class="side" id="side">
+    <div class="step-nav" id="step-nav">
+      <span class="step-counter" id="step-counter">—</span>
+      <button id="btn-prev" title="Previous step (←)">◀ Prev</button>
+      <button id="btn-next" title="Next step (→)">Next ▶</button>
+    </div>
     <h2>Selected logic block</h2>
     <div class="focus-name" id="focus-name">—</div>
-    <div class="focus-purpose" id="focus-purpose">Click any block on the canvas.</div>
+    <div class="focus-purpose" id="focus-purpose">Click any block on the canvas, or use ◀ / ▶ to walk through.</div>
     <div class="reads-writes" id="focus-rw"></div>
     <div class="code-loc" id="focus-loc"></div>
     <pre class="code" id="focus-code"></pre>
+    <div id="focus-next"></div>
   </aside>
 </div>
 
@@ -581,14 +687,22 @@
     const cols = diag.cols || [];
     const blocksFlat = [];
     cols.forEach(col => {
-      (col.blocks || []).forEach(b => blocksFlat.push({ ...b, _col: col }));
+      (col.blocks || []).forEach((b, bi) => {
+        blocksFlat.push({ ...b, _col: col, _step: blocksFlat.length + 1 });
+      });
     });
+    const stepById = {};
+    blocksFlat.forEach(b => { stepById[b.id] = b._step; });
     const touches = new Set();
     blocksFlat.forEach(b => (b.state_effects || []).forEach(e => touches.add(e.ds_id)));
     const connections = [];
     blocksFlat.forEach(b => (b.state_effects || []).forEach(e => connections.push({
       from: b.id, to: e.ds_id, kind: e.kind || 'rw', label: e.op || ''
     })));
+    // Block→block edges (cross-column flow): CALL, ON SUCCESS, ON ERROR, call_soon, etc.
+    // Filter to edges whose endpoints are both blocks in this storyline.
+    const blockIds = new Set(blocksFlat.map(b => b.id));
+    const flowEdges = (diag.edges || []).filter(e => blockIds.has(e.from) && blockIds.has(e.to));
     return {
       id: sl.id,
       title: sl.title,
@@ -599,7 +713,9 @@
       data_structures: diag.data_structures || [],
       cols,
       blocks: blocksFlat,
+      stepById,
       connections,
+      edges: flowEdges,
       defaultActive: blocksFlat[0]?.id || null,
     };
   }
@@ -679,7 +795,9 @@
           arr.textContent = '▶';
           row.appendChild(arr);
         }
-        row.appendChild(renderBlock(b, view));
+        // Decorate with _step + _col so renderBlock sees them
+        const decorated = { ...b, _col: col, _step: view.stepById[b.id] };
+        row.appendChild(renderBlock(decorated, view));
       });
       area.appendChild(row);
     });
@@ -709,6 +827,7 @@
     }
     blk.innerHTML =
       '<div class="blk-head">' +
+        (b._step ? '<div class="blk-step">' + b._step + '</div>' : '') +
         '<div class="blk-tag">' + esc(b.phase || '') + (b.line_range ? ' · ' + esc(b.line_range) : '') + '</div>' +
         '<div class="blk-name">' + esc(b.title || b.name || b.id) + '</div>' +
       '</div>' +
@@ -757,6 +876,22 @@
     requestAnimationFrame(() => drawArrows(view));
   }
 
+  // Classify an edge label/style into a flow kind: call | async | error | success | return | plain
+  function edgeKind(e) {
+    const lbl = String(e.label || '').toUpperCase();
+    const style = String(e.style || '').toLowerCase();
+    if (/ERROR|EXCEPT|RAISE|CATCH/.test(lbl)) return 'error';
+    if (style === 'dashed' || /ASYNC|CALL_SOON|SIGNAL|NOTIFY|SCHEDULE|ENQUEUE|RESUME|CALLBACK/.test(lbl)) return 'async';
+    if (/SUCCESS|OK|THEN/.test(lbl)) return 'success';
+    if (/RETURN|RET\b/.test(lbl)) return 'return';
+    if (/CALL|INVOKE/.test(lbl)) return 'call';
+    return 'plain';
+  }
+  const EDGE_COLOR = {
+    call:    '#2f7a2f', async:   '#a64798', error:   '#c54343',
+    success: '#2f7a2f', return:  '#5b6cff', plain:   '#57606a',
+  };
+
   function drawArrows(view) {
     const svg = document.getElementById('arrows');
     if (!svg) return;
@@ -770,10 +905,71 @@
       '<marker id="m-read"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>' +
       '<marker id="m-write" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a4332a" /></marker>' +
       '<marker id="m-rw"    markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#8a5a14" /></marker>' +
+      '<marker id="m-flow-call"    markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#2f7a2f" /></marker>' +
+      '<marker id="m-flow-async"   markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a64798" /></marker>' +
+      '<marker id="m-flow-error"   markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#c54343" /></marker>' +
+      '<marker id="m-flow-success" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#2f7a2f" /></marker>' +
+      '<marker id="m-flow-return"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>' +
+      '<marker id="m-flow-plain"   markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#57606a" /></marker>' +
       '</defs>';
     const parts = [];
+
+    // 1) Block→block flow edges (always visible — they're the narrative spine)
+    (view.edges || []).forEach(e => {
+      const fromEl = document.getElementById(e.from);
+      const toEl   = document.getElementById(e.to);
+      if (!fromEl || !toEl) return;
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const kind = edgeKind(e);
+      const color = EDGE_COLOR[kind];
+      const isActive = (e.from === STATE.activeBlockId || e.to === STATE.activeBlockId);
+      const dashed = (kind === 'async');
+
+      // Anchor points: bottom-center of `from`, top-center of `to`.
+      // Falls back to right→left for same-row neighbors.
+      const sameRow = Math.abs((fr.top + fr.height/2) - (tr.top + tr.height/2)) < fr.height/2;
+      let x1, y1, x2, y2, d;
+      if (sameRow) {
+        x1 = fr.right - rect.left;
+        y1 = fr.top + fr.height/2 - rect.top;
+        x2 = tr.left  - rect.left;
+        y2 = tr.top  + tr.height/2 - rect.top;
+        const midX = (x1 + x2) / 2;
+        d = 'M ' + x1 + ' ' + y1 + ' C ' + midX + ' ' + y1 + ', ' + midX + ' ' + y2 + ', ' + x2 + ' ' + y2;
+      } else {
+        x1 = fr.left + fr.width/2 - rect.left;
+        y1 = fr.bottom - rect.top;
+        x2 = tr.left + tr.width/2 - rect.left;
+        y2 = tr.top - rect.top;
+        const midY = (y1 + y2) / 2;
+        d = 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + midY + ', ' + x2 + ' ' + midY + ', ' + x2 + ' ' + y2;
+      }
+      const strokeW = isActive ? 2.4 : 1.6;
+      const opacity = isActive ? 1.0 : 0.45;
+      const dashAttr = dashed ? ' stroke-dasharray="6 4"' : '';
+      parts.push('<path d="' + d + '" stroke="' + color + '" stroke-width="' + strokeW + '" fill="none" ' +
+        'marker-end="url(#m-flow-' + kind + ')" opacity="' + opacity + '"' + dashAttr + ' />');
+
+      if (e.label) {
+        const lx = sameRow ? (x1 + x2) / 2 : (x1 + x2) / 2;
+        const ly = sameRow ? ((y1 + y2) / 2 - 4) : ((y1 + y2) / 2);
+        const w = String(e.label).length * 5.4 + 14;
+        const bg = kind === 'error' ? '#fff0f0'
+                 : kind === 'async' ? '#fbeefa'
+                 : kind === 'call' || kind === 'success' ? '#eef9ee'
+                 : '#eef0ff';
+        parts.push('<rect x="' + (lx - w/2) + '" y="' + (ly - 8) + '" width="' + w + '" height="14" rx="3" ' +
+          'fill="' + bg + '" stroke="' + color + '" stroke-width="0.7" opacity="' + opacity + '" />');
+        parts.push('<text x="' + lx + '" y="' + (ly + 2) + '" text-anchor="middle" fill="' + color +
+          '" font-family="ui-monospace, monospace" font-size="9.5" font-weight="700" opacity="' + opacity + '">' +
+          esc(e.label) + '</text>');
+      }
+    });
+
+    // 2) Block→data-structure arrows (only for the active block, as before)
     view.connections.forEach(c => {
-      if (c.from !== STATE.activeBlockId) return;  // only draw arrows for active block
+      if (c.from !== STATE.activeBlockId) return;
       const fromEl = document.getElementById(c.from);
       const toEl = document.getElementById('ds-' + c.to);
       if (!fromEl || !toEl) return;
@@ -804,6 +1000,47 @@
     svg.innerHTML = defs + parts.join('');
   }
 
+  // ---------- Step navigation ----------
+  // The "next" block is computed as: the first outgoing flow edge from the active
+  // block (preferring CALL/SUCCESS/PLAIN over ERROR/ASYNC so the happy path wins),
+  // OR if there's no outgoing edge, the next block in source order within the storyline.
+  function nextStep(view, blockId) {
+    const outs = (view.edges || []).filter(e => e.from === blockId);
+    if (outs.length) {
+      const ranked = outs.slice().sort((a, b) => {
+        const order = { call: 0, success: 0, plain: 1, return: 2, async: 3, error: 4 };
+        return (order[edgeKind(a)] ?? 5) - (order[edgeKind(b)] ?? 5);
+      });
+      return { id: ranked[0].to, via: ranked[0], alternates: ranked.slice(1) };
+    }
+    const i = view.blocks.findIndex(b => b.id === blockId);
+    const nb = view.blocks[i + 1];
+    return nb ? { id: nb.id, via: null, alternates: [] } : null;
+  }
+  function prevStep(view, blockId) {
+    const ins = (view.edges || []).filter(e => e.to === blockId);
+    if (ins.length) {
+      const ranked = ins.slice().sort((a, b) => {
+        const order = { call: 0, success: 0, plain: 1, return: 2, async: 3, error: 4 };
+        return (order[edgeKind(a)] ?? 5) - (order[edgeKind(b)] ?? 5);
+      });
+      return { id: ranked[0].from };
+    }
+    const i = view.blocks.findIndex(b => b.id === blockId);
+    const pb = view.blocks[i - 1];
+    return pb ? { id: pb.id } : null;
+  }
+
+  function gotoBlock(blockId) {
+    if (!blockId) return;
+    STATE.activeBlockId = blockId;
+    renderCanvas();
+    renderSidePanel();
+    // Scroll the active block into view
+    const el = document.getElementById(blockId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
+
   // ---------- Side panel ----------
   function renderSidePanel() {
     const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
@@ -811,12 +1048,28 @@
     const view = viewForStoryline(sl);
     const b = view.blocks.find(b => b.id === STATE.activeBlockId);
     const f = id => document.getElementById(id);
+
+    // Step nav bar
+    const total = view.blocks.length;
+    const stepNum = b ? b._step : 0;
+    const prev = b ? prevStep(view, b.id) : null;
+    const next = b ? nextStep(view, b.id) : null;
+    f('step-counter').innerHTML = b
+      ? 'Step <strong>' + stepNum + '</strong> / ' + total
+      : '—';
+    const btnP = f('btn-prev'); const btnN = f('btn-next');
+    btnP.disabled = !prev;
+    btnN.disabled = !next;
+    btnP.onclick = () => prev && gotoBlock(prev.id);
+    btnN.onclick = () => next && gotoBlock(next.id);
+
     if (!b) {
       f('focus-name').textContent = '—';
-      f('focus-purpose').textContent = 'Click any block.';
+      f('focus-purpose').textContent = 'Click any block, or use ◀ / ▶ to walk through.';
       f('focus-rw').innerHTML = '';
       f('focus-loc').textContent = '';
       f('focus-code').textContent = '';
+      f('focus-next').innerHTML = '';
       return;
     }
     const rp = b.right_panel || {};
@@ -840,6 +1093,38 @@
     } else {
       f('focus-code').textContent = '';
     }
+
+    // Next-step hint(s): primary + any alternates (e.g. ON SUCCESS vs ON ERROR)
+    if (next) {
+      const nextBlock = view.blocks.find(x => x.id === next.id);
+      const primary = renderNextLink('Next', next, nextBlock);
+      const altLinks = next.alternates.map(e => {
+        const ab = view.blocks.find(x => x.id === e.to);
+        const kind = edgeKind(e);
+        const kindCls = (kind === 'async' || kind === 'error') ? kind : '';
+        const kindLabel = e.label || kind.toUpperCase();
+        return ab ? '<div style="margin-top:6px;"><span class="nh-kind ' + kindCls + '">' + esc(kindLabel) + '</span> ' +
+          '<span class="nh-link" data-go="' + esc(ab.id) + '">→ #' + ab._step + ' ' + esc(ab.title || ab.id) + '</span></div>' : '';
+      }).join('');
+      f('focus-next').innerHTML = primary + altLinks;
+      f('focus-next').querySelectorAll('[data-go]').forEach(el => {
+        el.onclick = () => gotoBlock(el.getAttribute('data-go'));
+      });
+    } else {
+      f('focus-next').innerHTML = '<div class="next-hint" style="opacity:0.7"><span class="nh-label">End of storyline</span>This is the last step in this storyline.</div>';
+    }
+  }
+
+  function renderNextLink(label, step, block) {
+    if (!block) return '';
+    const kind = step.via ? edgeKind(step.via) : 'plain';
+    const kindCls = (kind === 'async' || kind === 'error') ? kind : '';
+    const viaLabel = step.via && step.via.label ? step.via.label : (step.via ? kind.toUpperCase() : 'in source order');
+    return '<div class="next-hint">' +
+      '<span class="nh-label">' + esc(label) + ' &mdash; <kbd>→</kbd></span>' +
+      '<span class="nh-kind ' + kindCls + '">' + esc(viaLabel) + '</span> ' +
+      '<span class="nh-link" data-go="' + esc(block.id) + '">→ #' + block._step + ' ' + esc(block.title || block.id) + '</span>' +
+      '</div>';
   }
 
   // ---------- Shape renderers (compact, type-level, no instance content) ----------
@@ -1003,6 +1288,19 @@
     window.addEventListener('resize', () => {
       const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
       if (sl) drawArrows(viewForStoryline(sl));
+    });
+    // Keyboard navigation: ←/→ to walk the storyline
+    window.addEventListener('keydown', (ev) => {
+      if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (!sl) return;
+      const view = viewForStoryline(sl);
+      if (!STATE.activeBlockId) return;
+      const step = ev.key === 'ArrowRight'
+        ? nextStep(view, STATE.activeBlockId)
+        : prevStep(view, STATE.activeBlockId);
+      if (step) { ev.preventDefault(); gotoBlock(step.id); }
     });
   }
   init();
