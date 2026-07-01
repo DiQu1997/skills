@@ -8,9 +8,19 @@ at least one step's `code_view.primary_changes` (coverage check). Bypass
 with --no-coverage-check.
 
 Usage:
-    python3 render.py <input.json> <output.html>
-    python3 render.py demo/sample_review.json demo/sample_review.html
+    python3 render.py <input.json> <output.html>                       # source view (default)
+    python3 render.py <input.json> <output.html> --view swimlane       # legacy storyline canvas
     python3 render.py review.json review.html --no-coverage-check
+
+Two views on the same schema:
+    source   — continuous diff top-to-bottom (file-by-file, +/- coloring)
+               with each step as a colored highlight band (severity-tinted)
+               and a margin annotation showing the step title + concern
+               preview. Click → detail panel with concerns, evidence,
+               behavior_delta, suggestions, tests, alternatives.
+               Best for "walk me through this PR."
+    swimlane — original storyline canvas + slide-in dock. Steps as
+               phase-tagged block cards in horizontal columns.
 """
 
 import argparse
@@ -20,6 +30,11 @@ import sys
 from pathlib import Path
 
 PLACEHOLDER = "/*REVIEW_DATA_PLACEHOLDER*/"
+
+TEMPLATES = {
+    "source":   "review_source.html",
+    "swimlane": "review.html",
+}
 
 
 # ----- Coverage check ---------------------------------------------------
@@ -108,6 +123,10 @@ def parse_args():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("input", type=Path, help="Review JSON input file.")
     p.add_argument("output", type=Path, help="Rendered HTML output file.")
+    p.add_argument("--view", choices=list(TEMPLATES.keys()), default="source",
+                   help="Which render template to use. 'source' (default) is "
+                        "the continuous-diff-with-margin-annotations view; "
+                        "'swimlane' is the original storyline canvas + dock.")
     p.add_argument("--no-coverage-check", action="store_true",
                    help="Skip the diff_hunks ↔ code_view coverage check. "
                         "Use only as an escape hatch; the default behavior "
@@ -122,7 +141,7 @@ def main():
         print(f"Input file not found: {args.input}", file=sys.stderr)
         sys.exit(1)
 
-    template_path = Path(__file__).parent / "template" / "review.html"
+    template_path = Path(__file__).parent / "template" / TEMPLATES[args.view]
     if not template_path.exists():
         print(f"Template not found: {template_path}", file=sys.stderr)
         sys.exit(1)
@@ -162,7 +181,7 @@ def main():
         f.write(output)
 
     size_kb = os.path.getsize(args.output) / 1024
-    print(f"Wrote {args.output} ({size_kb:.1f} KB)")
+    print(f"Wrote {args.output} ({size_kb:.1f} KB) [view={args.view}]")
     print(f"  Storylines: {len(data.get('storylines', []))}")
     print(f"  Total steps: {sum(len(s.get('steps') or []) for s in data.get('storylines', []))}")
 

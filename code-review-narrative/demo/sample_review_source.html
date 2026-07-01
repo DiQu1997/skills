@@ -1,0 +1,3175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Code review — source view</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+    --code-bg:#fbfaf7;
+    --gutter:#f6f5f1; --gutter-fg:#a8b1c0;
+
+    --tok-kw:#5b3e9c; --tok-type:#205493; --tok-str:#8a5a14;
+    --tok-num:#2b6b5e; --tok-com:#8b949e; --tok-fn:#2f7a2f;
+
+    /* Diff line backgrounds — GitHub-ish. */
+    --diff-add-bg:  rgba(70, 149, 74, 0.14);
+    --diff-add-mk:  #2f7a2f;
+    --diff-add-gutter: rgba(70, 149, 74, 0.28);
+    --diff-rem-bg:  rgba(197, 67, 67, 0.14);
+    --diff-rem-mk:  #c54343;
+    --diff-rem-gutter: rgba(197, 67, 67, 0.28);
+
+    /* Severity palette — reviewed step's highlight band color. */
+    --sev-high-fg:   #b0281e;  --sev-high-bg:   #fdecea;
+    --sev-medium-fg: #b56a00;  --sev-medium-bg: #fff5df;
+    --sev-low-fg:    #2560b8;  --sev-low-bg:    #e6efff;
+    --sev-info-fg:   #6d7885;  --sev-info-bg:   #eef0f2;
+    --sev-clean-fg:  #1f883d;  --sev-clean-bg:  #dff0df;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "tabs   tabs"
+      "main   side";
+    height: 100vh;
+  }
+  .topbar { grid-area: topbar; }
+  .tabs   { grid-area: tabs; }
+  .main   { grid-area: main; }
+  .side   { grid-area: side; }
+
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .view-pill {
+    margin-left: auto;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: 10px;
+  }
+
+  .tabs {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex; padding: 0 22px; gap: 4px;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 9px 14px;
+    cursor: pointer; font-size: 12.5px; color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    user-select: none;
+    white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint);
+    padding: 1px 5px; border-radius: 3px; background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+  .tab .tab-counts {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    color: var(--fg-faint);
+    letter-spacing: 0.04em;
+  }
+  .tab .tab-counts .high   { color: var(--sev-high-fg); font-weight: 700; }
+  .tab .tab-counts .medium { color: var(--sev-medium-fg); font-weight: 700; }
+  .tab .tab-counts .low    { color: var(--sev-low-fg); }
+
+  .main { overflow-y: auto; padding: 14px 22px 60px; }
+
+  /* Top-level PR intro */
+  .pr-intro {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    line-height: 1.6;
+  }
+  .pr-intro .pi-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 4px;
+  }
+  .pr-intro details { margin-top: 6px; }
+  .pr-intro summary { cursor: pointer; color: var(--accent); font-size: 11.5px; font-family: ui-monospace, monospace; user-select: none; }
+  .pr-intro .pi-desc { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .pr-intro .stat-strip {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    margin-top: 6px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+  }
+  .pr-intro .stat-strip .stat {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 8px;
+  }
+  .pr-intro .stat.high   { border-color: var(--sev-high-fg);   color: var(--sev-high-fg);   background: var(--sev-high-bg); }
+  .pr-intro .stat.medium { border-color: var(--sev-medium-fg); color: var(--sev-medium-fg); background: var(--sev-medium-bg); }
+  .pr-intro .stat.low    { border-color: var(--sev-low-fg);    color: var(--sev-low-fg);    background: var(--sev-low-bg); }
+  .pr-intro .stat.clean  { border-color: var(--sev-clean-fg);  color: var(--sev-clean-fg);  background: var(--sev-clean-bg); }
+
+  /* Storyline prologue card (前情提要) */
+  .storyline-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+  }
+  .storyline-banner .b-position {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .storyline-banner .b-position .pos-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--border);
+    margin: 0 2px; vertical-align: middle;
+  }
+  .storyline-banner .b-position .pos-dot.active { background: var(--accent); transform: scale(1.4); }
+  .storyline-banner .b-position .pos-dot.done   { background: var(--fg-faint); }
+  .storyline-banner .b-title {
+    font-family: ui-monospace, monospace;
+    font-size: 17px; font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .storyline-banner .b-summary {
+    font-size: 12.5px; color: var(--fg-soft); line-height: 1.55;
+    margin-bottom: 10px;
+  }
+  .storyline-banner .b-confidence {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    display: inline-block;
+    padding: 2px 8px; border-radius: 4px;
+    margin-left: 8px;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    color: var(--fg-soft);
+  }
+
+  /* Purpose (stated / evident / discrepancy) */
+  .b-purpose {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .b-purpose .p-row { margin-top: 4px; }
+  .b-purpose .p-row:first-child { margin-top: 0; }
+  .b-purpose .p-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    display: inline-block; min-width: 90px;
+  }
+  .b-purpose .p-row.discrepancy {
+    color: var(--sev-high-fg);
+    font-weight: 500;
+    background: var(--sev-high-bg);
+    padding: 4px 6px; border-radius: 3px;
+    margin-top: 8px;
+  }
+
+  /* Architectural context — structured facts */
+  .b-context {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+  .b-context dt {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin: 0; padding-top: 2px;
+    white-space: nowrap;
+  }
+  .b-context dd { margin: 0; }
+  .b-context .module-chip {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg);
+    margin: 1px 3px 1px 0;
+  }
+  .b-context .module-chip .role {
+    color: var(--fg-faint);
+    font-style: italic;
+    margin-left: 5px;
+    font-family: -apple-system, sans-serif;
+    font-size: 10px;
+  }
+  .b-change-overview {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg);
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  /* Prev / next storyline bridge */
+  .storyline-bridge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+  }
+  .bridge-cell {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms;
+  }
+  .bridge-cell:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .bridge-cell.empty { background: transparent; cursor: default; border-style: dashed; opacity: 0.5; }
+  .bridge-cell.empty:hover { background: transparent; border-color: var(--border); }
+  .bridge-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 3px;
+  }
+  .bridge-cell.next .bridge-label { text-align: right; }
+  .bridge-title {
+    font-family: ui-monospace, monospace;
+    font-size: 12px; font-weight: 700;
+    color: var(--fg); margin-bottom: 3px;
+  }
+  .bridge-cell.next .bridge-title { text-align: right; }
+  .bridge-summary {
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .bridge-counts {
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--fg-faint); margin-top: 4px;
+  }
+  .bridge-cell.next .bridge-counts { text-align: right; }
+  .bridge-counts .h { color: var(--sev-high-fg); font-weight: 700; }
+  .bridge-counts .m { color: var(--sev-medium-fg); font-weight: 700; }
+
+  /* File section — one per file touched in this storyline */
+  .file-section { margin-bottom: 28px; }
+  .file-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px 6px 0 0;
+    padding: 10px 14px;
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  .file-path {
+    font-family: ui-monospace, monospace;
+    font-size: 13px; font-weight: 700;
+    color: var(--fg);
+  }
+  .file-counts {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint);
+    margin-left: auto;
+  }
+  .file-counts .add { color: var(--diff-add-mk); font-weight: 700; }
+  .file-counts .rem { color: var(--diff-rem-mk); font-weight: 700; }
+
+  .file-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    padding: 10px 14px;
+  }
+  .code-flow { position: relative; min-width: 0; }
+  .annotations { position: relative; }
+
+  /* Continuous code with diff coloring. Two gutter columns: old line-num
+     and new line-num (a la GitHub), then a +/-/space marker, then source. */
+  .code-line {
+    display: grid;
+    grid-template-columns: 36px 36px 14px 1fr;
+    font-family: ui-monospace, monospace;
+    font-size: 12px; line-height: 1.55;
+  }
+  .code-line .ln {
+    color: var(--gutter-fg);
+    text-align: right;
+    padding-right: 8px;
+    user-select: none;
+    background: var(--gutter);
+    border-right: 1px solid var(--border);
+  }
+  .code-line .marker {
+    text-align: center;
+    color: var(--gutter-fg);
+    user-select: none;
+  }
+  .code-line .src {
+    padding: 0 10px;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--fg);
+  }
+  .code-line.add { background: var(--diff-add-bg); }
+  .code-line.add .ln { background: var(--diff-add-gutter); }
+  .code-line.add .marker { color: var(--diff-add-mk); font-weight: 700; }
+  .code-line.rem { background: var(--diff-rem-bg); }
+  .code-line.rem .ln { background: var(--diff-rem-gutter); }
+  .code-line.rem .marker { color: var(--diff-rem-mk); font-weight: 700; }
+  .code-line .src .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  .code-line .src .tok-type { color: var(--tok-type); }
+  .code-line .src .tok-str { color: var(--tok-str); }
+  .code-line .src .tok-com { color: var(--tok-com); font-style: italic; }
+  .code-line .src .tok-fn { color: var(--tok-fn); }
+
+  /* Step region — wraps a range of code_view lines belonging to one step */
+  .step-region {
+    position: relative;
+    margin: 8px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: box-shadow 100ms;
+  }
+  .step-region:hover { filter: brightness(0.98); }
+  .step-region.active { box-shadow: 0 0 0 2px currentColor inset; }
+  /* Severity-driven region colors */
+  .step-region.sev-high    { border-left-color: var(--sev-high-fg);   background: var(--sev-high-bg);   color: var(--sev-high-fg); }
+  .step-region.sev-medium  { border-left-color: var(--sev-medium-fg); background: var(--sev-medium-bg); color: var(--sev-medium-fg); }
+  .step-region.sev-low     { border-left-color: var(--sev-low-fg);    background: var(--sev-low-bg);    color: var(--sev-low-fg); }
+  .step-region.sev-info    { border-left-color: var(--sev-info-fg);   background: var(--sev-info-bg);   color: var(--sev-info-fg); }
+  .step-region.sev-clean   { border-left-color: var(--sev-clean-fg);  background: var(--sev-clean-bg);  color: var(--sev-clean-fg); }
+  .step-region .code-line .ln { background: rgba(255,255,255,0.55); }
+
+  /* Elision */
+  .elision {
+    display: grid;
+    grid-template-columns: 36px 36px 14px 1fr;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--fg-faint);
+    margin: 2px 0;
+  }
+  .elision .ln { color: var(--gutter-fg); text-align: right; padding-right: 8px; background: var(--gutter); border-right: 1px solid var(--border); }
+  .elision .marker { text-align: center; }
+  .elision .src { padding: 2px 10px; font-style: italic; }
+
+  /* Annotation chip — beside its step-region */
+  .annot {
+    position: absolute;
+    left: 0; right: 0;
+    border: 1px solid var(--border);
+    border-left: 4px solid;
+    background: var(--bg-card);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: box-shadow 100ms, transform 100ms;
+  }
+  .annot:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateY(-1px); }
+  .annot.active { box-shadow: 0 2px 10px rgba(91,108,255,0.18); }
+  .annot.sev-high    { border-left-color: var(--sev-high-fg); }
+  .annot.sev-medium  { border-left-color: var(--sev-medium-fg); }
+  .annot.sev-low     { border-left-color: var(--sev-low-fg); }
+  .annot.sev-info    { border-left-color: var(--sev-info-fg); }
+  .annot.sev-clean   { border-left-color: var(--sev-clean-fg); }
+  .annot-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .annot-step-badge {
+    width: 26px; height: 22px; padding: 0 4px;
+    border-radius: 11px;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    color: var(--fg-soft);
+    font-family: ui-monospace, monospace; font-size: 10.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .annot-sev-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .annot-sev-badge.sev-high    { background: var(--sev-high-fg);   color: #fff; }
+  .annot-sev-badge.sev-medium  { background: var(--sev-medium-fg); color: #fff; }
+  .annot-sev-badge.sev-low     { background: var(--sev-low-fg);    color: #fff; }
+  .annot-sev-badge.sev-info    { background: var(--sev-info-fg);   color: #fff; }
+  .annot-sev-badge.sev-clean   { background: var(--sev-clean-fg);  color: #fff; }
+  .annot-track {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.07em; text-transform: uppercase;
+  }
+  .annot-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12px;
+    color: var(--fg);
+    line-height: 1.35;
+    margin-top: 2px;
+  }
+  .annot-says {
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.45;
+    margin-top: 3px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .annot-concern-preview {
+    font-size: 10.5px;
+    color: var(--fg);
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+    line-height: 1.4;
+  }
+  .annot-concern-preview .cp-count {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: var(--sev-high-fg);
+    margin-right: 4px;
+  }
+
+  /* SIDE: detail panel */
+  .side {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 16px 30px;
+  }
+  .side h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
+  }
+  .step-nav {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .step-nav .step-counter { color: var(--fg-soft); flex: 1; }
+  .step-nav .step-counter strong { color: var(--fg); font-weight: 700; }
+  .step-nav button {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 9px; font-size: 11px;
+    font-family: ui-monospace, monospace; color: var(--fg); cursor: pointer;
+  }
+  .step-nav button:hover:not(:disabled) {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+  .step-nav button:disabled { color: var(--fg-faint); opacity: 0.5; cursor: default; }
+
+  .focus-track {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    color: var(--fg-faint); letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .focus-name {
+    font-family: ui-monospace, monospace;
+    font-size: 17px; font-weight: 700;
+    color: var(--fg); margin-bottom: 6px;
+    line-height: 1.35;
+  }
+  .focus-summary {
+    font-size: 12.5px; color: var(--fg); line-height: 1.55;
+    margin-bottom: 12px;
+  }
+
+  .focus-section {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .focus-section-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .focus-section .body { font-size: 12px; color: var(--fg); line-height: 1.55; }
+
+  /* Before/after cards for behavior_delta */
+  .ba-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+  .ba-cell {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 7px 9px;
+  }
+  .ba-cell .ba-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 3px;
+  }
+  .ba-cell.before .ba-label { color: var(--diff-rem-mk); }
+  .ba-cell.after .ba-label { color: var(--diff-add-mk); }
+  .ba-cell .ba-text { font-size: 11.5px; color: var(--fg); line-height: 1.5; }
+
+  /* Concern items */
+  .concern {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 6px;
+  }
+  .concern.sev-high    { border-left-color: var(--sev-high-fg);   background: var(--sev-high-bg); }
+  .concern.sev-medium  { border-left-color: var(--sev-medium-fg); background: var(--sev-medium-bg); }
+  .concern.sev-low     { border-left-color: var(--sev-low-fg);    background: var(--sev-low-bg); }
+  .concern.sev-informational { border-left-color: var(--sev-info-fg); background: var(--sev-info-bg); }
+  .concern .concern-head {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+  }
+  .concern .concern-sev-pill {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 3px;
+    color: #fff;
+  }
+  .concern.sev-high         .concern-sev-pill { background: var(--sev-high-fg); }
+  .concern.sev-medium       .concern-sev-pill { background: var(--sev-medium-fg); }
+  .concern.sev-low          .concern-sev-pill { background: var(--sev-low-fg); }
+  .concern.sev-informational .concern-sev-pill { background: var(--sev-info-fg); }
+  .concern .concern-title {
+    font-size: 12px; color: var(--fg); font-weight: 600;
+    line-height: 1.4;
+    flex: 1;
+  }
+  .concern .concern-evidence {
+    margin-top: 4px;
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.5;
+    padding-left: 8px;
+    border-left: 2px solid rgba(0,0,0,0.06);
+  }
+  .concern .concern-evidence .ev-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    display: block; margin-bottom: 2px;
+  }
+
+  .suggestion {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-top: 5px;
+    font-size: 11.5px; color: var(--fg);
+    line-height: 1.5;
+  }
+
+  .alt-approach {
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-top: 5px;
+    font-size: 11.5px;
+  }
+  .alt-approach .alt-name { font-family: ui-monospace, monospace; font-weight: 700; color: var(--fg); }
+  .alt-approach .alt-kind { color: var(--fg-faint); font-size: 10px; margin-left: 6px; }
+  .alt-approach .alt-tradeoff { color: var(--fg-soft); margin-top: 3px; }
+
+  .test-coverage-grid { display: grid; gap: 4px; margin-top: 4px; }
+  .test-item {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .test-item .t-file { font-family: ui-monospace, monospace; color: var(--fg); }
+  .test-item .t-name { color: var(--accent); margin-left: 4px; }
+  .test-item .t-what { color: var(--fg-soft); margin-top: 2px; font-size: 10.5px; line-height: 1.45; }
+
+  pre.focus-code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.55;
+    overflow-x: auto; margin: 0;
+    color: var(--fg);
+  }
+
+  .next-hint {
+    margin-top: 14px; padding: 8px 10px;
+    background: var(--bg-soft);
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    font-size: 11.5px; color: var(--fg-soft);
+  }
+  .next-hint .nh-label {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    display: block; margin-bottom: 3px;
+  }
+  .next-hint .nh-link {
+    color: var(--accent); cursor: pointer;
+    font-family: ui-monospace, monospace; font-weight: 700;
+  }
+  .next-hint .nh-link:hover { text-decoration: underline; }
+
+  .placeholder {
+    margin: 80px auto 0; max-width: 520px; text-align: center;
+    color: var(--fg-faint); font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1 id="hdr-title">🔍 Code review</h1>
+    <div class="crumb" id="hdr-crumb"></div>
+    <span class="view-pill">source view · ←/→ walks steps</span>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <section class="main" id="main"></section>
+  <aside class="side" id="side">
+    <div class="step-nav" id="step-nav">
+      <span class="step-counter" id="step-counter">—</span>
+      <button id="btn-prev" title="Previous step (←)">◀ Prev</button>
+      <button id="btn-next" title="Next step (→)">Next ▶</button>
+    </div>
+    <div class="focus-track" id="focus-track"></div>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-summary" id="focus-summary">Click a highlighted change region in the code to focus a step.</div>
+    <div id="focus-extras"></div>
+    <div id="focus-next"></div>
+  </aside>
+</div>
+
+<script>
+  const REVIEW_DATA = {
+  "schema_version": "0.4",
+  "metadata": {
+    "repo": "github.com/google/leveldb (fabricated)",
+    "base_commit": "a5394e1...",
+    "head_commit": "b7f2c8d...",
+    "title": "Track MemTable size at write time + tests + comment cleanup",
+    "generated_at": "2026-04-26T00:00:00Z",
+    "locale": "zh"
+  },
+  "summary": {
+    "one_line": "Replace on-demand arena memory query with a write-time counter, plus tests and a comment cleanup.",
+    "description": "Currently MemTable::ApproximateMemoryUsage() reads from arena, which the PR description claims is expensive. This change introduces a tracked_bytes_ counter updated in Add(). Includes tests for the new tracking and an unrelated comment fix in the header."
+  },
+  "diff_hunks": [
+    {
+      "file": "db/memtable.cc",
+      "lines": [
+        {
+          "line_num": 17,
+          "content": "      table_(comparator_, &arena_),",
+          "change": "added"
+        },
+        {
+          "line_num": 17,
+          "content": "      table_(comparator_, &arena_) {}",
+          "change": "removed"
+        },
+        {
+          "line_num": 18,
+          "content": "      tracked_bytes_(0) {}",
+          "change": "added"
+        },
+        {
+          "line_num": 27,
+          "content": "  return tracked_bytes_;",
+          "change": "added"
+        },
+        {
+          "line_num": 27,
+          "content": "  return arena_.MemoryUsage();",
+          "change": "removed"
+        },
+        {
+          "line_num": 94,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 95,
+          "content": "  // Track size: entry bytes + an estimate of skiplist node overhead.",
+          "change": "added"
+        },
+        {
+          "line_num": 96,
+          "content": "  tracked_bytes_ += encoded_len + kApproxSkipListNodeOverhead;",
+          "change": "added"
+        }
+      ]
+    },
+    {
+      "file": "db/memtable.h",
+      "lines": [
+        {
+          "line_num": 40,
+          "content": "  // Returns a cached counter updated at write time; O(1).",
+          "change": "added"
+        },
+        {
+          "line_num": 40,
+          "content": "  // Note: this iterates arena blocks; do not call in tight loops.",
+          "change": "removed"
+        },
+        {
+          "line_num": 77,
+          "content": "  // Cached approximate byte usage, updated in Add().",
+          "change": "added"
+        },
+        {
+          "line_num": 78,
+          "content": "  // Includes both encoded entry bytes and skiplist node overhead.",
+          "change": "added"
+        },
+        {
+          "line_num": 79,
+          "content": "  size_t tracked_bytes_;",
+          "change": "added"
+        }
+      ]
+    },
+    {
+      "file": "db/memtable_test.cc",
+      "lines": [
+        {
+          "line_num": 47,
+          "content": "TEST(MemTableTest, TrackedSizeMonotonic) {",
+          "change": "added"
+        },
+        {
+          "line_num": 48,
+          "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+          "change": "added"
+        },
+        {
+          "line_num": 49,
+          "content": "  MemTable* mem = new MemTable(cmp);",
+          "change": "added"
+        },
+        {
+          "line_num": 50,
+          "content": "  mem->Ref();",
+          "change": "added"
+        },
+        {
+          "line_num": 51,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 52,
+          "content": "  size_t prev = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 53,
+          "content": "  for (int i = 0; i < 100; i++) {",
+          "change": "added"
+        },
+        {
+          "line_num": 54,
+          "content": "    mem->Add(i, kTypeValue, \"k\" + std::to_string(i), \"v\");",
+          "change": "added"
+        },
+        {
+          "line_num": 55,
+          "content": "    size_t now = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 56,
+          "content": "    ASSERT_GT(now, prev) << \"size should grow after each Add\";",
+          "change": "added"
+        },
+        {
+          "line_num": 57,
+          "content": "    prev = now;",
+          "change": "added"
+        },
+        {
+          "line_num": 58,
+          "content": "  }",
+          "change": "added"
+        },
+        {
+          "line_num": 59,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 60,
+          "content": "  mem->Unref();",
+          "change": "added"
+        },
+        {
+          "line_num": 61,
+          "content": "}",
+          "change": "added"
+        },
+        {
+          "line_num": 63,
+          "content": "TEST(MemTableTest, TrackedSizeApproximatesArena) {",
+          "change": "added"
+        },
+        {
+          "line_num": 64,
+          "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+          "change": "added"
+        },
+        {
+          "line_num": 65,
+          "content": "  MemTable* mem = new MemTable(cmp);",
+          "change": "added"
+        },
+        {
+          "line_num": 66,
+          "content": "  mem->Ref();",
+          "change": "added"
+        },
+        {
+          "line_num": 67,
+          "content": "  for (int i = 0; i < 1000; i++) {",
+          "change": "added"
+        },
+        {
+          "line_num": 68,
+          "content": "    mem->Add(i, kTypeValue, \"key\" + std::to_string(i), \"value\");",
+          "change": "added"
+        },
+        {
+          "line_num": 69,
+          "content": "  }",
+          "change": "added"
+        },
+        {
+          "line_num": 70,
+          "content": "  size_t tracked = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 71,
+          "content": "  // Tracked size should be in the same order of magnitude as arena.",
+          "change": "added"
+        },
+        {
+          "line_num": 72,
+          "content": "  // We allow 50% slop in either direction.",
+          "change": "added"
+        },
+        {
+          "line_num": 73,
+          "content": "  // (No direct arena access in test; this is a placeholder for",
+          "change": "added"
+        },
+        {
+          "line_num": 74,
+          "content": "  //  whatever ground-truth comparison the team agrees on.)",
+          "change": "added"
+        },
+        {
+          "line_num": 75,
+          "content": "  ASSERT_GT(tracked, 1000 * 10);",
+          "change": "added"
+        },
+        {
+          "line_num": 76,
+          "content": "  ASSERT_LT(tracked, 1000 * 1000);",
+          "change": "added"
+        },
+        {
+          "line_num": 77,
+          "content": "  mem->Unref();",
+          "change": "added"
+        },
+        {
+          "line_num": 78,
+          "content": "}",
+          "change": "added"
+        }
+      ]
+    }
+  ],
+  "storylines": [
+    {
+      "id": "S1",
+      "title": "Track MemTable size at write time",
+      "kind": "refactor",
+      "confidence": "high",
+      "confidence_reasoning": "All three steps modify the same pair of files (memtable.h, memtable.cc) for a single coherent purpose: replace ApproximateMemoryUsage()'s computation strategy. Each step depends on the previous.",
+      "summary": "Replace arena-based size calculation with a write-time counter for ApproximateMemoryUsage().",
+      "files_touched": [
+        "db/memtable.h",
+        "db/memtable.cc"
+      ],
+      "purpose": {
+        "stated": "PR description: 'O(blocks) → O(1) for ApproximateMemoryUsage(); reduces overhead when called frequently from the write pipeline.'",
+        "evident": "The change introduces a counter `tracked_bytes_` updated in Add() and returned by ApproximateMemoryUsage(). At the structural level, the change replaces 'compute on demand' with 'maintain incrementally'. The actual returned value also changes semantically: it now reflects only inserted-entry bytes (plus a node-overhead estimate), not arena-consumed bytes.",
+        "discrepancy": "The performance argument in the PR description is partly inaccurate. `Arena::MemoryUsage()` is already O(1) — it returns a relaxed atomic load, not iterating blocks. So the optimization framing is misleading. The real change is semantic (entry-byte counting vs arena-byte counting), not algorithmic."
+      },
+      "architectural_context": {
+        "system_role": "MemTable is the in-memory write buffer of LevelDB's LSM-tree write path. ApproximateMemoryUsage() is queried by DBImpl during write-batch processing to decide when to rotate (freeze) the current MemTable into an immutable one and start flushing to disk.",
+        "involved_modules": [
+          {
+            "module": "db/memtable",
+            "role_in_storyline": "Owner of the new counter; updates and exposes it."
+          },
+          {
+            "module": "util/arena",
+            "role_in_storyline": "Previous source of size info; now bypassed for this query."
+          },
+          {
+            "module": "db/db_impl",
+            "role_in_storyline": "Caller of ApproximateMemoryUsage() — its decisions are affected by the semantic shift in this change."
+          }
+        ],
+        "data_flow": "Write enters DBImpl::Write → MemTable::Add → tracked_bytes_ += encoded_len + overhead estimate. Separately, DBImpl::MakeRoomForWrite polls MemTable::ApproximateMemoryUsage to decide rotation. Before this change, that query went through arena_; after, it returns tracked_bytes_ directly.",
+        "diagram": {
+          "type": "ascii",
+          "content": "  Write path                 Rotation decision\n  ──────────                 ─────────────────\n  DBImpl::Write              DBImpl::MakeRoomForWrite\n       │                            │\n       ▼                            ▼\n  MemTable::Add ──── updates ──→ tracked_bytes_\n       │                            │\n       ▼                       (was: arena_.MemoryUsage())\n  table_.Insert"
+        }
+      },
+      "change_overview": "This storyline reshapes how MemTable reports its size. Before, MemTable::ApproximateMemoryUsage() delegated to Arena, which already maintains an atomic counter of allocated bytes. After, MemTable maintains its own counter (`tracked_bytes_`) that increments per inserted entry by encoded_len plus a conservative skiplist-node overhead estimate.\n\nThe three steps build on each other: S1.1 declares the field; S1.2 initializes and updates it inside Add(); S1.3 switches ApproximateMemoryUsage()'s implementation to read it. The change is mechanically clean but introduces a subtle semantic shift in what the returned value represents (inserted entry bytes vs arena bytes including overhead/waste).",
+      "reading_roadmap": "S1.1 introduces the counter as a private field with a defining comment. S1.2 wires it up in the constructor (init to 0) and the Add() method (increment per insert). S1.3 then switches the public accessor to return the counter directly. Read in order — each step relies on the previous one being in place.",
+      "steps": [
+        {
+          "id": "S1.1",
+          "title": "Add tracked_bytes_ field to MemTable",
+          "track": "core",
+          "code_view": {
+            "primary_changes": [
+              {
+                "file": "db/memtable.h",
+                "language": "cpp",
+                "context_start_line": 70,
+                "context_end_line": 80,
+                "lines": [
+                  {
+                    "line_num": 70,
+                    "content": "  ~MemTable();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 71,
+                    "content": "",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 72,
+                    "content": "  KeyComparator comparator_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 73,
+                    "content": "  int refs_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 74,
+                    "content": "  Arena arena_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 75,
+                    "content": "  Table table_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 76,
+                    "content": "",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 77,
+                    "content": "  // Cached approximate byte usage, updated in Add().",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 78,
+                    "content": "  // Includes both encoded entry bytes and skiplist node overhead.",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 79,
+                    "content": "  size_t tracked_bytes_;",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 80,
+                    "content": "};",
+                    "change": "unchanged"
+                  }
+                ],
+                "walkthrough": [
+                  {
+                    "line_start": 77,
+                    "line_end": 79,
+                    "chunk_role": "the change · field declaration",
+                    "explanation": "Adds a plain size_t (not atomic) counter alongside the other private members. The two-line comment is precise about what this counter accumulates: encoded entry bytes plus skiplist node overhead. The non-atomic choice is intentional — MemTable::Add is only called under the DB write lock (single writer). Placement after table_ follows the existing rough 'order of construction' layout."
+                  }
+                ]
+              }
+            ],
+            "supporting_definitions": []
+          },
+          "summary": "MemTable starts tracking its own memory. Before, every size query walked the arena's block list — fine in isolation, but called from hot paths (flush throttling, monitoring) it added up. This step just declares the counter; S1.2 wires the per-Add increment, and S1.3 swaps the public accessor to read it directly.",
+          "behavior_delta": {
+            "before": "MemTable carried no internal byte-usage counter — when callers asked how big it was, the answer came from `arena_.MemoryUsage()`, the arena's own atomic.",
+            "after": "MemTable now owns a `tracked_bytes_` field. Nothing reads or writes it yet — declaration only. The companion comment fixes the field's meaning ('encoded entry bytes plus skiplist node overhead estimate') before S1.2 and S1.3 give it a job.",
+            "diff": "No runtime change in isolation. The step's value is what it sets up: a place for S1.2 to accumulate into, and a target for S1.3 to read. The crucial choice happens in the field's *definition* of what it tracks — entry bytes, not arena bytes — which is the semantic break that S1.3 will operationalize."
+          },
+          "usage_context": {
+            "primary_usage_scenario": "This field is set up at MemTable construction (every time a new MemTable is created — once per DBImpl write-buffer rotation) and read by ApproximateMemoryUsage() (called frequently by DBImpl::MakeRoomForWrite during write batch processing).",
+            "callers": [],
+            "call_patterns": [
+              "Field declaration only; no callers at this step. Initialization and update added in S1.2; read added in S1.3."
+            ],
+            "implicit_dependencies": [
+              "size_t is the return type used by Arena::MemoryUsage() and existing ApproximateMemoryUsage() — keeping it size_t preserves the existing public-API contract."
+            ]
+          },
+          "test_coverage": {
+            "covered_by": [],
+            "added_in_this_pr": [
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "TrackedSizeMonotonic",
+                "what_it_tests": "Indirectly tests this field by asserting ApproximateMemoryUsage() grows after each Add()."
+              },
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "TrackedSizeApproximatesArena",
+                "what_it_tests": "Indirectly via order-of-magnitude bounds on ApproximateMemoryUsage()."
+              }
+            ],
+            "not_covered": [
+              "No direct test of the field declaration (declarations aren't typically unit-tested).",
+              "Initialization order in the constructor is not tested in isolation — only via the higher-level public API."
+            ]
+          },
+          "codebase_patterns": {
+            "similar_changes_elsewhere": [
+              {
+                "file": "util/arena.cc",
+                "line": 8,
+                "note": "Arena maintains its own `memory_usage_` atomic counter — this PR replicates that pattern at the MemTable layer."
+              }
+            ],
+            "convention_alignment": "Field is placed in the private members block alongside other state (refs_, arena_, table_), consistent with existing layout. Comment style matches surrounding code.",
+            "deviations": null
+          },
+          "alternative_approaches": [
+            {
+              "approach": "Make tracked_bytes_ atomic (`std::atomic<size_t>`)",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Would allow concurrent writers to safely update. Currently MemTable is single-writer (DB write lock), so a plain size_t is sufficient. Adding atomic now would be premature; if concurrency model changes later, this field would need to change with it. A comment noting the assumption would help."
+            },
+            {
+              "approach": "Use uint64_t instead of size_t",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "size_t is 32-bit on 32-bit systems, which could theoretically overflow on a multi-GB MemTable. uint64_t would be safer. But size_t matches Arena::MemoryUsage()'s return type and the existing public API of ApproximateMemoryUsage(), so consistency wins here."
+            }
+          ],
+          "evaluation": "Naming is clear. Placement next to other private members is consistent. The two-line comment is precise about what the counter does and doesn't include — an important property since the counter is an estimate, not an exact figure.",
+          "suggestions": [
+            "Consider adding a brief comment noting the single-writer assumption (the field is plain size_t, not atomic).",
+            "If the team prefers, alphabetize private members; current placement (refs_, arena_, table_, tracked_bytes_) is in a 'rough order of construction', which is also fine."
+          ],
+          "analysis": null,
+          "concerns": [],
+          "prerequisites": [],
+          "prior_role": "MemTable is LevelDB's in-memory write buffer: every Put lands here first, accumulates until the table hits its size threshold, then flushes to a disk SSTable. Its size is queried often — the flush-decision logic checks it on every write, monitoring queries it on a tick — and historically that query delegated to the embedded `Arena`, which already maintained an atomic counter of total allocated bytes (cheap lock-free reads, blocks-granularity precision). The class therefore carried no side-state about how much had been written; the arena was the source of truth."
+        },
+        {
+          "id": "S1.2",
+          "title": "Initialize and update tracked_bytes_ in Add()",
+          "track": "core",
+          "code_view": {
+            "primary_changes": [
+              {
+                "file": "db/memtable.cc",
+                "language": "cpp",
+                "context_start_line": 14,
+                "context_end_line": 20,
+                "lines": [
+                  {
+                    "line_num": 14,
+                    "content": "MemTable::MemTable(const InternalKeyComparator& comparator)",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 15,
+                    "content": "    : comparator_(comparator),",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 16,
+                    "content": "      refs_(0),",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 17,
+                    "content": "      table_(comparator_, &arena_) {}",
+                    "change": "removed"
+                  },
+                  {
+                    "line_num": 17,
+                    "content": "      table_(comparator_, &arena_),",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 18,
+                    "content": "      tracked_bytes_(0) {}",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 19,
+                    "content": "",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 20,
+                    "content": "MemTable::~MemTable() { assert(refs_ == 0); }",
+                    "change": "unchanged"
+                  }
+                ]
+              },
+              {
+                "file": "db/memtable.cc",
+                "language": "cpp",
+                "context_start_line": 76,
+                "context_end_line": 99,
+                "lines": [
+                  {
+                    "line_num": 76,
+                    "content": "void MemTable::Add(SequenceNumber s, ValueType type,",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 77,
+                    "content": "                  const Slice& key, const Slice& value) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 78,
+                    "content": "  size_t key_size = key.size();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 79,
+                    "content": "  size_t val_size = value.size();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 80,
+                    "content": "  size_t internal_key_size = key_size + 8;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 81,
+                    "content": "  const size_t encoded_len = VarintLength(internal_key_size) +",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 82,
+                    "content": "                             internal_key_size + VarintLength(val_size) +",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 83,
+                    "content": "                             val_size;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 84,
+                    "content": "  char* buf = arena_.Allocate(encoded_len);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 85,
+                    "content": "  char* p = EncodeVarint32(buf, internal_key_size);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 86,
+                    "content": "  std::memcpy(p, key.data(), key_size);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 87,
+                    "content": "  p += key_size;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 88,
+                    "content": "  EncodeFixed64(p, (s << 8) | type);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 89,
+                    "content": "  p += 8;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 90,
+                    "content": "  p = EncodeVarint32(p, val_size);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 91,
+                    "content": "  std::memcpy(p, value.data(), val_size);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 92,
+                    "content": "  assert(p + val_size == buf + encoded_len);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 93,
+                    "content": "  table_.Insert(buf);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 94,
+                    "content": "",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 95,
+                    "content": "  // Track size: entry bytes + an estimate of skiplist node overhead.",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 96,
+                    "content": "  tracked_bytes_ += encoded_len + kApproxSkipListNodeOverhead;",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 97,
+                    "content": "}",
+                    "change": "unchanged"
+                  }
+                ],
+                "function_purpose": {
+                  "function_name": "MemTable::Add",
+                  "structure": "single",
+                  "problem_solved": "Inserts a single key/value entry into the in-memory write buffer. This is the only path by which writes land in the MemTable; everything else (DBImpl::Write, WriteBatchInternal) ultimately routes here. The function is responsible for encoding the entry into a single contiguous arena allocation and inserting a pointer into the SkipList.",
+                  "without_it": "Without MemTable::Add, callers would either need to manually encode the entry layout (varint sizes + key + tag + value) and manage arena allocation themselves, or the SkipList would have to expose a richer Insert API that handled encoding. Either route would leak MemTable's internal layout to callers, breaking the abstraction that lets MemTable evolve its on-disk-equivalent format independently."
+                },
+                "walkthrough": [
+                  {
+                    "line_start": 78,
+                    "line_end": 83,
+                    "chunk_role": "sizing",
+                    "explanation": "Compute the total encoded length for the entry — varint(internal_key_size) + internal_key_size + varint(val_size) + val_size — before allocating. Doing it in one pass avoids a copy or realloc later. internal_key_size is key_size + 8 because the trailing 8 bytes pack sequence number and value type."
+                  },
+                  {
+                    "line_start": 84,
+                    "line_end": 84,
+                    "chunk_role": "allocation",
+                    "explanation": "Single contiguous arena allocation for the whole entry. Note the SkipList node itself is allocated separately inside table_.Insert(buf) below — this is why the size-accounting change in this PR (line 96) adds an explicit estimate for node overhead rather than relying on encoded_len alone."
+                  },
+                  {
+                    "line_start": 85,
+                    "line_end": 92,
+                    "chunk_role": "encoding",
+                    "explanation": "Lay out the bytes into the buffer: varint internal_key_size, then the user key, then the 8-byte (seq << 8) | type tag, then varint val_size, then the value. The assert at line 92 checks the encoder consumed exactly the budgeted space."
+                  },
+                  {
+                    "line_start": 93,
+                    "line_end": 93,
+                    "chunk_role": "insertion",
+                    "explanation": "Hand the buffer off to the SkipList. Insert takes the buffer pointer; the comparator embedded in the SkipList knows how to decode it for ordering."
+                  },
+                  {
+                    "line_start": 95,
+                    "line_end": 96,
+                    "chunk_role": "the change · accumulator update",
+                    "explanation": "The change in this PR. Increment tracked_bytes_ by encoded entry bytes plus a fixed conservative skiplist-node overhead estimate. Three things to notice: (1) placement is after table_.Insert(), so failure paths wouldn't desync the counter (Insert is currently infallible, but this is correct anyway); (2) += is non-atomic — relies on the single-writer property of the DB write lock; (3) the overhead constant is a magic number (96), not derived from sizeof(Node) + kMaxHeight*sizeof(void*) — see concerns section for the implication."
+                  }
+                ]
+              }
+            ],
+            "supporting_definitions": [
+              {
+                "file": "db/memtable.cc",
+                "language": "cpp",
+                "context_start_line": 10,
+                "context_end_line": 12,
+                "lines": [
+                  {
+                    "line_num": 10,
+                    "content": "// Conservative estimate of skiplist node overhead.",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 11,
+                    "content": "// Real overhead depends on randomly chosen height; this is the upper bound.",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 12,
+                    "content": "static constexpr size_t kApproxSkipListNodeOverhead = 96;",
+                    "change": "unchanged"
+                  }
+                ],
+                "why_included": "Constant referenced by the new tracking line at line 96."
+              }
+            ]
+          },
+          "summary": "Every Add() now bumps `tracked_bytes_` by the encoded entry size plus a conservative estimate for the skiplist node Arena will allocate. The explicit `: tracked_bytes_(0)` in the constructor isn't strictly required (default-init zeros it), but the explicit form makes the invariant readable next to its declaration. The increment is non-atomic — MemTable is single-writer by design, so no synchronization is needed.",
+          "behavior_delta": {
+            "before": "Add() encoded the entry, allocated arena space, inserted into the skiplist, returned. The arena's counter ticked up as a side effect of the allocation, but MemTable itself had nothing to update.",
+            "after": "Same flow, plus a single non-atomic `tracked_bytes_ += encoded_len + kSkipListNodeOverheadEstimate;` line right after the insert. The constant is a per-entry guess at what Arena will allocate for the skiplist node holding the entry pointer.",
+            "diff": "One arithmetic op per Add — negligible. The interesting thing is what's being counted: encoded entry bytes the caller wrote plus a fixed-overhead estimate. This deliberately doesn't track arena waste, padding, or unused space in the last block. The counter and `arena_.MemoryUsage()` will diverge — and that divergence is the whole point of the storyline (S1.3 will read this counter instead of the arena's)."
+          },
+          "usage_context": {
+            "primary_usage_scenario": "Add() is called once per Put/Delete operation through DBImpl::Write. In typical workloads this is the dominant write-path operation — for a busy database, called millions of times per second across the lifetime of a MemTable.",
+            "callers": [
+              {
+                "file": "db/db_impl.cc",
+                "line": 1182,
+                "snippet": "WriteBatchInternal::InsertInto(write_batch, mem_)",
+                "context": "DBImpl::Write delegates to WriteBatchInternal::InsertInto, which iterates over a write batch and calls MemTable::Add for each operation. This is the single hot caller; nothing else writes to the MemTable directly."
+              },
+              {
+                "file": "db/write_batch.cc",
+                "line": 145,
+                "snippet": "handler->Put(key, value);  // → MemTable::Add via MemTableInserter",
+                "context": "WriteBatch iteration dispatches to a Handler subclass (MemTableInserter) which calls MemTable::Add with the parsed entry."
+              }
+            ],
+            "call_patterns": [
+              "Always called under DB-level write lock (single writer at a time).",
+              "Called with key sizes typically <100 bytes and value sizes anywhere from a few bytes to many KB.",
+              "Called repeatedly within a single batch (no per-batch reset of the counter — accumulates across batches into the lifetime of one MemTable)."
+            ],
+            "implicit_dependencies": [
+              "Single-writer property — the non-atomic increment is safe only because no other thread updates Add() concurrently.",
+              "Insert order — tracked_bytes_ increments after table_.Insert(buf). If Insert() ever fails (it doesn't in current code), the counter would be desynced — but the assumption is that Insert is infallible."
+            ]
+          },
+          "test_coverage": {
+            "covered_by": [
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "Simple",
+                "what_it_tests": "Existing test for Add → Get round-trip; doesn't observe tracked_bytes_ directly but exercises the modified Add() path."
+              }
+            ],
+            "added_in_this_pr": [
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "TrackedSizeMonotonic",
+                "what_it_tests": "Asserts tracked_bytes_ grows strictly with each Add() (via ApproximateMemoryUsage())."
+              }
+            ],
+            "not_covered": [
+              "Behavior with empty values (`Add(s, t, k, \"\")`) — should still increment due to entry overhead, not directly tested.",
+              "Concurrent Add() calls — currently disallowed by single-writer contract, but no test enforces this.",
+              "Numerical accuracy of the overhead estimate vs actual node sizes."
+            ]
+          },
+          "codebase_patterns": {
+            "similar_changes_elsewhere": [
+              {
+                "file": "util/arena.cc",
+                "line": 22,
+                "note": "Arena uses memory_usage_.fetch_add(...) (atomic) inside its allocator. The pattern here (bare += in single-writer context) intentionally diverges by skipping atomicity."
+              }
+            ],
+            "convention_alignment": "Comment style and placement align with existing comments in this file. The increment is placed after the successful Insert(), which matches the convention 'only count what landed'.",
+            "deviations": "The `kApproxSkipListNodeOverhead = 96` magic number is an outlier — most LevelDB constants are either configurable, derived from a clear formula, or come with extensive justification. A bare 96 with only 'conservative estimate' as documentation is light by codebase standards."
+          },
+          "alternative_approaches": [
+            {
+              "approach": "Compute actual node size at insert time by exposing height from SkipList::Insert()",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Would yield exact counts. Requires changing SkipList::Insert()'s signature/return value or adding a peek into RandomHeight()'s last result. Adds API surface for marginal benefit if approximate is good enough."
+            },
+            {
+              "approach": "Compute overhead as `kMaxHeight * sizeof(void*) + sizeof(Node)` instead of magic 96",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Would make the constant self-documenting and update automatically if Node grows. Slightly slower-to-read but more maintainable. Recommended."
+            },
+            {
+              "approach": "Don't add per-entry overhead; just count encoded_len",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Simpler, but underestimates by ~30-50% on small entries (where overhead dominates). The current choice errs on overestimating, which is safer for a memory-limit trigger."
+            }
+          ],
+          "evaluation": "The increment is correctly placed after table_.Insert(buf), so failures to insert (theoretical — Insert() doesn't fail in current code) wouldn't desync. The comment explains why the estimate exists. The pattern is straightforward.",
+          "suggestions": [
+            "Replace `kApproxSkipListNodeOverhead = 96` with `kMaxHeight * sizeof(void*) + sizeof(SkipList::Node)` (or static_assert that they're consistent). The magic 96 will silently drift if Node layout changes.",
+            "Add a comment near tracked_bytes_ in memtable.h documenting the single-writer assumption — if this changes later, this field is the first thing that needs to become atomic.",
+            "Consider whether to count the per-batch sequence-number prefix bytes as part of tracked_bytes_ or only the user-visible bytes; either is defensible but the choice should be conscious."
+          ],
+          "analysis": "The conservative-overhead approach trades accuracy for cost. Actual node height in SkipList::Insert() is determined by RandomHeight() which most often returns 1 (50% probability) but can go up to kMaxHeight (12). A node with height h occupies sizeof(Node) + (h-1)*sizeof(void*) bytes. The 96-byte estimate roughly corresponds to height 12 (max), which is conservative but on average overcounts by a factor of 2-3x for small entries.\n\nThis matters because callers (DBImpl::MakeRoomForWrite) compare tracked_bytes_ against `options_.write_buffer_size` to decide when to rotate. Overestimating means rotation happens earlier than it would have with a precise count, leading to slightly smaller MemTables in practice. Whether this is desirable depends on whether write_buffer_size is interpreted as 'soft target' or 'hard cap'. Header docs are silent on this; commits historically treat it as a soft target.",
+          "concerns": [
+            {
+              "concern": "Magic number `kApproxSkipListNodeOverhead = 96` will silently desync from reality if SkipList::Node layout changes.",
+              "evidence": "Constant defined at memtable.cc:12 with no static_assert tying it to actual Node size; comment merely says 'conservative estimate'.",
+              "severity": "medium"
+            },
+            {
+              "concern": "Single-writer assumption is not enforced or documented at the field site. A future change adding a second writer would silently corrupt the counter.",
+              "evidence": "tracked_bytes_ is plain size_t (memtable.h:79), incremented with `+=` (memtable.cc:96), no thread-safety annotation or check.",
+              "severity": "low"
+            }
+          ],
+          "prerequisites": [
+            {
+              "kind": "prior_step",
+              "reference_id": "S1.1",
+              "summary": "tracked_bytes_ was introduced in S1.1 as a private size_t field with a comment indicating it accumulates 'encoded entry bytes plus skiplist node overhead'. This step makes that comment factual."
+            }
+          ],
+          "prior_role": "MemTable::Add() is the single ingest path: every Put on the DB ultimately lands here. It takes (sequence_number, key, value, value_type), encodes them into a single contiguous byte buffer in arena-allocated memory, then inserts that buffer into the skiplist keyed on (user-key, seq). Historically it was a pure 'put bytes somewhere' routine — no side state about how much got written — because Arena's atomic counter already gave callers a cheap (if blocks-only) approximation."
+        },
+        {
+          "id": "S1.3",
+          "title": "Replace ApproximateMemoryUsage() implementation",
+          "track": "core",
+          "code_view": {
+            "primary_changes": [
+              {
+                "file": "db/memtable.cc",
+                "language": "cpp",
+                "context_start_line": 26,
+                "context_end_line": 28,
+                "lines": [
+                  {
+                    "line_num": 26,
+                    "content": "size_t MemTable::ApproximateMemoryUsage() {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 27,
+                    "content": "  return arena_.MemoryUsage();",
+                    "change": "removed"
+                  },
+                  {
+                    "line_num": 27,
+                    "content": "  return tracked_bytes_;",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 28,
+                    "content": "}",
+                    "change": "unchanged"
+                  }
+                ]
+              }
+            ],
+            "supporting_definitions": [
+              {
+                "file": "util/arena.h",
+                "language": "cpp",
+                "context_start_line": 32,
+                "context_end_line": 38,
+                "lines": [
+                  {
+                    "line_num": 32,
+                    "content": "  // Returns an estimate of the total memory usage of data allocated",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 33,
+                    "content": "  // by the arena (including space allocated but not yet used for",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 34,
+                    "content": "  // user allocations).",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 35,
+                    "content": "  size_t MemoryUsage() const {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 36,
+                    "content": "    return memory_usage_.load(std::memory_order_relaxed);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 37,
+                    "content": "  }",
+                    "change": "unchanged"
+                  }
+                ],
+                "why_included": "The previous implementation called this. Critical: arena_.MemoryUsage() is already O(1) — it returns a relaxed atomic load, not iterating blocks. This contradicts the PR description's performance claim."
+              },
+              {
+                "file": "db/db_impl.cc",
+                "language": "cpp",
+                "context_start_line": 1240,
+                "context_end_line": 1290,
+                "lines": [
+                  {
+                    "line_num": 1240,
+                    "content": "Status DBImpl::MakeRoomForWrite(bool force) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1241,
+                    "content": "  mutex_.AssertHeld();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1242,
+                    "content": "  assert(!writers_.empty());",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1243,
+                    "content": "  bool allow_delay = !force;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1244,
+                    "content": "  Status s;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1245,
+                    "content": "  while (true) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1246,
+                    "content": "    if (!bg_error_.ok()) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1247,
+                    "content": "      // Yield previous error",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1248,
+                    "content": "      s = bg_error_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1249,
+                    "content": "      break;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1250,
+                    "content": "    } else if (allow_delay &&",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1251,
+                    "content": "               versions_->NumLevelFiles(0) >=",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1252,
+                    "content": "                   config::kL0_SlowdownWritesTrigger) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1253,
+                    "content": "      // We are getting close to hitting a hard limit on the number of",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1254,
+                    "content": "      // L0 files. Rather than delaying a single write by several",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1255,
+                    "content": "      // seconds when we hit the hard limit, start delaying each",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1256,
+                    "content": "      // individual write by 1ms to reduce latency variance.",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1257,
+                    "content": "      mutex_.Unlock();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1258,
+                    "content": "      env_->SleepForMicroseconds(1000);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1259,
+                    "content": "      allow_delay = false;  // Do not delay a single write more than once",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1260,
+                    "content": "      mutex_.Lock();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1261,
+                    "content": "    } else if (!force &&",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1262,
+                    "content": "               (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1263,
+                    "content": "      // There is room in current memtable",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1264,
+                    "content": "      break;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1265,
+                    "content": "    } else if (imm_ != nullptr) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1266,
+                    "content": "      // We have filled up the current memtable, but the previous",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1267,
+                    "content": "      // one is still being compacted, so we wait.",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1268,
+                    "content": "      background_work_finished_signal_.Wait();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1269,
+                    "content": "    } else if (versions_->NumLevelFiles(0) >=",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1270,
+                    "content": "               config::kL0_StopWritesTrigger) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1271,
+                    "content": "      // There are too many level-0 files.",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1272,
+                    "content": "      Log(options_.info_log, \"waiting...\\n\");",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1273,
+                    "content": "      background_work_finished_signal_.Wait();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1274,
+                    "content": "    } else {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1275,
+                    "content": "      // Attempt to switch to a new memtable and trigger compaction of old",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1276,
+                    "content": "      assert(versions_->PrevLogNumber() == 0);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1277,
+                    "content": "      uint64_t new_log_number = versions_->NewFileNumber();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1278,
+                    "content": "      WritableFile* lfile = nullptr;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1279,
+                    "content": "      s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1280,
+                    "content": "      if (!s.ok()) {",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1281,
+                    "content": "        versions_->ReuseFileNumber(new_log_number);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1282,
+                    "content": "        break;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1283,
+                    "content": "      }",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1284,
+                    "content": "      delete log_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1285,
+                    "content": "      delete logfile_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1286,
+                    "content": "      logfile_ = lfile;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1287,
+                    "content": "      logfile_number_ = new_log_number;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1288,
+                    "content": "      log_ = new log::Writer(lfile);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1289,
+                    "content": "      imm_ = mem_;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1290,
+                    "content": "      has_imm_.store(true, std::memory_order_release);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1291,
+                    "content": "      mem_ = new MemTable(internal_comparator_);",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1292,
+                    "content": "      mem_->Ref();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1293,
+                    "content": "      force = false;  // Do not force another compaction if have room",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1294,
+                    "content": "      MaybeScheduleCompaction();",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1295,
+                    "content": "    }",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1296,
+                    "content": "  }",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1297,
+                    "content": "  return s;",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 1298,
+                    "content": "}",
+                    "change": "unchanged"
+                  }
+                ],
+                "why_included": "Primary consumer of ApproximateMemoryUsage(). Line 1262 is the decision point affected by this PR's semantic change: the threshold comparison now uses entry-byte counting instead of arena-byte counting.",
+                "function_purpose": {
+                  "function_name": "DBImpl::MakeRoomForWrite",
+                  "structure": "multi_section",
+                  "sections": [
+                    {
+                      "line_start": 1246,
+                      "line_end": 1249,
+                      "section_name": "background error propagation",
+                      "problem_solved": "If a background compaction has failed, no new writes should proceed — they would pile up in a MemTable that can never flush. This section propagates the error to the caller so the write fails fast.",
+                      "without_it": "Writers would silently succeed into a MemTable that will never be compacted, eventually exhausting memory or producing a database that can't recover."
+                    },
+                    {
+                      "line_start": 1250,
+                      "line_end": 1260,
+                      "section_name": "L0 write slowdown",
+                      "problem_solved": "When L0 file count approaches the hard stop trigger, this section introduces a 1ms sleep per write to create backpressure. The goal is to smooth latency: instead of one write hitting a wall and blocking for seconds while compaction catches up, all writes slow down slightly.",
+                      "without_it": "Without graduated backpressure, write latency would be bimodal: near-zero until the hard limit, then seconds-long stalls. This is the classic 'stall cliff' problem in LSM-trees."
+                    },
+                    {
+                      "line_start": 1261,
+                      "line_end": 1264,
+                      "section_name": "memtable capacity check",
+                      "problem_solved": "Checks whether the current MemTable still has room by comparing ApproximateMemoryUsage() against write_buffer_size. This is the gate that decides whether a write can proceed without rotation. This is the line (1262) directly affected by the PR's semantic change.",
+                      "without_it": "Without this check, the MemTable would grow unbounded until something else (OOM, arena exhaustion) stopped it. The write_buffer_size knob would have no effect."
+                    },
+                    {
+                      "line_start": 1265,
+                      "line_end": 1273,
+                      "section_name": "compaction backpressure waits",
+                      "problem_solved": "Two wait conditions: (1) if the previous MemTable is still being compacted (imm_ != nullptr), wait for it to finish before creating another; (2) if L0 file count hits the hard stop, wait. Both prevent the system from getting too far ahead of compaction.",
+                      "without_it": "Multiple immutable MemTables could pile up (the current design only supports one at a time). Or L0 could grow without bound, making reads expensive and compaction unable to keep up."
+                    },
+                    {
+                      "line_start": 1274,
+                      "line_end": 1295,
+                      "section_name": "memtable rotation",
+                      "problem_solved": "When the current MemTable is full and conditions allow, this section performs the rotation: creates a new WAL file, moves the current MemTable to immutable (imm_), creates a fresh MemTable, and schedules a background compaction to flush imm_ to L0.",
+                      "without_it": "Without rotation, writes would either fail or the single MemTable would grow forever. Rotation is the mechanism that converts in-memory writes into on-disk sorted runs, which is the core of the LSM-tree architecture."
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "summary": "ApproximateMemoryUsage() now reads `tracked_bytes_` directly — one load, no traversal. The trade-off is that we no longer measure *arena* bytes (slab overhead, free space inside the last block); we measure *entry* bytes that callers actually wrote. For the only known caller — flush-decision throttling — entry bytes is the more honest signal.",
+          "behavior_delta": {
+            "before": "Returned `arena_.MemoryUsage()` — an atomic count of bytes the arena had ever handed out across all blocks. Included slab overhead, padding, and any unused space in the current trailing block.",
+            "after": "Returns `tracked_bytes_` directly. No iteration, no atomic access (the field is non-atomic; only the single writer touches it).",
+            "diff": "Two semantic shifts happen here, not one. (1) **Cost**: O(blocks) → O(1). (2) **Meaning**: arena-allocated bytes → entry bytes (plus the per-entry overhead estimate from S1.2). The returned number will systematically be smaller than the old number — it omits slab waste and unused tail space. For flush throttling, this is arguably the *more* honest signal because it tracks the bytes you'd actually have to flush, not the bytes the arena happened to grab. But any caller that used the old value to size a buffer for compaction would now under-allocate — none exist in this repo, but the comment in S3.1 doesn't flag the shift."
+          },
+          "usage_context": {
+            "primary_usage_scenario": "ApproximateMemoryUsage() is called by DBImpl::MakeRoomForWrite during every write batch to decide whether to rotate the MemTable. It is the trigger for memtable→immutable-memtable→flush state transitions.",
+            "callers": [
+              {
+                "file": "db/db_impl.cc",
+                "line": 1267,
+                "snippet": "if (!force && (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) { ... }",
+                "context": "MakeRoomForWrite checks if the current memtable has room. If the returned size exceeds write_buffer_size, the memtable is rotated and a flush is triggered. This is the single decision point this function exists to serve."
+              },
+              {
+                "file": "db/version_set.cc",
+                "line": 982,
+                "snippet": "// (no direct caller in this file; included as black box)",
+                "context": "No other ApproximateMemoryUsage callers found in the search scope. The function exists primarily for the rotation decision above."
+              }
+            ],
+            "call_patterns": [
+              "Called once per write batch (before processing the batch).",
+              "Called from a hot path — every write goes through MakeRoomForWrite."
+            ],
+            "implicit_dependencies": [
+              "DBImpl assumes the value corresponds to memory pressure caused by the MemTable. The semantic shift in this change (entry bytes + estimate vs arena bytes) means the rotation point will shift correspondingly. If the team treats write_buffer_size as a soft target tracking 'memory used by data', the new semantics is arguably closer to that intent. If they treat it as 'arena bytes consumed', this change is a regression."
+            ]
+          },
+          "test_coverage": {
+            "covered_by": [],
+            "added_in_this_pr": [
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "TrackedSizeMonotonic",
+                "what_it_tests": "Calls ApproximateMemoryUsage() repeatedly and asserts monotonic growth."
+              },
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "TrackedSizeApproximatesArena",
+                "what_it_tests": "Asserts the returned value is within an order-of-magnitude band — see S2.2 concerns about the looseness."
+              }
+            ],
+            "not_covered": [
+              "No integration test verifies that DBImpl::MakeRoomForWrite still rotates at the expected point with the new semantics.",
+              "No test confirms the value tracks 'reasonable' against actual arena consumption — the existing tests are loose."
+            ]
+          },
+          "codebase_patterns": {
+            "similar_changes_elsewhere": [],
+            "convention_alignment": "One-line implementation change, no comment update inline (the header comment is updated in S3.1, separately). This split between implementation change and comment update is unusual; conventionally both would be in the same commit/step.",
+            "deviations": "The PR description's performance claim ('O(blocks) → O(1)') is at odds with the actual code (arena_.MemoryUsage() is already O(1) by inspection of util/arena.h:35). The header comment 'Note: this iterates arena blocks; do not call in tight loops' (memtable.h:40, removed in S3.1) is itself stale — the arena did not iterate blocks at any point in recent history."
+          },
+          "alternative_approaches": [
+            {
+              "approach": "Keep arena_.MemoryUsage() and just remove the misleading 'iterates blocks' comment",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "If the only goal is correctness of the comment, this is a one-line fix with no semantic change. The chosen approach goes further: it changes what the function returns, which has subtle behavioral consequences."
+            },
+            {
+              "approach": "Return both values via a struct (entry bytes + arena bytes)",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Provides callers more information but breaks the existing public API and is over-engineered if all current callers want one number."
+            },
+            {
+              "approach": "Add tracked_bytes_ alongside arena, and have ApproximateMemoryUsage() return the max of both",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Conservative — never under-counts memory pressure. But adds two sources of truth and obscures intent."
+            }
+          ],
+          "evaluation": "Mechanically straightforward. But this is the step where the PR's framing matters most: the change is presented as a performance optimization but is actually a semantic shift. The comment change in S3.1 will lock in the new framing.",
+          "suggestions": [
+            "Verify the PR description's performance claim by benchmarking — likely no measurable change since both old and new implementations are O(1).",
+            "Update the PR description to accurately describe the change as 'switch ApproximateMemoryUsage() to count inserted-entry bytes rather than arena-allocated bytes' rather than as a perf fix.",
+            "Confirm with someone familiar with DBImpl::MakeRoomForWrite that the new semantic is the intended interpretation of write_buffer_size."
+          ],
+          "analysis": "This is the step where the PR's framing meets the reviewer's responsibility. Three things are happening at once: a comment fix (S3.1 — fine), a counter introduction (S1.1, S1.2 — fine), and a return-value semantic change (this step — needs scrutiny). The first two are not controversial. The third changes how DBImpl decides to rotate the MemTable, by changing what 'memory usage' means.\n\nFor a typical workload with mid-sized values, the new value is in the same ballpark as the old. For workloads with many small entries (where node overhead dominates), the new value over-reports vs the arena. For workloads with few large entries (where arena waste dominates), the new value under-reports vs the arena. Either could affect rotation timing, which affects MemTable size distribution, which affects compaction patterns downstream. None of this is necessarily bad — it might be exactly what's wanted — but it should be a conscious decision documented somewhere.",
+          "concerns": [
+            {
+              "concern": "PR description's performance argument is incorrect; the change is actually semantic, not algorithmic. This affects how the change should be reviewed and documented.",
+              "evidence": "util/arena.h:35 shows Arena::MemoryUsage() is an atomic load (O(1)). The PR description claims this was O(blocks).",
+              "severity": "high"
+            },
+            {
+              "concern": "Behavioral change in DBImpl::MakeRoomForWrite rotation point is not directly tested. Workload patterns where new semantics over- or under-counts vs old will see shifted rotation behavior.",
+              "evidence": "Only S2.1 (monotonic growth) and S2.2 (loose order-of-magnitude bound) cover the new path; no test asserts rotation timing parity.",
+              "severity": "medium"
+            },
+            {
+              "concern": "Comment update for ApproximateMemoryUsage is split into S3.1 instead of bundled here. This makes the PR easier to misread one step at a time.",
+              "evidence": "S3.1 modifies the comment for the function whose body is changed in this step.",
+              "severity": "low"
+            }
+          ],
+          "prerequisites": [
+            {
+              "kind": "prior_step",
+              "reference_id": "S1.2",
+              "summary": "tracked_bytes_ is now actively maintained by Add() (S1.2). At this point it accumulates encoded_len + node-overhead estimate per inserted entry."
+            }
+          ],
+          "prior_role": "ApproximateMemoryUsage() is MemTable's public 'how big is this' accessor. It's called from the flush-decision logic on every write and from monitoring queries every tick, so its cost matters. Before this change, it delegated to `arena_.MemoryUsage()`, which under the hood walked the arena's linked list of allocation blocks summing their `block_used_` fields — O(blocks), where blocks count grows with writes. The 'approximate' in the name was about avoiding *iteration cost*, not about precision; the returned number was exact for arena-allocated bytes."
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Add tests for memory tracking",
+      "kind": "test",
+      "confidence": "high",
+      "confidence_reasoning": "Both new tests directly validate behavior introduced in S1. They live in the same file and share setup. Clearly belong together.",
+      "summary": "Tests verifying that tracked_bytes_ correctly reflects writes and matches expected sizes.",
+      "files_touched": [
+        "db/memtable_test.cc"
+      ],
+      "purpose": {
+        "stated": "PR description: 'Adds test coverage for the new tracking.'",
+        "evident": "Adds two tests against ApproximateMemoryUsage(): one checks monotonicity (S2.1), one checks order-of-magnitude reasonableness (S2.2). The tests cover symptoms but not the underlying invariant precisely.",
+        "discrepancy": "S2.2 self-documents as a placeholder ('No direct arena access in test; this is a placeholder for whatever ground-truth comparison the team agrees on.'). This is unusual for production-bound test code."
+      },
+      "architectural_context": {
+        "system_role": "Unit-test layer for db/memtable. Runs as part of `make test`; gates merges via CI.",
+        "involved_modules": [
+          {
+            "module": "db/memtable_test",
+            "role_in_storyline": "Adds the new tests using existing GoogleTest patterns."
+          }
+        ],
+        "data_flow": "Test creates MemTable instance → calls Add() in a loop → reads ApproximateMemoryUsage() → asserts properties.",
+        "diagram": {
+          "type": "none",
+          "content": ""
+        }
+      },
+      "change_overview": "Two new tests are added to the existing memtable_test.cc file. S2.1 checks that ApproximateMemoryUsage() grows strictly after each Add(). S2.2 checks that after 1000 small entries, the value is within an order of magnitude of expected. The first is a clean monotonicity check; the second is intentionally loose and self-acknowledged as a placeholder.",
+      "reading_roadmap": "S2.1 is a straightforward sanity test. S2.2 is more interesting because of what it doesn't test — read S2.2's analysis closely; it's a candidate for being either tightened or removed before merge.",
+      "steps": [
+        {
+          "id": "S2.1",
+          "title": "Test that tracked size grows monotonically with Add()",
+          "track": "test",
+          "code_view": {
+            "primary_changes": [
+              {
+                "file": "db/memtable_test.cc",
+                "language": "cpp",
+                "context_start_line": 47,
+                "context_end_line": 61,
+                "lines": [
+                  {
+                    "line_num": 47,
+                    "content": "TEST(MemTableTest, TrackedSizeMonotonic) {",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 48,
+                    "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 49,
+                    "content": "  MemTable* mem = new MemTable(cmp);",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 50,
+                    "content": "  mem->Ref();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 51,
+                    "content": "",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 52,
+                    "content": "  size_t prev = mem->ApproximateMemoryUsage();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 53,
+                    "content": "  for (int i = 0; i < 100; i++) {",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 54,
+                    "content": "    mem->Add(i, kTypeValue, \"k\" + std::to_string(i), \"v\");",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 55,
+                    "content": "    size_t now = mem->ApproximateMemoryUsage();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 56,
+                    "content": "    ASSERT_GT(now, prev) << \"size should grow after each Add\";",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 57,
+                    "content": "    prev = now;",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 58,
+                    "content": "  }",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 59,
+                    "content": "",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 60,
+                    "content": "  mem->Unref();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 61,
+                    "content": "}",
+                    "change": "added"
+                  }
+                ]
+              }
+            ],
+            "supporting_definitions": []
+          },
+          "summary": "A monotonicity guard. If a future change skips the increment on some entries — dedup, special-case keys, an early return — the public accessor would silently understate memory. This test plants a tripwire: insert 100 entries, assert the returned value is *strictly* larger after each Add. It would catch that whole class of regression before it ships, even though it doesn't check the *magnitude* of growth.",
+          "behavior_delta": {
+            "before": "No test directly observed the post-Add() growth of ApproximateMemoryUsage(). Existing tests cover the data-correctness side (Get returns what was Put) but not the size accounting.",
+            "after": "On every test run, 100 entries are inserted and the returned size is asserted to grow with each insert.",
+            "diff": "Adds a guard against regressions where a future change skips the increment for some entries (e.g. dedup, special-case key types). Doesn't test magnitude — only direction."
+          },
+          "usage_context": {
+            "primary_usage_scenario": "Test runs as part of CI on every PR. Failure would block merges.",
+            "callers": [],
+            "call_patterns": [
+              "Single-threaded; no concurrency aspect tested.",
+              "Uses small key/value strings ('k0' to 'k99', 'v')."
+            ],
+            "implicit_dependencies": [
+              "Assumes std::to_string is acceptable in test code (it is in this codebase, see existing tests)."
+            ]
+          },
+          "test_coverage": {
+            "covered_by": [],
+            "added_in_this_pr": [
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "(this test)",
+                "what_it_tests": "Monotonic growth of ApproximateMemoryUsage() across 100 Add() calls."
+              }
+            ],
+            "not_covered": [
+              "Empty-value Add — should still increment due to entry overhead, not directly asserted.",
+              "Magnitude of per-Add growth — the test passes even if the increment is absurdly large or small.",
+              "Behavior across 0 inserts (does ApproximateMemoryUsage() return 0?)."
+            ]
+          },
+          "codebase_patterns": {
+            "similar_changes_elsewhere": [
+              {
+                "file": "db/memtable_test.cc",
+                "line": 22,
+                "note": "Existing 'Simple' test uses the same Ref/Unref lifecycle pattern."
+              }
+            ],
+            "convention_alignment": "Test name follows convention (descriptive, CamelCase). Lifecycle (Ref/Unref) matches existing tests. Loop count (100) is in line with other small-scale tests in the file.",
+            "deviations": null
+          },
+          "alternative_approaches": [
+            {
+              "approach": "Also assert magnitude — `(now - prev) > kEntryMin && (now - prev) < kEntryMax`",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Tightens the test against silent over- or under-counting bugs. The current test would pass even if every Add somehow added 1MB. A magnitude assertion would catch that. Marginal added complexity."
+            },
+            {
+              "approach": "Add an assertion at the start that ApproximateMemoryUsage() returns 0 for an empty MemTable",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Tests the constructor initialization. One extra line, catches a class of bugs (zero-init failures) that the current test misses."
+            }
+          ],
+          "evaluation": "Tests the right property (monotonicity) and is readable. Passes the smell test for a basic regression guard. The looseness is acceptable for what it claims to test.",
+          "suggestions": [
+            "Consider adding a starting assertion that an empty MemTable returns 0 for ApproximateMemoryUsage().",
+            "Consider asserting `(now - prev) >= encoded_len_estimate` to catch silent under-counting; would also serve as documentation of the expected per-Add increment."
+          ],
+          "analysis": null,
+          "concerns": [
+            {
+              "concern": "Test passes even if increments are wildly wrong in magnitude (only direction is checked).",
+              "evidence": "Only ASSERT_GT(now, prev); no upper bound.",
+              "severity": "low"
+            }
+          ],
+          "prerequisites": [
+            {
+              "kind": "prior_step",
+              "reference_id": "S1.3",
+              "summary": "ApproximateMemoryUsage() now returns tracked_bytes_ directly (changed in S1.3). Before this PR, it returned arena_.MemoryUsage()."
+            }
+          ]
+        },
+        {
+          "id": "S2.2",
+          "title": "Test that tracked size approximates arena usage",
+          "track": "test",
+          "code_view": {
+            "primary_changes": [
+              {
+                "file": "db/memtable_test.cc",
+                "language": "cpp",
+                "context_start_line": 63,
+                "context_end_line": 78,
+                "lines": [
+                  {
+                    "line_num": 63,
+                    "content": "TEST(MemTableTest, TrackedSizeApproximatesArena) {",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 64,
+                    "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 65,
+                    "content": "  MemTable* mem = new MemTable(cmp);",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 66,
+                    "content": "  mem->Ref();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 67,
+                    "content": "  for (int i = 0; i < 1000; i++) {",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 68,
+                    "content": "    mem->Add(i, kTypeValue, \"key\" + std::to_string(i), \"value\");",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 69,
+                    "content": "  }",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 70,
+                    "content": "  size_t tracked = mem->ApproximateMemoryUsage();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 71,
+                    "content": "  // Tracked size should be in the same order of magnitude as arena.",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 72,
+                    "content": "  // We allow 50% slop in either direction.",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 73,
+                    "content": "  // (No direct arena access in test; this is a placeholder for",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 74,
+                    "content": "  //  whatever ground-truth comparison the team agrees on.)",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 75,
+                    "content": "  ASSERT_GT(tracked, 1000 * 10);",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 76,
+                    "content": "  ASSERT_LT(tracked, 1000 * 1000);",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 77,
+                    "content": "  mem->Unref();",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 78,
+                    "content": "}",
+                    "change": "added"
+                  }
+                ]
+              }
+            ],
+            "supporting_definitions": []
+          },
+          "summary": "A magnitude check, intentionally loose. Insert 1000 small entries, assert tracked size lands in [10K, 1M]. The author acknowledges in-place that 10–1000 bytes per entry is an enormous band: this catches catastrophic miscounting (counter never incremented; off by 1000×) but not subtle drift. It's a placeholder while a tighter assertion is figured out — at minimum we want a smoke test that the absolute number is in the right ballpark.",
+          "behavior_delta": {
+            "before": "No prior magnitude check.",
+            "after": "On each test run, 1000 entries are added and ApproximateMemoryUsage() is asserted within [10K, 1M] bytes.",
+            "diff": "Provides extremely weak protection against catastrophic miscounting. Would not catch e.g. 2x or 5x systematic errors."
+          },
+          "usage_context": {
+            "primary_usage_scenario": "CI test runs.",
+            "callers": [],
+            "call_patterns": [],
+            "implicit_dependencies": [
+              "Assumes that '10–1000 bytes per entry' is a reasonable range for entries of the form (key='keyN', value='value', seq=N, type=value). Realistic per-entry size is around 30–60 bytes including overhead estimate; the bounds are 10x slack on each side."
+            ]
+          },
+          "test_coverage": {
+            "covered_by": [],
+            "added_in_this_pr": [
+              {
+                "file": "db/memtable_test.cc",
+                "test_name": "(this test)",
+                "what_it_tests": "Order-of-magnitude bound on ApproximateMemoryUsage() after 1000 small inserts."
+              }
+            ],
+            "not_covered": [
+              "Tighter accuracy bounds — see comment in test admitting the bounds are placeholders.",
+              "Comparison against actual arena usage — the comment explicitly defers this.",
+              "Behavior with realistic value sizes (KB-sized values)."
+            ]
+          },
+          "codebase_patterns": {
+            "similar_changes_elsewhere": [],
+            "convention_alignment": "Test structure matches existing tests in the file.",
+            "deviations": "The four-line comment block (lines 71-74) admitting the test is a placeholder is a code smell. Production tests should not advertise their own inadequacy in inline comments."
+          },
+          "alternative_approaches": [
+            {
+              "approach": "Compute expected value precisely from inputs and assert near-equality",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Each entry has predictable encoded size (varint + key + 8 + varint + value). With node overhead = 96, total per entry is computable. Asserting within ±5% of predicted would catch real bugs. Slightly more code but actually tests something."
+            },
+            {
+              "approach": "Remove this test entirely until a real ground-truth check is implementable",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "An admitted-placeholder test is worse than no test (creates false confidence). Removing keeps the test suite honest."
+            },
+            {
+              "approach": "Friend-class the test to access arena_ directly and compare",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Allows direct comparison but introduces test-only friend declarations in production headers — generally discouraged."
+            }
+          ],
+          "evaluation": "The test's intent is good but the execution is weak. Its own comments concede this. As-is, it contributes more noise than signal: a developer breaking the counter in a non-catastrophic way would see this test pass, gaining false confidence.",
+          "suggestions": [
+            "Either commit to a tight assertion (compute expected size from inputs) or remove the test until a real check is feasible.",
+            "If kept, the comment block (lines 71-74) should not ship — comments admitting a test is a placeholder are a smell.",
+            "Consider also adding a test with KB-sized values, since size accounting is qualitatively different there."
+          ],
+          "analysis": "This test is the weakest link in the PR's quality story. The PR introduces a counter and changes a function's semantics, but the only test of accuracy is a 10x-loose order-of-magnitude check that the code itself admits is a placeholder. If accuracy of tracked_bytes_ matters (and it does, because callers use it for rotation decisions), the test should reflect that. If it doesn't matter, the PR description should not frame the change as 'tracking' at all.",
+          "concerns": [
+            {
+              "concern": "Test creates false confidence: passes even with substantial systematic miscounting (within 10x of true value).",
+              "evidence": "ASSERT_GT(tracked, 10K), ASSERT_LT(tracked, 1M) for 1000 entries with predicted ~30-60 bytes each — covers a 16x range.",
+              "severity": "medium"
+            },
+            {
+              "concern": "Inline comment self-acknowledges the test is a placeholder. Production tests should not ship in this state.",
+              "evidence": "Lines 71-74 of the test.",
+              "severity": "medium"
+            }
+          ],
+          "prerequisites": [
+            {
+              "kind": "prior_step",
+              "reference_id": "S2.1",
+              "summary": "S2.1 (TrackedSizeMonotonic) established that the value increases. This test attempts to validate magnitude."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Fix outdated comment in MemTable header",
+      "kind": "doc",
+      "confidence": "medium",
+      "confidence_reasoning": "Single-line comment fix unrelated to the main change. Could be argued as core (the comment is now accurate because of S1) or as drive-by (the comment was wrong even before this PR). Reviewer may want to ask the author to split this into a separate commit.",
+      "summary": "Updates a stale comment about ApproximateMemoryUsage().",
+      "files_touched": [
+        "db/memtable.h"
+      ],
+      "purpose": {
+        "stated": null,
+        "evident": "Replaces a comment that claimed ApproximateMemoryUsage() iterates arena blocks (it didn't, even before this PR — see S1.3 analysis) with a comment saying the function returns a cached counter and is O(1).",
+        "discrepancy": "The original comment was already misleading prior to this PR (arena was already O(1)). This step fixes a long-standing inaccuracy and conflates it with the S1 change. The fix is correct for the post-S1 world but the framing matters."
+      },
+      "architectural_context": {
+        "system_role": "Header-level documentation only.",
+        "involved_modules": [
+          {
+            "module": "db/memtable",
+            "role_in_storyline": "Header comment update."
+          }
+        ],
+        "data_flow": null,
+        "diagram": {
+          "type": "none",
+          "content": ""
+        }
+      },
+      "change_overview": "A single comment replacement. Removes the line 'Note: this iterates arena blocks; do not call in tight loops.' and replaces it with 'Returns a cached counter updated at write time; O(1).'",
+      "reading_roadmap": "Single step. Read in conjunction with S1.3 since they are causally linked.",
+      "steps": [
+        {
+          "id": "S3.1",
+          "title": "Update ApproximateMemoryUsage comment",
+          "track": "supporting",
+          "code_view": {
+            "primary_changes": [
+              {
+                "file": "db/memtable.h",
+                "language": "cpp",
+                "context_start_line": 38,
+                "context_end_line": 41,
+                "lines": [
+                  {
+                    "line_num": 38,
+                    "content": "  // Returns an estimate of the number of bytes of memory in use by this",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 39,
+                    "content": "  // data structure. It is safe to call when MemTable is being modified.",
+                    "change": "unchanged"
+                  },
+                  {
+                    "line_num": 40,
+                    "content": "  // Note: this iterates arena blocks; do not call in tight loops.",
+                    "change": "removed"
+                  },
+                  {
+                    "line_num": 40,
+                    "content": "  // Returns a cached counter updated at write time; O(1).",
+                    "change": "added"
+                  },
+                  {
+                    "line_num": 41,
+                    "content": "  size_t ApproximateMemoryUsage();",
+                    "change": "unchanged"
+                  }
+                ]
+              }
+            ],
+            "supporting_definitions": []
+          },
+          "summary": "The header comment is updated to match the new reality. The old comment warned readers that ApproximateMemoryUsage() iterates arena blocks and is expensive — true before S1.3, false after. The replacement says 'cached counter updated at write time; O(1)' — true now, but glosses over the *semantic* shift (the counter measures entry bytes, not arena bytes), which a careful reader of S1.3's behavior delta will catch.",
+          "behavior_delta": {
+            "before": "Comment told readers ApproximateMemoryUsage() iterates arena blocks and is expensive.",
+            "after": "Comment says it returns a cached counter and is O(1).",
+            "diff": "Header-level documentation now matches post-S1 reality. Doesn't disclose the semantic shift in what the counter represents (entry bytes vs arena bytes)."
+          },
+          "usage_context": {
+            "primary_usage_scenario": "Read by anyone exploring db/memtable.h for the first time, e.g. new contributors deciding whether ApproximateMemoryUsage() is safe to call frequently.",
+            "callers": [],
+            "call_patterns": [],
+            "implicit_dependencies": []
+          },
+          "test_coverage": {
+            "covered_by": [],
+            "added_in_this_pr": [],
+            "not_covered": []
+          },
+          "codebase_patterns": {
+            "similar_changes_elsewhere": [],
+            "convention_alignment": "Comment is short and informative, matching the surrounding header comments.",
+            "deviations": null
+          },
+          "alternative_approaches": [
+            {
+              "approach": "Also document the semantic shift (counts entry bytes, not arena bytes)",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "More accurate documentation; would help future readers understand why the value differs from arena.MemoryUsage(). Two more lines."
+            },
+            {
+              "approach": "Split into a separate commit",
+              "evidence_kind": "analytical",
+              "tradeoff_vs_chosen": "Reviewers would see the comment fix without the surrounding noise. Conventional best practice for documentation-only changes."
+            }
+          ],
+          "evaluation": "Comment now matches implementation. Clean fix. Minor concern that it doesn't surface the semantic shift.",
+          "suggestions": [
+            "Consider adding a sentence about what the counter represents (entry bytes plus a node-overhead estimate, not arena bytes).",
+            "Worth asking the author whether this should be its own commit, separable from S1's logic change."
+          ],
+          "analysis": null,
+          "concerns": [
+            {
+              "concern": "Comment update is silent on the semantic shift in what the function returns. Future readers may assume the returned value is interchangeable with arena's view of memory, which is not quite accurate.",
+              "evidence": "New comment says 'cached counter updated at write time; O(1)' but doesn't define what's being counted.",
+              "severity": "low"
+            }
+          ],
+          "prerequisites": [
+            {
+              "kind": "prior_step",
+              "reference_id": "S1.3",
+              "summary": "The new O(1) behavior was introduced in S1.3 by replacing arena_.MemoryUsage() with tracked_bytes_."
+            }
+          ],
+          "prior_role": "The comment above `ApproximateMemoryUsage()` in `memtable.h` has stood since the function was first added — `git blame` shows the language predates the move to atomic-counter-backed arenas. It told callers that the call walks the arena's block list and is therefore something to avoid in tight loops. That guidance is no longer accurate after S1.3 replaced the implementation; the comment is now actively misleading (suggests an O(blocks) cost that doesn't exist)."
+        }
+      ]
+    }
+  ]
+};
+
+  const STATE = { activeStorylineId: null, activeStepId: null };
+
+  // ---------- Helpers ----------
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  const KW = new Set(['def','class','if','elif','else','return','while','for','in','not','and','or','break','continue','import','from','as','with','try','except','finally','raise','yield','lambda','self','None','True','False','pass','assert','const','let','var','function','new','delete','typeof','instanceof','extends','implements','interface','type','enum','public','private','protected','static','void','int','size_t','bool','true','false','nullptr','null','undefined','struct','namespace','using','template','typename']);
+  function highlight(line) {
+    const src = String(line == null ? '' : line);
+    const out = []; let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '/' && src[i+1] === '/') { out.push(['com', src.slice(i)]); break; }
+      if (c === '#') { out.push(['com', src.slice(i)]); break; }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < src.length && src[j] !== c) { if (src[j] === '\\') j += 2; else j++; }
+        out.push(['str', src.slice(i, Math.min(j + 1, src.length))]);
+        i = Math.min(j + 1, src.length); continue;
+      }
+      if (/[0-9]/.test(c) && (i === 0 || !/[A-Za-z_]/.test(src[i-1]))) {
+        let j = i;
+        while (j < src.length && /[0-9._x]/.test(src[j])) j++;
+        out.push(['num', src.slice(i, j)]); i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        out.push([KW.has(word) ? 'kw' : null, word]);
+        i = j; continue;
+      }
+      out.push([null, c]); i++;
+    }
+    return out.map(([cls, text]) =>
+      cls ? '<span class="tok-' + cls + '">' + esc(text) + '</span>' : esc(text)
+    ).join('');
+  }
+
+  const SEV_ORDER = { high: 0, medium: 1, low: 2, informational: 3, clean: 4 };
+  const SEV_CANON = { high: 'high', medium: 'medium', low: 'low', informational: 'info', info: 'info', clean: 'clean' };
+  function stepSeverity(step) {
+    const concerns = step.concerns || [];
+    if (!concerns.length) return 'clean';
+    let worst = 'informational';
+    concerns.forEach(c => {
+      const s = c.severity || 'informational';
+      if ((SEV_ORDER[s] ?? 99) < (SEV_ORDER[worst] ?? 99)) worst = s;
+    });
+    return worst;
+  }
+  function sevClass(sev) { return 'sev-' + (SEV_CANON[sev] || 'info'); }
+
+  // ---------- View: build per-storyline data ----------
+  function viewForStoryline(sl) {
+    const steps = (sl.steps || []).map((s, i) => ({
+      ...s,
+      _step: i + 1,
+      _severity: stepSeverity(s),
+    }));
+    // Flatten (step, file, primary_change) triples
+    const perFile = new Map();  // file → [{step, change}]
+    steps.forEach(s => {
+      const pcs = (s.code_view && s.code_view.primary_changes) || [];
+      pcs.forEach(pc => {
+        const f = pc.file || '(unknown)';
+        if (!perFile.has(f)) perFile.set(f, []);
+        perFile.get(f).push({ step: s, change: pc });
+      });
+    });
+    return {
+      id: sl.id,
+      title: sl.title,
+      summary: sl.summary || '',
+      files: sl.files_touched || Array.from(perFile.keys()),
+      purpose: sl.purpose || {},
+      arch: sl.architectural_context || {},
+      change_overview: sl.change_overview || '',
+      confidence: sl.confidence || '',
+      confidence_reasoning: sl.confidence_reasoning || '',
+      steps, perFile,
+      defaultActive: steps[0]?.id || null,
+    };
+  }
+
+  function countSeverities(sl) {
+    const c = { high: 0, medium: 0, low: 0, informational: 0, clean: 0 };
+    (sl.steps || []).forEach(s => {
+      const sev = stepSeverity(s);
+      c[sev] = (c[sev] || 0) + 1;
+    });
+    return c;
+  }
+
+  // ---------- Tabs ----------
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    (REVIEW_DATA.storylines || []).forEach(sl => {
+      const t = document.createElement('div');
+      t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
+      const c = countSeverities(sl);
+      const parts = [];
+      if (c.high)   parts.push('<span class="high">' + c.high + 'H</span>');
+      if (c.medium) parts.push('<span class="medium">' + c.medium + 'M</span>');
+      if (c.low)    parts.push('<span class="low">' + c.low + 'L</span>');
+      const counts = parts.length ? '<span class="tab-counts">' + parts.join(' ') + '</span>' : '';
+      t.innerHTML = '<span class="tab-num">' + esc(sl.id) + '</span>' + esc(sl.title) + counts;
+      t.onclick = () => setStoryline(sl.id);
+      root.appendChild(t);
+    });
+  }
+
+  // ---------- PR intro (first storyline only) ----------
+  function renderPRIntro() {
+    const sm = REVIEW_DATA.summary || {};
+    const md = REVIEW_DATA.metadata || {};
+    const storylines = REVIEW_DATA.storylines || [];
+    const totals = { high: 0, medium: 0, low: 0, informational: 0, clean: 0 };
+    storylines.forEach(sl => {
+      const c = countSeverities(sl);
+      Object.keys(c).forEach(k => totals[k] += c[k]);
+    });
+    const intro = document.createElement('div');
+    intro.className = 'pr-intro';
+    const stats = [];
+    if (totals.high)          stats.push('<span class="stat high">'   + totals.high + ' HIGH</span>');
+    if (totals.medium)        stats.push('<span class="stat medium">' + totals.medium + ' MEDIUM</span>');
+    if (totals.low)           stats.push('<span class="stat low">'    + totals.low + ' LOW</span>');
+    if (totals.informational) stats.push('<span class="stat">'        + totals.informational + ' INFO</span>');
+    if (totals.clean)         stats.push('<span class="stat clean">'  + totals.clean + ' CLEAN</span>');
+    const files = new Set();
+    storylines.forEach(sl => (sl.files_touched || []).forEach(f => files.add(f)));
+    if (files.size) stats.push('<span class="stat">' + files.size + ' files</span>');
+    const longDesc = sm.description && sm.description !== sm.one_line
+      ? '<details><summary>What this PR does in full</summary><div class="pi-desc">' + esc(sm.description) + '</div></details>'
+      : '';
+    intro.innerHTML =
+      '<div class="pi-label">🔍 Reviewing · ' + esc(md.title || md.repo || '') + '</div>' +
+      (sm.one_line ? esc(sm.one_line) : '') +
+      (stats.length ? '<div class="stat-strip">' + stats.join('') + '</div>' : '') +
+      longDesc;
+    return intro;
+  }
+
+  // ---------- Storyline prologue ----------
+  function renderStorylineBanner(sl, slIdx, storylines, view) {
+    const banner = document.createElement('div');
+    banner.className = 'storyline-banner';
+    const dots = storylines.map((s, i) => {
+      const cls = i === slIdx ? 'active' : (i < slIdx ? 'done' : '');
+      return '<span class="pos-dot ' + cls + '" title="' + esc(s.id + ': ' + s.title) + '"></span>';
+    }).join('');
+    const position = '<div class="b-position">Storyline ' + (slIdx + 1) + ' of ' + storylines.length + '   ' + dots + '</div>';
+    const confBadge = view.confidence ? '<span class="b-confidence" title="' + esc(view.confidence_reasoning) + '">confidence: ' + esc(view.confidence) + '</span>' : '';
+    const title = '<div class="b-title">' + esc(sl.title) + confBadge + '</div>';
+    const summary = view.summary ? '<div class="b-summary">' + esc(view.summary) + '</div>' : '';
+
+    // Purpose (stated / evident / discrepancy)
+    const p = view.purpose;
+    let purposeHtml = '';
+    if (p && (p.stated || p.evident || p.discrepancy)) {
+      const rows = [];
+      if (p.stated)  rows.push('<div class="p-row"><span class="p-label">Stated</span> ' + esc(p.stated) + '</div>');
+      if (p.evident) rows.push('<div class="p-row"><span class="p-label">Evident</span> ' + esc(p.evident) + '</div>');
+      if (p.discrepancy) rows.push('<div class="p-row discrepancy"><span class="p-label">⚠ Discrepancy</span> ' + esc(p.discrepancy) + '</div>');
+      purposeHtml = '<div class="b-purpose">' + rows.join('') + '</div>';
+    }
+
+    // Architectural context
+    const ac = view.arch;
+    const contextRows = [];
+    if (ac.system_role)       contextRows.push('<dt>Role</dt><dd>' + esc(ac.system_role) + '</dd>');
+    if (Array.isArray(ac.involved_modules) && ac.involved_modules.length) {
+      const chips = ac.involved_modules.map(m =>
+        '<span class="module-chip">' + esc(m.module || m.file || '') +
+        (m.role_in_storyline ? '<span class="role">— ' + esc(m.role_in_storyline) + '</span>' : '') +
+        '</span>'
+      ).join('');
+      contextRows.push('<dt>Modules</dt><dd>' + chips + '</dd>');
+    }
+    if (ac.data_flow)         contextRows.push('<dt>Data flow</dt><dd>' + esc(ac.data_flow) + '</dd>');
+    const context = contextRows.length ? '<dl class="b-context">' + contextRows.join('') + '</dl>' : '';
+
+    const change = view.change_overview ? '<div class="b-change-overview">' + esc(view.change_overview) + '</div>' : '';
+
+    // Bridges
+    const prev = slIdx > 0 ? storylines[slIdx - 1] : null;
+    const next = slIdx < storylines.length - 1 ? storylines[slIdx + 1] : null;
+    const countsBadge = (s) => {
+      const c = countSeverities(s);
+      const parts = [];
+      if (c.high) parts.push('<span class="h">' + c.high + ' HIGH</span>');
+      if (c.medium) parts.push('<span class="m">' + c.medium + ' MEDIUM</span>');
+      if (c.low) parts.push(c.low + ' LOW');
+      if (!parts.length) parts.push('clean');
+      return '<div class="bridge-counts">' + parts.join(' · ') + '</div>';
+    };
+    const prevHtml = prev
+      ? '<div class="bridge-cell" data-go-sl="' + esc(prev.id) + '">' +
+          '<div class="bridge-label">◀ Previously · ' + esc(prev.id) + '</div>' +
+          '<div class="bridge-title">' + esc(prev.title) + '</div>' +
+          (prev.summary ? '<div class="bridge-summary">' + esc(prev.summary) + '</div>' : '') +
+          countsBadge(prev) +
+        '</div>'
+      : '<div class="bridge-cell empty"><div class="bridge-label">— start of review —</div></div>';
+    const nextHtml = next
+      ? '<div class="bridge-cell next" data-go-sl="' + esc(next.id) + '">' +
+          '<div class="bridge-label">Coming up · ' + esc(next.id) + ' ▶</div>' +
+          '<div class="bridge-title">' + esc(next.title) + '</div>' +
+          (next.summary ? '<div class="bridge-summary">' + esc(next.summary) + '</div>' : '') +
+          countsBadge(next) +
+        '</div>'
+      : '<div class="bridge-cell next empty"><div class="bridge-label">— end of review —</div></div>';
+    const bridge = '<div class="storyline-bridge">' + prevHtml + nextHtml + '</div>';
+
+    banner.innerHTML = position + title + summary + purposeHtml + context + change + bridge;
+    banner.querySelectorAll('[data-go-sl]').forEach(el => {
+      el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+    });
+    return banner;
+  }
+
+  // ---------- File section: header + code body with diff coloring ----------
+  function renderFileSection(file, changes, view) {
+    const section = document.createElement('div');
+    section.className = 'file-section';
+    section.id = 'file-' + file.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Aggregate line counts
+    let adds = 0, rems = 0;
+    changes.forEach(({change}) => (change.lines || []).forEach(l => {
+      if (l.change === 'added') adds++;
+      else if (l.change === 'removed') rems++;
+    }));
+
+    const header = document.createElement('div');
+    header.className = 'file-header';
+    header.innerHTML =
+      '<span class="file-path">' + esc(file) + '</span>' +
+      '<span class="file-counts">' +
+        (adds ? '<span class="add">+' + adds + '</span>' : '') +
+        (adds && rems ? ' ' : '') +
+        (rems ? '<span class="rem">−' + rems + '</span>' : '') +
+      '</span>';
+    section.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'file-body';
+    const codeFlow = document.createElement('div');
+    codeFlow.className = 'code-flow';
+    const annotations = document.createElement('div');
+    annotations.className = 'annotations';
+
+    // Build the merged line stream. A "position" is either:
+    //   an unchanged line (single row, both old+new line-num set)
+    //   an added line (row with new line-num, no old)
+    //   a removed line (row with old line-num, no new)
+    // Sort:
+    //   primary key = the "new file" line number for added / unchanged lines,
+    //                 the "removed" line is placed AT the position it was in old
+    //                 file — visually, we tie the removed line to the closest
+    //                 unchanged/added line by its recorded line_num.
+    //
+    // Simpler heuristic that works for typical unified diffs: sort by
+    // line_num, and for ties put removed BEFORE added.
+    // Group by step so we can wrap each step's line-range in a region.
+
+    const stepRanges = changes.map(({step, change}) => {
+      const lines = (change.lines || []).slice();
+      // We need to compute (start, end) covering all lines this step contributes
+      // to this file, expressed in the visual row-order sense.
+      let lo = Infinity, hi = -Infinity;
+      lines.forEach(l => {
+        if (typeof l.line_num === 'number') {
+          if (l.line_num < lo) lo = l.line_num;
+          if (l.line_num > hi) hi = l.line_num;
+        }
+      });
+      const ctxLo = typeof change.context_start_line === 'number' ? Math.min(change.context_start_line, lo) : lo;
+      const ctxHi = typeof change.context_end_line === 'number' ? Math.max(change.context_end_line, hi) : hi;
+      return { step, change, lo: ctxLo, hi: ctxHi, lines };
+    }).sort((a, b) => a.lo - b.lo || a.hi - b.hi);
+
+    // Render step by step: each step becomes its own region containing its lines.
+    // Between steps, if there's a gap, insert an elision.
+    let prevHi = null;
+    stepRanges.forEach(({ step, change, lo, hi, lines }, idx) => {
+      if (prevHi != null && lo > prevHi + 1) {
+        const el = document.createElement('div');
+        el.className = 'elision';
+        el.innerHTML = '<span class="ln"></span><span class="ln"></span><span class="marker">…</span><span class="src">' +
+          esc('lines ' + (prevHi + 1) + (lo - 1 > prevHi + 1 ? '–' + (lo - 1) : '') + ' elided') + '</span>';
+        codeFlow.appendChild(el);
+      }
+      const sev = step._severity;
+      const region = document.createElement('div');
+      region.className = 'step-region ' + sevClass(sev);
+      region.id = 'reg-' + file.replace(/[^a-zA-Z0-9]/g, '_') + '-' + step.id;
+      region.dataset.stepId = step.id;
+
+      // Sort lines: primary by line_num, ties → removed before added, unchanged before both.
+      const rank = { unchanged: 0, removed: 1, added: 2 };
+      const sorted = lines.slice().sort((a, b) => {
+        const la = a.line_num ?? 0, lb = b.line_num ?? 0;
+        if (la !== lb) return la - lb;
+        return (rank[a.change] ?? 9) - (rank[b.change] ?? 9);
+      });
+
+      sorted.forEach(l => {
+        const cls = l.change === 'added' ? 'add' : l.change === 'removed' ? 'rem' : '';
+        const oldLn = (l.change === 'unchanged' || l.change === 'removed') ? l.line_num : '';
+        const newLn = (l.change === 'unchanged' || l.change === 'added') ? l.line_num : '';
+        const marker = l.change === 'added' ? '+' : l.change === 'removed' ? '−' : ' ';
+        const lineEl = document.createElement('div');
+        lineEl.className = 'code-line ' + cls;
+        lineEl.innerHTML =
+          '<span class="ln">' + esc(String(oldLn || '')) + '</span>' +
+          '<span class="ln">' + esc(String(newLn || '')) + '</span>' +
+          '<span class="marker">' + marker + '</span>' +
+          '<span class="src">' + highlight(l.content || '') + '</span>';
+        region.appendChild(lineEl);
+      });
+      region.onclick = () => gotoStep(step.id);
+      codeFlow.appendChild(region);
+
+      // Annotation
+      const annot = document.createElement('div');
+      annot.className = 'annot ' + sevClass(sev);
+      annot.dataset.stepId = step.id;
+      const sevLabel = sev === 'clean' ? '✓ CLEAN' :
+                       sev === 'high' ? '⚠ HIGH' :
+                       sev === 'medium' ? '⚠ MED' :
+                       sev === 'low' ? 'LOW' : 'INFO';
+      const concerns = step.concerns || [];
+      const concernPreview = concerns.length
+        ? '<div class="annot-concern-preview"><span class="cp-count">' + concerns.length + '</span>' +
+          esc(concerns[0].concern || '') + '</div>'
+        : '';
+      annot.innerHTML =
+        '<div class="annot-head">' +
+          '<div class="annot-step-badge">#' + step._step + '</div>' +
+          '<div class="annot-sev-badge ' + sevClass(sev) + '">' + sevLabel + '</div>' +
+          '<div class="annot-track">' + esc(step.track || '') + '</div>' +
+        '</div>' +
+        '<div class="annot-name">' + esc(step.title || step.id) + '</div>' +
+        (step.summary ? '<div class="annot-says">' + esc(step.summary) + '</div>' : '') +
+        concernPreview;
+      annot.onclick = () => gotoStep(step.id);
+      annotations.appendChild(annot);
+
+      prevHi = hi;
+    });
+
+    body.appendChild(codeFlow);
+    body.appendChild(annotations);
+    section.appendChild(body);
+    return section;
+  }
+
+  // ---------- Layout: align each annot to its step-region vertically ----------
+  function layoutAnnotations() {
+    document.querySelectorAll('.file-section').forEach(section => {
+      const body = section.querySelector('.file-body');
+      if (!body) return;
+      const annotations = section.querySelector('.annotations');
+      if (!annotations) return;
+      const bodyRect = body.getBoundingClientRect();
+      const regions = section.querySelectorAll('.step-region');
+      const annots = section.querySelectorAll('.annot');
+      const positions = [];
+      regions.forEach((reg, idx) => {
+        const annot = annots[idx];
+        if (!annot) return;
+        const rr = reg.getBoundingClientRect();
+        const desiredTop = rr.top - bodyRect.top + body.scrollTop;
+        positions.push({ idx, desired: desiredTop, height: 0, annot });
+      });
+      positions.forEach(p => { p.annot.style.top = p.desired + 'px'; });
+      positions.forEach(p => { p.height = p.annot.offsetHeight; });
+      const MIN_GAP = 6;
+      let lastBottom = -Infinity;
+      positions.forEach(p => {
+        const top = Math.max(p.desired, lastBottom + MIN_GAP);
+        p.annot.style.top = top + 'px';
+        lastBottom = top + p.height;
+      });
+      if (positions.length) {
+        const lowest = positions[positions.length - 1];
+        const need = parseFloat(lowest.annot.style.top) + lowest.height;
+        annotations.style.minHeight = need + 'px';
+      }
+    });
+  }
+
+  // ---------- Step navigation ----------
+  function nextStep(view, stepId) {
+    const i = view.steps.findIndex(s => s.id === stepId);
+    return view.steps[i + 1] ? { id: view.steps[i + 1].id } : null;
+  }
+  function prevStep(view, stepId) {
+    const i = view.steps.findIndex(s => s.id === stepId);
+    return view.steps[i - 1] ? { id: view.steps[i - 1].id } : null;
+  }
+  function gotoStep(stepId) {
+    if (!stepId) return;
+    STATE.activeStepId = stepId;
+    renderActiveState();
+    renderSidePanel();
+    // Scroll first matching region into view
+    const reg = document.querySelector('.step-region[data-step-id="' + stepId + '"]');
+    if (reg) reg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function renderActiveState() {
+    document.querySelectorAll('.step-region.active, .annot.active').forEach(el => el.classList.remove('active'));
+    if (!STATE.activeStepId) return;
+    document.querySelectorAll('.step-region').forEach(r => {
+      if (r.dataset.stepId === STATE.activeStepId) r.classList.add('active');
+    });
+    document.querySelectorAll('.annot').forEach(a => {
+      if (a.dataset.stepId === STATE.activeStepId) a.classList.add('active');
+    });
+  }
+
+  // ---------- Side panel ----------
+  function renderSidePanel() {
+    const sl = (REVIEW_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) return;
+    const view = viewForStoryline(sl);
+    const s = view.steps.find(x => x.id === STATE.activeStepId);
+    const f = id => document.getElementById(id);
+
+    const total = view.steps.length;
+    const stepNum = s ? s._step : 0;
+    const prev = s ? prevStep(view, s.id) : null;
+    const next = s ? nextStep(view, s.id) : null;
+    f('step-counter').innerHTML = s ? 'Step <strong>' + stepNum + '</strong> / ' + total : '—';
+    f('btn-prev').disabled = !prev;
+    f('btn-next').disabled = !next;
+    f('btn-prev').onclick = () => prev && gotoStep(prev.id);
+    f('btn-next').onclick = () => next && gotoStep(next.id);
+
+    if (!s) {
+      f('focus-track').textContent = '';
+      f('focus-name').textContent = '—';
+      f('focus-summary').textContent = 'Click a highlighted change region in the code to focus a step.';
+      f('focus-extras').innerHTML = '';
+      f('focus-next').innerHTML = '';
+      return;
+    }
+    f('focus-track').textContent = (s.track || '') + '  ·  ' + view.title;
+    f('focus-name').textContent = s.title || s.id;
+    f('focus-summary').textContent = s.summary || '';
+
+    const extras = [];
+    // Behavior delta (before/after)
+    if (s.behavior_delta && (s.behavior_delta.before || s.behavior_delta.after)) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Behavior delta</div>' +
+        '<div class="ba-grid">' +
+          '<div class="ba-cell before"><div class="ba-label">Before</div><div class="ba-text">' + esc(s.behavior_delta.before || '') + '</div></div>' +
+          '<div class="ba-cell after"><div class="ba-label">After</div><div class="ba-text">' + esc(s.behavior_delta.after || '') + '</div></div>' +
+        '</div></div>');
+    }
+    // Concerns
+    if ((s.concerns || []).length) {
+      const items = s.concerns.map(c => {
+        const sev = c.severity || 'informational';
+        const sevPill = (sev.toUpperCase());
+        return '<div class="concern ' + sevClass(sev) + '">' +
+          '<div class="concern-head">' +
+            '<span class="concern-sev-pill">' + esc(sevPill) + '</span>' +
+            '<span class="concern-title">' + esc(c.concern || '') + '</span>' +
+          '</div>' +
+          (c.evidence ? '<div class="concern-evidence"><span class="ev-label">Evidence</span>' + esc(c.evidence) + '</div>' : '') +
+          '</div>';
+      }).join('');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Concerns (' + s.concerns.length + ')</div><div class="body">' + items + '</div></div>');
+    }
+    // Suggestions
+    if ((s.suggestions || []).length) {
+      const items = s.suggestions.map(sg =>
+        '<div class="suggestion">💡 ' + esc(typeof sg === 'string' ? sg : sg.suggestion || JSON.stringify(sg)) + '</div>'
+      ).join('');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Suggestions</div><div class="body">' + items + '</div></div>');
+    }
+    // Evaluation
+    if (s.evaluation) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Evaluation</div><div class="body">' + esc(s.evaluation) + '</div></div>');
+    }
+    // Analysis
+    if (s.analysis) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Analysis</div><div class="body">' + esc(s.analysis) + '</div></div>');
+    }
+    // Alternative approaches
+    if ((s.alternative_approaches || []).length) {
+      const items = s.alternative_approaches.map(a =>
+        '<div class="alt-approach">' +
+          '<span class="alt-name">' + esc(a.approach || '') + '</span>' +
+          (a.evidence_kind ? '<span class="alt-kind">· ' + esc(a.evidence_kind) + '</span>' : '') +
+          (a.tradeoff_vs_chosen ? '<div class="alt-tradeoff">' + esc(a.tradeoff_vs_chosen) + '</div>' : '') +
+        '</div>'
+      ).join('');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Alternatives</div><div class="body">' + items + '</div></div>');
+    }
+    // Test coverage
+    if (s.test_coverage) {
+      const tc = s.test_coverage;
+      const bits = [];
+      if ((tc.covered_by || []).length) {
+        const items = tc.covered_by.map(t =>
+          '<div class="test-item"><span class="t-file">' + esc(t.file || '') + '</span><span class="t-name">' + esc(t.test_name || '') + '</span>' +
+          (t.what_it_tests ? '<div class="t-what">' + esc(t.what_it_tests) + '</div>' : '') + '</div>'
+        ).join('');
+        bits.push('<div style="margin-bottom:4px"><em style="color:var(--fg-faint);font-size:10.5px">Covered by existing:</em></div>' + items);
+      }
+      if ((tc.added_in_this_pr || []).length) {
+        const items = tc.added_in_this_pr.map(t =>
+          '<div class="test-item"><span class="t-file">' + esc(t.file || '') + '</span><span class="t-name">' + esc(t.test_name || '') + '</span>' +
+          (t.what_it_tests ? '<div class="t-what">' + esc(t.what_it_tests) + '</div>' : '') + '</div>'
+        ).join('');
+        bits.push('<div style="margin: 4px 0 4px"><em style="color:var(--fg-faint);font-size:10.5px">Added in this PR:</em></div>' + items);
+      }
+      if (bits.length) extras.push('<div class="focus-section"><div class="focus-section-label">Test coverage</div><div class="body test-coverage-grid">' + bits.join('') + '</div></div>');
+    }
+    // Prior role
+    if (s.prior_role) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Prior role</div><div class="body">' + esc(s.prior_role) + '</div></div>');
+    }
+    f('focus-extras').innerHTML = extras.join('');
+
+    // Next hint
+    if (next) {
+      const nb = view.steps.find(x => x.id === next.id);
+      f('focus-next').innerHTML = nb
+        ? '<div class="next-hint"><span class="nh-label">Next step</span>' +
+            '<span class="nh-link" data-go="' + esc(nb.id) + '">#' + nb._step + ' ' + esc(nb.title || nb.id) + '</span></div>'
+        : '';
+      f('focus-next').querySelectorAll('[data-go]').forEach(el => {
+        el.onclick = () => gotoStep(el.getAttribute('data-go'));
+      });
+    } else {
+      f('focus-next').innerHTML = '<div class="next-hint" style="opacity:0.7"><span class="nh-label">End of storyline</span>Last step here. Use tabs to switch storylines.</div>';
+    }
+  }
+
+  // ---------- Main render ----------
+  function renderMain() {
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    const storylines = REVIEW_DATA.storylines || [];
+    const sl = storylines.find(s => s.id === STATE.activeStorylineId);
+    if (!sl) { main.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
+    const slIdx = storylines.indexOf(sl);
+    const view = viewForStoryline(sl);
+
+    if (slIdx === 0) main.appendChild(renderPRIntro());
+    main.appendChild(renderStorylineBanner(sl, slIdx, storylines, view));
+
+    if (!view.perFile.size) {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.innerHTML = '<strong>' + esc(sl.title) + '</strong> — no code changes recorded for this storyline.';
+      main.appendChild(p);
+      return;
+    }
+
+    view.perFile.forEach((changes, file) => {
+      main.appendChild(renderFileSection(file, changes, view));
+    });
+
+    requestAnimationFrame(() => {
+      layoutAnnotations();
+      renderActiveState();
+    });
+  }
+
+  function setStoryline(id) {
+    STATE.activeStorylineId = id;
+    const sl = (REVIEW_DATA.storylines || []).find(s => s.id === id);
+    const v = sl ? viewForStoryline(sl) : null;
+    STATE.activeStepId = v ? v.defaultActive : null;
+    renderTabs();
+    renderMain();
+    renderSidePanel();
+    const main = document.getElementById('main');
+    if (main) main.scrollTop = 0;
+  }
+
+  // ---------- Init ----------
+  function renderTopbar() {
+    const md = REVIEW_DATA.metadata || {};
+    const t = document.getElementById('hdr-title');
+    if (t) t.textContent = '🔍 ' + (md.title || 'Code review');
+    const c = document.getElementById('hdr-crumb');
+    if (c) {
+      const parts = [];
+      if (md.repo) parts.push('<code>' + esc(md.repo) + '</code>');
+      const sm = REVIEW_DATA.summary || {};
+      if (sm.one_line) parts.push(esc(sm.one_line));
+      c.innerHTML = parts.join(' · ');
+    }
+  }
+
+  function init() {
+    if (!REVIEW_DATA || !REVIEW_DATA.storylines) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No review data injected.</div>';
+      return;
+    }
+    renderTopbar();
+    const first = (REVIEW_DATA.storylines || [])[0];
+    if (!first) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No storylines.</div>'; return; }
+    setStoryline(first.id);
+    window.addEventListener('resize', () => layoutAnnotations());
+    window.addEventListener('keydown', (ev) => {
+      if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      const sl = (REVIEW_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (!sl) return;
+      const view = viewForStoryline(sl);
+      if (!STATE.activeStepId) return;
+      const step = ev.key === 'ArrowRight' ? nextStep(view, STATE.activeStepId) : prevStep(view, STATE.activeStepId);
+      if (step) { ev.preventDefault(); gotoStep(step.id); }
+    });
+  }
+  init();
+</script>
+</body>
+</html>
