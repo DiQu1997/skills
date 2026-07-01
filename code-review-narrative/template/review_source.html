@@ -110,6 +110,215 @@
 
   .main { overflow-y: auto; padding: 14px 22px 60px; }
 
+  /* -------- Overview tab (table of contents for the review) -------- */
+  .ov-hero {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+  }
+  .ov-hero .ov-label {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .ov-hero h1 { font-family: ui-monospace, monospace; font-size: 20px; font-weight: 700; margin: 0 0 8px; color: var(--fg); }
+  .ov-hero .ov-tagline { font-size: 13px; color: var(--fg-soft); line-height: 1.55; margin-bottom: 10px; }
+  .ov-hero .ov-stats { display: flex; gap: 8px; flex-wrap: wrap; font-family: ui-monospace, monospace; font-size: 10.5px; }
+  .ov-hero .ov-stat {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 3px; padding: 2px 8px; color: var(--fg-soft);
+  }
+  .ov-hero .ov-stat strong { color: var(--fg); font-weight: 700; margin-right: 3px; }
+  .ov-hero .ov-stat.high   { border-color: var(--sev-high-fg);   color: var(--sev-high-fg);   background: var(--sev-high-bg); }
+  .ov-hero .ov-stat.high strong { color: var(--sev-high-fg); }
+  .ov-hero .ov-stat.medium { border-color: var(--sev-medium-fg); color: var(--sev-medium-fg); background: var(--sev-medium-bg); }
+  .ov-hero .ov-stat.medium strong { color: var(--sev-medium-fg); }
+  .ov-hero .ov-stat.low    { border-color: var(--sev-low-fg);    color: var(--sev-low-fg);    background: var(--sev-low-bg); }
+  .ov-hero .ov-stat.low strong { color: var(--sev-low-fg); }
+  .ov-hero .ov-stat.clean  { border-color: var(--sev-clean-fg);  color: var(--sev-clean-fg);  background: var(--sev-clean-bg); }
+  .ov-hero .ov-stat.clean strong { color: var(--sev-clean-fg); }
+
+  .ov-section { margin-bottom: 22px; }
+  .ov-section-head {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .ov-section-head .ov-section-sub {
+    text-transform: none; letter-spacing: 0; color: var(--fg-faint); font-size: 11px;
+  }
+
+  /* Reading order strip */
+  .ov-sequence {
+    display: flex; align-items: center; gap: 6px;
+    padding: 12px 14px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto;
+  }
+  .ov-seq-node {
+    flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 6px 10px;
+    background: var(--bg-soft); border: 1.5px solid var(--border);
+    border-radius: 6px; cursor: pointer;
+    transition: transform 100ms, box-shadow 100ms;
+    min-width: 100px; max-width: 170px;
+  }
+  .ov-seq-node:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .ov-seq-node .seq-id {
+    font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--fg-faint); font-weight: 700;
+  }
+  .ov-seq-node .seq-title {
+    font-size: 11px; color: var(--fg); font-weight: 500;
+    line-height: 1.35; text-align: center; margin-top: 3px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .ov-seq-node .seq-sev-strip {
+    display: flex; width: 100%; height: 4px; border-radius: 2px; margin-top: 5px; overflow: hidden;
+  }
+  .ov-seq-node .seq-sev-strip span { display: block; }
+  .ov-seq-arrow { flex-shrink: 0; color: var(--fg-faint); font-size: 18px; user-select: none; }
+
+  /* Storyline card grid */
+  .ov-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+  .ov-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px; padding: 12px 14px;
+    cursor: pointer;
+    transition: transform 100ms, box-shadow 100ms;
+    display: flex; flex-direction: column;
+  }
+  .ov-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+  /* Severity-driven left-border on the card — matches the whole-review risk view */
+  .ov-card.card-sev-high    { border-left-color: var(--sev-high-fg); }
+  .ov-card.card-sev-medium  { border-left-color: var(--sev-medium-fg); }
+  .ov-card.card-sev-low     { border-left-color: var(--sev-low-fg); }
+  .ov-card.card-sev-info    { border-left-color: var(--sev-info-fg); }
+  .ov-card.card-sev-clean   { border-left-color: var(--sev-clean-fg); }
+
+  .ov-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .ov-card-id {
+    font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--fg-faint);
+    font-weight: 700; background: var(--bg-soft); padding: 1px 5px; border-radius: 3px;
+  }
+  .ov-card-kind {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    padding: 1px 6px; border-radius: 3px; color: #fff; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    background: var(--fg-soft);
+  }
+  .ov-card-confidence {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    color: var(--fg-faint);
+    letter-spacing: 0.04em; text-transform: uppercase;
+    margin-left: auto;
+  }
+  .ov-card-title {
+    font-family: ui-monospace, monospace; font-size: 14px; font-weight: 700;
+    color: var(--fg); line-height: 1.35; margin-bottom: 6px;
+  }
+  .ov-card-summary {
+    font-size: 11.5px; color: var(--fg-soft); line-height: 1.5;
+    margin-bottom: 8px;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .ov-card-purpose-discrepancy {
+    background: var(--sev-high-bg); color: var(--sev-high-fg);
+    border-left: 3px solid var(--sev-high-fg);
+    padding: 5px 8px; border-radius: 0 3px 3px 0;
+    font-size: 11px; line-height: 1.45;
+    margin-bottom: 8px;
+  }
+  .ov-card-purpose-discrepancy::before { content: '⚠ '; font-weight: 700; }
+  .ov-card-meta {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border);
+    font-size: 10.5px;
+  }
+  .ov-card-sev-pill {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; font-weight: 700;
+    padding: 2px 6px; border-radius: 3px;
+    color: #fff; letter-spacing: 0.04em;
+  }
+  .ov-card-sev-pill.card-sev-high    { background: var(--sev-high-fg); }
+  .ov-card-sev-pill.card-sev-medium  { background: var(--sev-medium-fg); }
+  .ov-card-sev-pill.card-sev-low     { background: var(--sev-low-fg); }
+  .ov-card-sev-pill.card-sev-info    { background: var(--sev-info-fg); }
+  .ov-card-sev-pill.card-sev-clean   { background: var(--sev-clean-fg); }
+  .ov-card-files {
+    display: flex; flex-wrap: wrap; gap: 3px;
+    margin-top: 6px;
+  }
+  .ov-card-file {
+    font-family: ui-monospace, monospace; font-size: 10px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 3px; padding: 1px 6px; color: var(--fg-soft);
+  }
+
+  /* Reading paths */
+  .ov-paths {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 10px;
+  }
+  .ov-path {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .ov-path .path-name {
+    font-family: ui-monospace, monospace; font-size: 11.5px; font-weight: 700;
+    color: var(--fg); margin-bottom: 3px;
+  }
+  .ov-path .path-desc { font-size: 11px; color: var(--fg-soft); line-height: 1.45; margin-bottom: 8px; }
+  .ov-path .path-chain {
+    display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    font-family: ui-monospace, monospace; font-size: 11px;
+  }
+  .ov-path .path-node {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 7px;
+    color: var(--fg); cursor: pointer; font-weight: 500;
+  }
+  .ov-path .path-node:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .ov-path .path-arrow { color: var(--fg-faint); }
+
+  /* File-overlap block */
+  .ov-file-overlap {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px;
+    font-size: 11.5px;
+  }
+  .ov-file-overlap .fo-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 3px 0; border-top: 1px dashed var(--border);
+  }
+  .ov-file-overlap .fo-row:first-child { border-top: 0; }
+  .ov-file-overlap .fo-file {
+    font-family: ui-monospace, monospace; font-size: 11px; color: var(--fg); flex: 1;
+  }
+  .ov-file-overlap .fo-count {
+    font-family: ui-monospace, monospace; color: var(--fg-soft); font-size: 10.5px;
+  }
+  .ov-file-overlap .fo-slcell {
+    display: inline-block; font-family: ui-monospace, monospace; font-size: 10px;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 0 5px; border-radius: 3px; margin-left: 3px;
+    cursor: pointer; font-weight: 700;
+  }
+  .ov-file-overlap .fo-slcell:hover { background: var(--accent); color: #fff; }
+
   /* Top-level PR intro */
   .pr-intro {
     background: var(--bg-card);
@@ -814,9 +1023,17 @@
   }
 
   // ---------- Tabs ----------
+  const OVERVIEW_ID = '__overview__';
+
   function renderTabs() {
     const root = document.getElementById('tabs');
     root.innerHTML = '';
+    // Overview tab first — the review's own table of contents.
+    const ovTab = document.createElement('div');
+    ovTab.className = 'tab' + (STATE.activeStorylineId === OVERVIEW_ID ? ' active' : '');
+    ovTab.innerHTML = '<span class="tab-num">🔍</span>Overview';
+    ovTab.onclick = () => setStoryline(OVERVIEW_ID);
+    root.appendChild(ovTab);
     (REVIEW_DATA.storylines || []).forEach(sl => {
       const t = document.createElement('div');
       t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
@@ -1145,11 +1362,25 @@
 
   // ---------- Side panel ----------
   function renderSidePanel() {
+    const f = id => document.getElementById(id);
+    // Overview tab has no active step — reset the side panel.
+    if (STATE.activeStorylineId === OVERVIEW_ID) {
+      f('step-counter').innerHTML = '—';
+      f('btn-prev').disabled = true;
+      f('btn-next').disabled = true;
+      f('btn-prev').onclick = null;
+      f('btn-next').onclick = null;
+      f('focus-track').textContent = '';
+      f('focus-name').textContent = 'Overview';
+      f('focus-summary').textContent = 'Pick a storyline card, a reading path, or a tab.';
+      f('focus-extras').innerHTML = '';
+      f('focus-next').innerHTML = '';
+      return;
+    }
     const sl = (REVIEW_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
     if (!sl) return;
     const view = viewForStoryline(sl);
     const s = view.steps.find(x => x.id === STATE.activeStepId);
-    const f = id => document.getElementById(id);
 
     const total = view.steps.length;
     const stepNum = s ? s._step : 0;
@@ -1264,10 +1495,217 @@
     }
   }
 
+  // ---------- Overview (review's table of contents) ----------
+  function renderOverview() {
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    const storylines = REVIEW_DATA.storylines || [];
+    const md = REVIEW_DATA.metadata || {};
+    const sm = REVIEW_DATA.summary || {};
+
+    // Compute totals
+    const totals = { high: 0, medium: 0, low: 0, informational: 0, clean: 0 };
+    storylines.forEach(sl => {
+      const c = countSeverities(sl);
+      Object.keys(c).forEach(k => totals[k] += (c[k] || 0));
+    });
+    const allFiles = new Set();
+    storylines.forEach(sl => (sl.files_touched || []).forEach(f => allFiles.add(f)));
+
+    // Hero card
+    const hero = document.createElement('div');
+    hero.className = 'ov-hero';
+    const stats = [];
+    stats.push('<span class="ov-stat"><strong>' + storylines.length + '</strong> storylines</span>');
+    stats.push('<span class="ov-stat"><strong>' + allFiles.size + '</strong> files</span>');
+    if (totals.high)   stats.push('<span class="ov-stat high"><strong>' + totals.high + '</strong> HIGH</span>');
+    if (totals.medium) stats.push('<span class="ov-stat medium"><strong>' + totals.medium + '</strong> MEDIUM</span>');
+    if (totals.low)    stats.push('<span class="ov-stat low"><strong>' + totals.low + '</strong> LOW</span>');
+    if (totals.informational) stats.push('<span class="ov-stat"><strong>' + totals.informational + '</strong> INFO</span>');
+    if (totals.clean)  stats.push('<span class="ov-stat clean"><strong>' + totals.clean + '</strong> CLEAN</span>');
+    hero.innerHTML =
+      '<div class="ov-label">🔍 Review overview</div>' +
+      '<h1>' + esc(md.title || 'Code review') + '</h1>' +
+      (sm.one_line ? '<div class="ov-tagline">' + esc(sm.one_line) + '</div>' : '') +
+      '<div class="ov-stats">' + stats.join('') + '</div>';
+    main.appendChild(hero);
+
+    // Sequence strip: horizontal chain with per-storyline severity strip
+    const seq = document.createElement('div');
+    seq.className = 'ov-section';
+    seq.innerHTML = '<div class="ov-section-head">Reading order <span class="ov-section-sub">natural narrative</span></div>';
+    const strip = document.createElement('div');
+    strip.className = 'ov-sequence';
+    storylines.forEach((s, i) => {
+      if (i > 0) {
+        const a = document.createElement('span');
+        a.className = 'ov-seq-arrow'; a.textContent = '→';
+        strip.appendChild(a);
+      }
+      const node = document.createElement('div');
+      node.className = 'ov-seq-node';
+      const c = countSeverities(s);
+      const strips = [];
+      if (c.high)   strips.push('<span style="flex:' + c.high   + '; background: var(--sev-high-fg)"></span>');
+      if (c.medium) strips.push('<span style="flex:' + c.medium + '; background: var(--sev-medium-fg)"></span>');
+      if (c.low)    strips.push('<span style="flex:' + c.low    + '; background: var(--sev-low-fg)"></span>');
+      if (c.informational) strips.push('<span style="flex:' + c.informational + '; background: var(--sev-info-fg)"></span>');
+      if (c.clean)  strips.push('<span style="flex:' + c.clean  + '; background: var(--sev-clean-fg)"></span>');
+      node.innerHTML =
+        '<div class="seq-id">' + esc(s.id) + '</div>' +
+        '<div class="seq-title">' + esc(s.title) + '</div>' +
+        '<div class="seq-sev-strip">' + strips.join('') + '</div>';
+      node.onclick = () => setStoryline(s.id);
+      strip.appendChild(node);
+    });
+    seq.appendChild(strip);
+    main.appendChild(seq);
+
+    // Storyline card grid
+    const gridSection = document.createElement('div');
+    gridSection.className = 'ov-section';
+    gridSection.innerHTML = '<div class="ov-section-head">Storylines <span class="ov-section-sub">click a card to open</span></div>';
+    const grid = document.createElement('div');
+    grid.className = 'ov-grid';
+    // File overlap map
+    const fileToSL = new Map();
+    storylines.forEach(s => (s.files_touched || []).forEach(f => {
+      if (!fileToSL.has(f)) fileToSL.set(f, []);
+      fileToSL.get(f).push(s.id);
+    }));
+    storylines.forEach(s => grid.appendChild(renderOverviewCard(s, fileToSL)));
+    gridSection.appendChild(grid);
+    main.appendChild(gridSection);
+
+    // Reading paths — review-specific
+    const pathsSection = document.createElement('div');
+    pathsSection.className = 'ov-section';
+    pathsSection.innerHTML = '<div class="ov-section-head">Reading paths <span class="ov-section-sub">curated by review goal</span></div>';
+    const paths = document.createElement('div');
+    paths.className = 'ov-paths';
+    paths.appendChild(renderReadingPath(
+      '📖 Author\'s order',
+      'Read the review top-to-bottom as designed.',
+      storylines.map(s => s.id), storylines
+    ));
+    const withHigh = storylines.filter(s => countSeverities(s).high > 0);
+    const withMed  = storylines.filter(s => countSeverities(s).medium > 0 && !withHigh.includes(s));
+    const rest     = storylines.filter(s => !withHigh.includes(s) && !withMed.includes(s));
+    const riskOrder = [...withHigh, ...withMed, ...rest];
+    paths.appendChild(renderReadingPath(
+      '🚨 Highest-risk first',
+      'Read storylines with HIGH concerns first, then MEDIUM, then the rest — for a triage pass.',
+      riskOrder.map(s => s.id), storylines
+    ));
+    const purposeStories = storylines.filter(s => s.purpose && s.purpose.discrepancy);
+    if (purposeStories.length) {
+      paths.appendChild(renderReadingPath(
+        '⚠ Purpose discrepancies',
+        'Storylines where the PR description does not match the code. Author intent verification.',
+        purposeStories.map(s => s.id), storylines
+      ));
+    }
+    pathsSection.appendChild(paths);
+    main.appendChild(pathsSection);
+
+    // File-overlap block
+    const shared = Array.from(fileToSL.entries()).filter(([, ids]) => ids.length > 1)
+      .sort((a, b) => b[1].length - a[1].length);
+    if (shared.length) {
+      const foSection = document.createElement('div');
+      foSection.className = 'ov-section';
+      foSection.innerHTML = '<div class="ov-section-head">Shared files <span class="ov-section-sub">touched by multiple storylines</span></div>';
+      const fo = document.createElement('div'); fo.className = 'ov-file-overlap';
+      shared.forEach(([file, ids]) => {
+        const row = document.createElement('div'); row.className = 'fo-row';
+        const chips = ids.map(id => '<span class="fo-slcell" data-go-sl="' + esc(id) + '">' + esc(id) + '</span>').join('');
+        row.innerHTML =
+          '<span class="fo-file">' + esc(file) + '</span>' +
+          '<span class="fo-count">×' + ids.length + '</span>' +
+          '<span>' + chips + '</span>';
+        fo.appendChild(row);
+      });
+      foSection.appendChild(fo);
+      main.appendChild(foSection);
+      foSection.querySelectorAll('[data-go-sl]').forEach(el => {
+        el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+      });
+    }
+  }
+
+  function storylineSeverity(sl) {
+    const c = countSeverities(sl);
+    if (c.high) return 'high';
+    if (c.medium) return 'medium';
+    if (c.low) return 'low';
+    if (c.informational) return 'info';
+    return 'clean';
+  }
+
+  function renderOverviewCard(sl, fileToSL) {
+    const card = document.createElement('div');
+    const cardSev = storylineSeverity(sl);
+    card.className = 'ov-card card-sev-' + cardSev;
+    card.onclick = () => setStoryline(sl.id);
+    const c = countSeverities(sl);
+    const pill = c.high ? { label: c.high + ' HIGH', cls: 'card-sev-high' }
+               : c.medium ? { label: c.medium + ' MEDIUM', cls: 'card-sev-medium' }
+               : c.low ? { label: c.low + ' LOW', cls: 'card-sev-low' }
+               : c.informational ? { label: c.informational + ' INFO', cls: 'card-sev-info' }
+               : { label: 'CLEAN', cls: 'card-sev-clean' };
+    const files = (sl.files_touched || []).slice(0, 3).map(f => '<span class="ov-card-file">' + esc(f) + '</span>').join('');
+    const moreFiles = (sl.files_touched || []).length > 3 ? '<span class="ov-card-file">+' + ((sl.files_touched || []).length - 3) + '</span>' : '';
+    const discrepancy = sl.purpose && sl.purpose.discrepancy
+      ? '<div class="ov-card-purpose-discrepancy">' + esc(sl.purpose.discrepancy) + '</div>'
+      : '';
+    // Full severity breakdown for meta row
+    const metaBits = [];
+    if (c.high)   metaBits.push('<span class="ov-card-sev-pill card-sev-high">' + c.high + ' HIGH</span>');
+    if (c.medium) metaBits.push('<span class="ov-card-sev-pill card-sev-medium">' + c.medium + ' MED</span>');
+    if (c.low)    metaBits.push('<span class="ov-card-sev-pill card-sev-low">' + c.low + ' LOW</span>');
+    if (c.informational) metaBits.push('<span class="ov-card-sev-pill card-sev-info">' + c.informational + ' INFO</span>');
+    if (!metaBits.length) metaBits.push('<span class="ov-card-sev-pill card-sev-clean">✓ CLEAN</span>');
+    card.innerHTML =
+      '<div class="ov-card-head">' +
+        '<span class="ov-card-id">' + esc(sl.id) + '</span>' +
+        '<span class="ov-card-kind">' + esc(sl.kind || 'mixed') + '</span>' +
+        (sl.confidence ? '<span class="ov-card-confidence" title="' + esc(sl.confidence_reasoning || '') + '">conf: ' + esc(sl.confidence) + '</span>' : '') +
+      '</div>' +
+      '<div class="ov-card-title">' + esc(sl.title) + '</div>' +
+      discrepancy +
+      (sl.summary ? '<div class="ov-card-summary">' + esc(sl.summary) + '</div>' : '') +
+      '<div class="ov-card-meta">' + metaBits.join('') + '</div>' +
+      (files ? '<div class="ov-card-files">' + files + moreFiles + '</div>' : '');
+    return card;
+  }
+
+  function renderReadingPath(name, desc, ids, storylines) {
+    const path = document.createElement('div');
+    path.className = 'ov-path';
+    const chainHtml = ids.map((id, i) => {
+      const sl = storylines.find(s => s.id === id);
+      const label = sl ? id + ' ' + (sl.title.length > 24 ? sl.title.slice(0, 24) + '…' : sl.title) : id;
+      return (i > 0 ? '<span class="path-arrow">→</span>' : '') +
+        '<span class="path-node" data-go-sl="' + esc(id) + '" title="' + esc(sl?.title || id) + '">' + esc(label) + '</span>';
+    }).join('');
+    path.innerHTML =
+      '<div class="path-name">' + esc(name) + '</div>' +
+      '<div class="path-desc">' + esc(desc) + '</div>' +
+      '<div class="path-chain">' + chainHtml + '</div>';
+    path.querySelectorAll('[data-go-sl]').forEach(el => {
+      el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+    });
+    return path;
+  }
+
   // ---------- Main render ----------
   function renderMain() {
     const main = document.getElementById('main');
     main.innerHTML = '';
+    if (STATE.activeStorylineId === OVERVIEW_ID) {
+      renderOverview();
+      return;
+    }
     const storylines = REVIEW_DATA.storylines || [];
     const sl = storylines.find(s => s.id === STATE.activeStorylineId);
     if (!sl) { main.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
@@ -1328,9 +1766,12 @@
       return;
     }
     renderTopbar();
-    const first = (REVIEW_DATA.storylines || [])[0];
-    if (!first) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No storylines.</div>'; return; }
-    setStoryline(first.id);
+    if (!(REVIEW_DATA.storylines || []).length) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No storylines.</div>';
+      return;
+    }
+    // Open the overview tab by default — the review's own table of contents.
+    setStoryline(OVERVIEW_ID);
     window.addEventListener('resize', () => layoutAnnotations());
     window.addEventListener('keydown', (ev) => {
       if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
