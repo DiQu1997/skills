@@ -97,6 +97,18 @@ edit, normalize, or summarize. The whole point of `diff_hunks` is that
 it can be diff'd against the agent's storyline coverage to catch silent
 omissions.
 
+**`diff_hunks` is mechanically verified against the real diff at render
+time.** `render.py` requires `--diff <pr.patch>` or `--repo <path>` and
+compares every `(file, change, line_num, content)` tuple in both
+directions — a dropped line, a fabricated line, an off-by-one
+`line_num`, or a single-character content drift each abort the render.
+So don't retype lines from memory; lift them verbatim. The reliable
+pattern is a small builder script that parses `git diff base..head`
+output and emits the `diff_hunks` entries programmatically — the same
+lift-don't-retype pattern the reading skill uses for `code_view` lines.
+Save the exact diff you reviewed (`git diff base..head > pr.patch`) so
+the render step can verify against it.
+
 ### Phase 2: Identify storylines
 
 A storyline is a coherent unit of intent. Test: "If I had to describe
