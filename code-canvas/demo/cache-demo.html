@@ -800,17 +800,24 @@ world.addEventListener('click', e => {
     drawWires();
   }
 });
+/* Pan starts only after real movement (>4px). Capturing on pointerdown would
+   retarget the click event to the viewport and swallow clicks on terms, bars,
+   headers etc. — so a still pointer is a click, a moved pointer is a drag. */
 let drag = null;
 vp.addEventListener('pointerdown', e => {
-  if (e.target.closest('.hdr') || e.target.closest('.bbar') || e.target.closest('.rlabel') || e.target.closest('#bar')) return;
-  drag = { sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y };
-  vp.classList.add('dragging');
-  vp.setPointerCapture(e.pointerId);
+  drag = { sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y, moved: false, id: e.pointerId };
 });
 vp.addEventListener('pointermove', e => {
   if (!drag) return;
-  cam.x = drag.ox + (e.clientX - drag.sx);
-  cam.y = drag.oy + (e.clientY - drag.sy);
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if (!drag.moved) {
+    if (Math.abs(dx) + Math.abs(dy) <= 4) return;
+    drag.moved = true;
+    vp.classList.add('dragging');
+    vp.setPointerCapture(drag.id);
+  }
+  cam.x = drag.ox + dx;
+  cam.y = drag.oy + dy;
   apply(false);
 });
 vp.addEventListener('pointerup', () => { drag = null; vp.classList.remove('dragging'); });
