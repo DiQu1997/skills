@@ -97,9 +97,14 @@ Blueprint / Node-RED 这类 node-and-wire 图：**写起来低效（图作为源
 
 ## 11. 待定问题
 
-- [ ] 布局：**定向为折中方案**——agent 给列 / 层级别的粗位置，渲染器负责精排。
-      生成器阶段落地
-- [ ] 块（行段树）的 schema 表达：嵌套 range + 名字 + 一句话 + 颜色分配规则
+- [x] 布局折中方案（已落地）；块 schema（已落地）
+- [x] diff 模式（v0.4）：card.diff = added 行 + removed 原文；demo/cache-diff.json
+- [x] note 动态跟随（v0.4）：每次重绘跟目标卡，above 位挤压自动降级
+- [x] 评测固化（v0.4）：eval/ 常设考题集 + run.py（考生 spawn + 机器打分），
+      基线两卷 PASS
+- [ ] 问答沉淀：好答案一键写回 canvas JSON
+- [ ] 大仓库多画布索引（画布的画布）
+- [ ] 语义缩放中间层（远景卡片只显示签名）
 - [ ] diff 模式怎么叠加：卡片内 diff 着色 + "改动前后"的卡片对？先做 diff review 还是 code reading？
 - [ ] JSON schema 设计（卡片 / 线 / 区域 / 步骤 / note）
 - [ ] 渲染器：延续单文件 HTML 模板 + 注入 JSON 的架构？

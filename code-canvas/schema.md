@@ -43,6 +43,13 @@
           "children": [ /* 嵌套子块，行段必须落在父块内 */ ]
         }
       ],
+      "diff": {                       // 可选：diff 画布的变更标记
+        "added": [7, 8],              // head 行号（现行行号），渲染绿条 + 底色
+        "removed": [                  // 被删原文：红色删除线展示，
+          { "after": 6,               // 显示在 head 第 6 行之后（0 = 卡首）
+            "code": "    resp = fetch_upstream(req)" }
+        ]                             // removed 行不参与行号与任何锚点
+      },                              // 卡头自动出 +n −m 徽标；图例自动补色样
       "terms": [                      // 可选：变元注释——不好懂的标识符
         { "line": 3,                  // 卡片内行号
           "token": "num_batched_tokens", // 该行中的标识符（整词匹配首次出现）

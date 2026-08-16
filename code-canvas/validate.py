@@ -83,6 +83,16 @@ def main():
         for i, t in enumerate(lines):
             if len(t) > 100:
                 warn(f"卡 {cid} 第 {i+1} 行长 {len(t)} 字符（>100，卡片会到测量上限被截断）")
+        diff = c.get("diff") or {}
+        for ln in diff.get("added") or []:
+            if not (isinstance(ln, int) and 1 <= ln <= n):
+                err(f"卡 {cid}: diff.added 行 {ln} 越界（共 {n} 行）")
+        for j, r in enumerate(diff.get("removed") or []):
+            a = r.get("after")
+            if not (isinstance(a, int) and 0 <= a <= n):
+                err(f"卡 {cid}: diff.removed[{j}].after {a} 越界（0–{n}）")
+            if not r.get("code"):
+                warn(f"卡 {cid}: diff.removed[{j}] 缺被删原文 code")
         check_blocks(c.get("blocks"), 1, n, f"卡 {cid}", n)
         for j, tm in enumerate(c.get("terms") or []):
             ln, tok = tm.get("line"), tm.get("token") or ""

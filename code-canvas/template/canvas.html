@@ -41,6 +41,14 @@
   .ln .no { display: inline-block; width: 20px; text-align: right; margin-right: 12px;
     color: #4d5663; user-select: none; }
   .ln.hot { background: rgba(88,166,255,.10); box-shadow: inset 2px 0 0 #58a6ff; }
+  .ln.add { background: rgba(63,185,120,.09); box-shadow: inset 2px 0 0 #3fb978; }
+  .ln.add.hot { box-shadow: inset 2px 0 0 #58a6ff; }
+  .ln.del { background: rgba(214,90,90,.06); color: #8f6f74; text-decoration: line-through; }
+  .ln.del .no { color: #a05a5a; text-decoration: none; }
+  .dbadge { font: 10px ui-monospace, Menlo, Consolas, monospace; padding: 0 7px;
+    border-radius: 99px; background: rgba(255,255,255,.04); border: 1px solid #39414d; flex: none; }
+  .dbadge b { color: #3fb978; font-weight: 600; }
+  .dbadge i { color: #d65a5a; font-style: normal; }
   .kw { color: #ff7b72; } .fn { color: #d2a8ff; } .str { color: #a5d6ff; }
   .num { color: #79c0ff; } .cmt { color: #7d8590; }
   .card.dim { opacity: .32; }
@@ -339,6 +347,12 @@ const cardById = {};
 for (const c of DATA.cards) {
   cardById[c.id] = c;
   const raw = c.code.split('\n');
+  const diff = c.diff || {};
+  const addSet = new Set(diff.added || []);
+  const delAfter = {};
+  (diff.removed || []).forEach(r => (delAfter[r.after] ||= []).push(r.code));
+  const delHtml = k => (delAfter[k] || []).map(t =>
+    `<div class="ln del"><span class="no">−</span>${esc(t)}</div>`).join('');
   const lineHtml = raw.map((t, i) => {
     // mark annotated terms with sentinels before highlighting, wrap after
     let marked = t;
@@ -354,16 +368,25 @@ for (const c of DATA.cards) {
       `<div class="tnote" id="${tm._id}" data-card="${c.id}" data-tid="${tm._j}">`
       + `<b>${esc(tm.token)}</b> — <span class="tn-text">${esc(tm.note)}</span> `
       + `<span class="tn-tools"><span class="bbtn" data-act="rewrite">重讲</span></span></div>`).join('');
-    return `<div class="ln" id="${c.id}-L${i + 1}"><span class="no">${i + 1}</span>${h}</div>${notes}`;
+    return (i === 0 ? delHtml(0) : '')
+      + `<div class="ln${addSet.has(i + 1) ? ' add' : ''}" id="${c.id}-L${i + 1}"><span class="no">${i + 1}</span>${h}</div>`
+      + delHtml(i + 1) + notes;
   });
   (c.blocks || []).forEach((b, i) => { b._idx = i; (function mark(bs) { (bs || []).forEach((x, j) => { x._idx = j; mark(x.children); }); })(b.children); });
   const el = document.createElement('div');
   el.className = 'card';
   el.id = 'card-' + c.id;
-  el.innerHTML = `<div class="hdr"><span class="chev">▾</span><span class="fname">${esc(c.name)}</span>`
+  const badge = c.diff
+    ? `<span class="dbadge"><b>+${(diff.added || []).length}</b> <i>−${(diff.removed || []).length}</i></span>` : '';
+  el.innerHTML = `<div class="hdr"><span class="chev">▾</span><span class="fname">${esc(c.name)}</span>${badge}`
     + `<span class="file">${esc(c.file || '')}</span></div>`
     + `<div class="body">${buildBlocks(c.blocks, lineHtml, 1, raw.length, c.id, 0)}</div>`;
   world.appendChild(el);
+}
+if (DATA.cards.some(c => c.diff)) {
+  document.querySelector('.legend').insertAdjacentHTML('beforeend',
+    `<span><span class="sw" style="border-color:#3fb978"></span>新增行</span>`
+    + `<span><span class="sw" style="border-color:#d65a5a"></span>删除的原文</span>`);
 }
 
 /* notes */
@@ -424,8 +447,15 @@ function layout() {
     c._baseY = L.top + c.layout.band * L.bandH;
   }
   relayoutColumns();
-  // notes
-  const leftSlots = {};   // per target card: stacked bottoms
+  placeNotes();
+  fitRegions();
+  sizeWorld();
+}
+/* notes follow their target cards on every redraw; an "above" note squeezed
+   out by an expanding card slides down, and falls back to hanging left of
+   its target when there is no room at all */
+function placeNotes() {
+  const leftSlots = {};
   for (const n of DATA.notes || []) {
     const el = document.getElementById('note-' + n.id);
     const p = n.place || {};
@@ -433,13 +463,25 @@ function layout() {
     const target = cardById[p.of];
     const tEl = target && document.getElementById('card-' + target.id);
     if (!tEl) { el.style.left = L.margin + 'px'; el.style.top = L.top + 'px'; continue; }
+    const ty = tEl.offsetTop, h = el.offsetHeight;
     if (p.side === 'above') {
-      // right of the region label pill, clear of the region border
-      el.style.left = (target._x + 120) + 'px';
-      el.style.top = Math.max(20, target._y - el.offsetHeight - L.regPadTop - 44) + 'px';
+      const above = DATA.cards
+        .filter(c => c.layout.col === target.layout.col && c.id !== target.id)
+        .map(c => document.getElementById('card-' + c.id))
+        .filter(e => e.offsetTop < ty);
+      const floor = above.length
+        ? Math.max(...above.map(e => e.offsetTop + e.offsetHeight)) + 10 : 20;
+      let y = Math.max(ty - h - L.regPadTop - 44, floor);
+      if (y <= ty - h - 6) {
+        el.style.left = (target._x + 120) + 'px';
+        el.style.top = Math.max(20, y) + 'px';
+      } else {
+        el.style.left = (target._x - L.noteW - 40) + 'px';
+        el.style.top = ty + 'px';
+      }
     } else { // left
       el.style.left = (target._x - L.noteGap - L.noteW) + 'px';
-      let y = target._y + 40;
+      let y = ty + 40;
       if (n.anchor && n.anchor.card === p.of) {
         const le = document.getElementById(n.anchor.card + '-L' + n.anchor.line);
         if (le && le.offsetParent !== null) y = wpos(le).y - 20;
@@ -447,11 +489,9 @@ function layout() {
       const floor = leftSlots[p.of] || 0;
       if (y < floor) y = floor;
       el.style.top = y + 'px';
-      leftSlots[p.of] = y + el.offsetHeight + 16;
+      leftSlots[p.of] = y + h + 16;
     }
   }
-  fitRegions();
-  sizeWorld();
 }
 function applyFoldDefaults(c) {
   const walk = (bs, prefix) => (bs || []).forEach(b => {
@@ -557,7 +597,7 @@ function bez(a, c1, c2, b, t) {
 let step = 0;
 const STEPS = DATA.steps && DATA.steps.length ? DATA.steps : [{ title: '总览', caption: '', fit: true }];
 function drawWires() {
-  relayoutColumns(); fitRegions(); sizeWorld();
+  relayoutColumns(); placeNotes(); fitRegions(); sizeWorld();
   svg.innerHTML = '';
   const active = STEPS[step].wires || null;
   for (const w of DATA.wires || []) {

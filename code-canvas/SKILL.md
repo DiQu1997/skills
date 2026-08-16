@@ -47,6 +47,18 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
    从 localhost 打开——每个块的「问」变成真问答（桥接 `claude -p`）。
    静态打开时「问」降级为复制上下文提问到剪贴板
 
+## Diff 画布（第三种画布类型）
+
+输入是一个 diff / PR 时（`meta.mode: "diff"`，参考 `demo/cache-diff.json`）：
+
+- 卡片 = 被改动的函数的 **head 全文** + `diff` 标记（added 行绿、removed
+  原文红删除线）；未改动但受影响的邻居做上下文卡（折叠）
+- 故事线 = **变更意图**（"本次变更" + "未改动的邻居"是最小形态），不按文件分
+- step 顺序 = 评审者的问题序列：**这个 PR 治什么病 → 核心改动（逐个）→
+  连锁影响 → 回归风险**。风险步是必选项——没有风险判断的 diff 画布只是
+  上色的 diff
+- removed 只放读懂变更所必需的原文，不搬运整个旧版本
+
 ## 规模闸门：大仓库先领航，后深潜
 
 动笔前先估计**这张图要讲的东西**的代码量（不是仓库总行数）：
@@ -90,8 +102,8 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
 
 - **宽度预算**：≥6 列的画布总览会小到难读，**≤5 列封顶**；行宽收窄可救列宽
 - 左置 note 指向非 0 列的卡时，该列前会加一条 ~320px 的 note 车道（加宽画布）
-- note 位置是布局期静态算的，**不跟随卡片展开时的动态下推**：
-  `above` 只适合上方没有可展开大卡的顶排卡；同一张卡多条 `above` 会原地重叠
+- note **每次重绘跟随目标卡**：above 位被上方展开的卡挤压时自动下滑，
+  实在没空间会退化成挂在目标卡左侧；同一张卡多条 `above` 仍会原地重叠，避免
 - 步骤状态是**累积**的（`expand`/`unfold` 只加不减）：直达 `#s5` 和顺序走到
   第 5 步画面不同；截图自检以顺序走为准
 - 调试尾缀 `q` 依赖块条的「问」按钮，无 blocks 的画布上无效果
