@@ -113,4 +113,8 @@ Blueprint / Node-RED 这类 node-and-wire 图：**写起来低效（图作为源
 - 布局折中方案已实现：agent 给 `{col, band}` 粗位置，渲染器测行宽定列宽、
   同列冲突下推、region 实时包住成员、镜头由 focus bbox 自动计算
 - `demo/cache-demo.json` / `.html` — 生成管线的参考示例（与手工 mock 同内容）
+- `demo/nano-vllm.json` / `.html` — 第一个真实仓库案例（GeeeekExplorer/nano-vllm，
+  6 步故事线）。真实代码带来的渲染器修正：卡片宽度上限放宽到 800px（真实行
+  常见 90+ 字符）、steps 支持 `unfold` 指定块、同列冲突下推改为每次重绘动态
+  执行（展开的卡会撞到下方卡）、above 位 note 右移避开区域标签
 - `mock/canvas-mock-v1.html` — 手工排版的形态原型，历史参考，勿再改

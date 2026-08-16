@@ -266,7 +266,7 @@ function layout() {
     el.classList.remove('collapsed');
     el.querySelectorAll('.blk').forEach(b => b.classList.remove('folded'));
     el.style.width = 'max-content';
-    c._w = Math.min(el.offsetWidth + 2, 620);
+    c._w = Math.min(el.offsetWidth + 2, 800);
   }
   // apply default states + fixed widths
   for (const c of DATA.cards) {
@@ -289,20 +289,14 @@ function layout() {
     colX[k] = x;
     x += Math.max(...cols[k].map(c => c._w)) + L.gutter;
   }
-  // y: band + collision push-down within column
-  for (const k of Object.keys(cols)) {
-    const list = cols[k].slice().sort((a, b) => (a.layout.band - b.layout.band));
-    let prevBottom = 0;
-    for (const c of list) {
-      const el = document.getElementById('card-' + c.id);
-      let y = L.top + c.layout.band * L.bandH;
-      if (y < prevBottom + L.vGap && prevBottom > 0) y = prevBottom + L.vGap;
-      el.style.left = colX[c.layout.col] + 'px';
-      el.style.top = y + 'px';
-      c._x = colX[c.layout.col]; c._y = y;
-      prevBottom = y + el.offsetHeight;
-    }
+  // x + base y from coarse hints; dynamic push-down happens on every draw
+  for (const c of DATA.cards) {
+    const el = document.getElementById('card-' + c.id);
+    el.style.left = colX[c.layout.col] + 'px';
+    c._x = colX[c.layout.col];
+    c._baseY = L.top + c.layout.band * L.bandH;
   }
+  relayoutColumns();
   // notes
   const leftSlots = {};   // per target card: stacked bottoms
   for (const n of DATA.notes || []) {
@@ -313,8 +307,8 @@ function layout() {
     const tEl = target && document.getElementById('card-' + target.id);
     if (!tEl) { el.style.left = L.margin + 'px'; el.style.top = L.top + 'px'; continue; }
     if (p.side === 'above') {
-      // clear the region border (regPadTop) plus breathing room
-      el.style.left = (target._x - 90) + 'px';
+      // right of the region label pill, clear of the region border
+      el.style.left = (target._x + 120) + 'px';
       el.style.top = Math.max(20, target._y - el.offsetHeight - L.regPadTop - 44) + 'px';
     } else { // left
       el.style.left = (target._x - L.noteGap - L.noteW) + 'px';
@@ -343,6 +337,22 @@ function applyFoldDefaults(c) {
     walk(b.children);
   });
   walk(c.blocks);
+}
+function relayoutColumns() {
+  // cards grow and shrink as they expand/fold; keep columns overlap-free
+  const cols = {};
+  for (const c of DATA.cards) (cols[c.layout.col] ||= []).push(c);
+  for (const k of Object.keys(cols)) {
+    const list = cols[k].slice().sort((a, b) => a._baseY - b._baseY);
+    let prevBottom = -1e9;
+    for (const c of list) {
+      const el = document.getElementById('card-' + c.id);
+      const y = Math.max(c._baseY, prevBottom + 60);
+      el.style.top = y + 'px';
+      c._y = y;
+      prevBottom = y + el.offsetHeight;
+    }
+  }
 }
 function fitRegions() {
   for (const r of DATA.regions || []) {
@@ -420,7 +430,7 @@ function bez(a, c1, c2, b, t) {
 let step = 0;
 const STEPS = DATA.steps && DATA.steps.length ? DATA.steps : [{ title: '总览', caption: '', fit: true }];
 function drawWires() {
-  fitRegions(); sizeWorld();
+  relayoutColumns(); fitRegions(); sizeWorld();
   svg.innerHTML = '';
   const active = STEPS[step].wires || null;
   for (const w of DATA.wires || []) {
@@ -503,6 +513,11 @@ function setStep(i, animate = true) {
     const el = document.getElementById('card-' + id);
     el.classList.remove('collapsed');
     el.querySelector('.chev').textContent = '▾';
+  });
+  (s.unfold || []).forEach(([cid, name]) => {
+    const blk = [...document.getElementById('card-' + cid).querySelectorAll('.blk')]
+      .find(e => e.querySelector('.bname').textContent === name);
+    if (blk) { blk.classList.remove('folded'); blk.querySelector('.bchev').textContent = '▾'; }
   });
   document.querySelectorAll('.ln.hot').forEach(e => e.classList.remove('hot'));
   (s.lines || []).forEach(([cid, ln]) => {

@@ -71,6 +71,7 @@
       "wires": ["w-key", "d-key"],    // 本步点亮的线；其余淡出
       "lines": [["handler", 2]],      // 本步高亮的行
       "expand": ["cachekey"],         // 本步自动展开的卡
+      "unfold": [["evict", "全表扫描打分"]], // 本步自动展开的块（[卡 id, 块名]）
       "focus": ["handler", "cachekey", "n3"] } // 取景元素（卡/note id）；镜头自动计算
   ]
 }
