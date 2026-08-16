@@ -30,15 +30,19 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
    概念级 bg note（锚到行，在相关 step 点亮）。字数硬上限见 schema.md
 6. **写 steps**：第 0 步总览（fit），后续每步 = 点亮的线 + 高亮的行 +
    focus 取景元素 + ≤80 字 caption。步子按"读者的问题"排，不按文件序
-7. **产出 JSON**，渲染：
+7. **产出 JSON，先过验证器再渲染**（不可跳过）：
 
    ```bash
+   python3 validate.py canvas.json   # ERROR 必须清零；warn 逐条自查
    python3 render.py canvas.json output.html
    ```
 
-8. **验证**（有 headless chromium 时）：截图总览和每个 step，检查
-   压盖 / 溢出 / 越界；`#s2` 直达步骤，调试尾缀 `x` 全展开、`e` 开说明、
-   `t` 开变元注释、`q` 开问答抽屉
+   验证器抓机械错误（悬空引用、行号越界、块区间重叠、token 不在行上）
+   和预算超限（每步线数/行数、各类文字上限）。ERROR 不清零的图是坏的。
+
+8. **截图自检**（有 headless chromium 时，逐项过下面的清单）：
+   总览 + 每个 step 各截一张；`#s2` 直达步骤，调试尾缀 `x` 全展开、
+   `e` 开说明、`t` 开变元注释、`q` 开问答抽屉
 9. **（可选）开启块级问答**：`python3 serve.py output.html --repo <仓库路径>`，
    从 localhost 打开——每个块的「问」变成真问答（桥接 `claude -p`）。
    静态打开时「问」降级为复制上下文提问到剪贴板
@@ -61,6 +65,17 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
 - 块必须能用一句话说清功能；深嵌套才用 children，不为分块而分块
 - 不确定的意图不写进 note——note 是断言，不是猜测
 
+## 截图自检清单
+
+每张截图对照检查，任何一条不过就改 JSON 重渲染：
+
+- [ ] 没有元素互相压盖（note 压卡、卡压卡、note 压区域标签）
+- [ ] 每步的 focus 镜头框住了 caption 里提到的所有东西（尤其行注释）
+- [ ] 点亮的线两端都可见，line 锚点落在正确的行上
+- [ ] 折叠卡的大纲（块色条）在总览缩放下可读
+- [ ] 每张卡至少被一个 step 聚焦过；没有 step 聚焦不存在的重点
+- [ ] caption 说"注意 X"时，X 确实在画面里且处于点亮态
+
 ## 失败模式
 
 - **全量连线**：把静态分析能找到的边都画上 = 毛线球。线是叙事的一部分
@@ -76,8 +91,10 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
 - `DESIGN.md` — 设计决定与理由
 - `schema.md` — canvas JSON 格式
 - `template/canvas.html` — 数据驱动的单文件渲染模板（布局引擎在里面）
+- `validate.py` — canvas JSON 验证器：机械错误 + 预算超限（渲染前必过）
 - `render.py` — JSON → HTML 注入脚本
 - `serve.py` — 块级问答服务：serve HTML + `/ask` 桥接 claude/codex CLI
+- `tests/` — Playwright 交互回归 + 个性化端到端测试
 - `demo/cache-demo.json` / `.html` — 参考示例（缓存中间件，4 步故事线）
 - `mock/canvas-mock-v1.html` — 手工排版的形态原型（历史参考，勿再改）
 
