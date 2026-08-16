@@ -105,10 +105,7 @@ Blueprint / Node-RED 这类 node-and-wire 图：**写起来低效（图作为源
 - [ ] 问答沉淀：好答案一键写回 canvas JSON
 - [ ] 大仓库多画布索引（画布的画布）
 - [ ] 语义缩放中间层（远景卡片只显示签名）
-- [ ] diff 模式怎么叠加：卡片内 diff 着色 + "改动前后"的卡片对？先做 diff review 还是 code reading？
-- [ ] JSON schema 设计（卡片 / 线 / 区域 / 步骤 / note）
-- [ ] 渲染器：延续单文件 HTML 模板 + 注入 JSON 的架构？
-- [ ] 大 storyline 的空间预算：一屏硬约束（邻域卡片 ≤3-4、行注释 ≤5）如何执行
+- [ ] 评测集扩容：把 nanovllm-deep / requests-nav 两张新考卷跑出基线
 
 ## 评测记录（2026-08-16 · openai/codex）
 
