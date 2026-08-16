@@ -11,7 +11,7 @@
 
   #vp { position: fixed; inset: 0; overflow: hidden; cursor: grab; }
   #vp.dragging { cursor: grabbing; }
-  #world { position: absolute; width: 1800px; height: 1000px; transform-origin: 0 0;
+  #world { position: absolute; width: 1800px; height: 1400px; transform-origin: 0 0;
     transition: transform .55s cubic-bezier(.22,.9,.26,1);
     background-image: radial-gradient(circle, #1c212a 1px, transparent 1px);
     background-size: 28px 28px; }
@@ -46,6 +46,20 @@
   .kw { color: #ff7b72; } .fn { color: #d2a8ff; } .str { color: #a5d6ff; }
   .num { color: #79c0ff; } .cmt { color: #7d8590; }
   .card.dim { opacity: .32; }
+
+  /* ---- intra-function logical blocks (fold to an outline) ---- */
+  .blk { border-left: 3px solid var(--bc); background: var(--bt); margin: 3px 0 3px 8px;
+    border-radius: 0 6px 6px 0; }
+  .blk .ln { padding-left: 6px; }
+  .bbar { display: flex; align-items: baseline; gap: 7px; padding: 3px 10px 3px 7px;
+    cursor: pointer; font-size: 10.5px; line-height: 1.7; white-space: nowrap; }
+  .bbar:hover { background: rgba(255,255,255,.035); }
+  .bchev { color: var(--bc); font-size: 8px; }
+  .bname { color: var(--bc); font-weight: 600; }
+  .bsum { color: #8b95a5; }
+  .brange { margin-left: auto; color: #566070; font-size: 9.5px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .blk.folded > .bcode { display: none; }
 
   /* ---- line-anchored notes ---- */
   .note { position: absolute; width: 250px; background: #26221a; border: 1px solid #55492f;
@@ -117,11 +131,11 @@
   <div id="world">
 
     <!-- storyline regions -->
-    <div class="region regionA" style="left:300px; top:180px; width:460px; height:700px;">
+    <div class="region regionA" id="regA" style="left:300px; top:180px; width:460px; height:700px;">
       <span class="rlabel">故事线 A · 请求主流程</span>
       <span class="rblurb">请求的进与出：命中早退，未命中回源</span>
     </div>
-    <div class="region regionB" style="left:940px; top:150px; width:760px; height:500px;">
+    <div class="region regionB" id="regB" style="left:940px; top:150px; width:810px; height:500px;">
       <span class="rlabel">故事线 B · 缓存子系统</span>
       <span class="rblurb">key 的生成与存取——命中率与新鲜度都在这里决定</span>
     </div>
@@ -191,7 +205,7 @@
       </div>
     </div>
 
-    <div class="card collapsed" id="card-get" style="left:1360px; top:290px; width:300px;">
+    <div class="card collapsed" id="card-get" style="left:1385px; top:290px; width:360px;">
       <div class="hdr"><span class="chev">▸</span><span class="fname">get_cached(key)</span><span class="file">server/cache.py</span></div>
       <div class="body">
         <div class="ln" id="gc-L1"><span class="no">1</span><span class="kw">def</span> <span class="fn">get_cached</span>(key):</div>
@@ -202,7 +216,7 @@
       </div>
     </div>
 
-    <div class="card collapsed" id="card-store" style="left:1360px; top:500px; width:300px;">
+    <div class="card collapsed" id="card-store" style="left:1385px; top:500px; width:360px;">
       <div class="hdr"><span class="chev">▸</span><span class="fname">store(key, resp, ttl)</span><span class="file">server/cache.py</span></div>
       <div class="body">
         <div class="ln" id="st-L1"><span class="no">1</span><span class="kw">def</span> <span class="fn">store</span>(key, resp, ttl):</div>
@@ -211,7 +225,53 @@
       </div>
     </div>
 
-    <svg id="wires" width="1800" height="1000" viewBox="0 0 1800 1000"></svg>
+    <!-- long nested function: card body is a fold-out outline of logical blocks -->
+    <div class="card" id="card-evict" style="left:1300px; top:720px; width:410px;">
+      <div class="hdr"><span class="chev">▾</span><span class="fname">_evict_if_needed()</span><span class="file">server/cache.py</span></div>
+      <div class="body">
+        <div class="ln" id="ev-L1"><span class="no">1</span><span class="kw">def</span> <span class="fn">_evict_if_needed</span>():</div>
+        <div class="blk folded" style="--bc:#5a9cf8; --bt:rgba(90,156,248,.05);">
+          <div class="bbar"><span class="bchev">▸</span><span class="bname">水位检查</span><span class="bsum">低于高水位就什么都不做</span><span class="brange">2–4</span></div>
+          <div class="bcode">
+            <div class="ln" id="ev-L2"><span class="no">2</span>    <span class="kw">if</span> _table.<span class="fn">size</span>() &lt; HIGH_WATER:</div>
+            <div class="ln" id="ev-L3"><span class="no">3</span>        <span class="kw">return</span></div>
+            <div class="ln" id="ev-L4"><span class="no">4</span>    target = _table.<span class="fn">size</span>() - LOW_WATER</div>
+          </div>
+        </div>
+        <div class="blk folded" style="--bc:#a78bfa; --bt:rgba(167,139,250,.05);">
+          <div class="bbar"><span class="bchev">▸</span><span class="bname">全表扫描打分</span><span class="bsum">锁一个 shard 扫一个</span><span class="brange">5–15</span></div>
+          <div class="bcode">
+            <div class="ln" id="ev-L5"><span class="no">5</span>    victims = []</div>
+            <div class="ln" id="ev-L6"><span class="no">6</span>    <span class="kw">for</span> shard <span class="kw">in</span> _table.<span class="fn">shards</span>():</div>
+            <div class="ln" id="ev-L7"><span class="no">7</span>        <span class="kw">with</span> shard.<span class="fn">lock</span>():</div>
+            <div class="ln" id="ev-L8"><span class="no">8</span>            <span class="kw">for</span> key, e <span class="kw">in</span> shard.<span class="fn">items</span>():</div>
+            <div class="blk folded" style="--bc:#f472b6; --bt:rgba(244,114,182,.05);">
+              <div class="bbar"><span class="bchev">▸</span><span class="bname">单个 entry 打分</span><span class="bsum">过期白送；越冷越大越先死</span><span class="brange">9–15</span></div>
+              <div class="bcode">
+                <div class="ln" id="ev-L9"><span class="no">9</span>                <span class="kw">if</span> e.<span class="fn">expired</span>():</div>
+                <div class="ln" id="ev-L10"><span class="no">10</span>                    victims.<span class="fn">append</span>((INF, key))</div>
+                <div class="ln" id="ev-L11"><span class="no">11</span>                    <span class="kw">continue</span></div>
+                <div class="ln" id="ev-L12"><span class="no">12</span>                score = <span class="fn">now</span>() - e.last_used</div>
+                <div class="ln" id="ev-L13"><span class="no">13</span>                <span class="kw">if</span> e.size &gt; BIG_OBJECT:</div>
+                <div class="ln" id="ev-L14"><span class="no">14</span>                    score *= <span class="num">2</span></div>
+                <div class="ln" id="ev-L15"><span class="no">15</span>                victims.<span class="fn">append</span>((score, key))</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="blk folded" style="--bc:#4cc38a; --bt:rgba(76,195,138,.05);">
+          <div class="bbar"><span class="bchev">▸</span><span class="bname">收割</span><span class="bsum">分数最高的 target 个删掉</span><span class="brange">16–19</span></div>
+          <div class="bcode">
+            <div class="ln" id="ev-L16"><span class="no">16</span>    victims.<span class="fn">sort</span>(reverse=<span class="kw">True</span>)</div>
+            <div class="ln" id="ev-L17"><span class="no">17</span>    <span class="kw">for</span> _, key <span class="kw">in</span> victims[:target]:</div>
+            <div class="ln" id="ev-L18"><span class="no">18</span>        _table.<span class="fn">delete</span>(key)</div>
+            <div class="ln" id="ev-L19"><span class="no">19</span>    metrics.<span class="fn">evicted</span>(target)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <svg id="wires" width="1800" height="1400" viewBox="0 0 1800 1400"></svg>
   </div>
 </div>
 
@@ -258,6 +318,8 @@ const WIRES = [
     toCard:'card-store',    to:{ card:'card-store', side:'left', slot:'data' }, label:'key' },
   { id:'d-resp',  kind:'data', fromCard:'card-fetch',    from:{ card:'card-fetch', line:'fu-L4', side:'right' },
     toCard:'card-store',    to:{ card:'card-store', side:'left', slot:'data' }, label:'resp' },
+  { id:'w-evict', kind:'call', fromCard:'card-store',    from:{ line:'st-L3', card:'card-store', side:'left' },
+    toCard:'card-evict',    to:{ card:'card-evict', side:'left', slot:'call' } },
 ];
 const LEADERS = [
   { note:'note1', line:'hr-L6' },
@@ -282,6 +344,10 @@ const STEPS = [
     caption:'回源拿到 resp，连同 key 一起写回。两根琥珀线在 store 汇合——「这个值从哪来」在文本里要人肉追踪变量，在图上是一眼的事。',
     wires:['w-fetch','w-store','d-key2','d-resp'], lines:['hr-L7','hr-L8','hr-L9'],
     cam:{ x:860, y:565, s:0.9 } },
+  { title:'④ 后台淘汰：长函数先读大纲',
+    caption:'store 写完顺手检查水位。_evict_if_needed 是个 19 行的嵌套函数——先读三根色条组成的大纲，点条展开代码；「单个 entry 打分」里还能再展一层。层级：卡片 → 块大纲 → 代码。',
+    wires:['w-evict'], expand:['card-store'], lines:['st-L3'],
+    cam:{ x:1250, y:660, s:1.0 } },
 ];
 let step = 0;
 
@@ -318,8 +384,26 @@ function bez(a, c1, c2, b, t) {
 }
 
 /* ---------- draw ---------- */
+/* regions wrap their member cards, whatever is expanded */
+const REGION_CARDS = {
+  regA: ['card-handler', 'card-fetch'],
+  regB: ['card-cachekey', 'card-get', 'card-store', 'card-evict'],
+};
+function fitRegions() {
+  for (const [rid, ids] of Object.entries(REGION_CARDS)) {
+    const r = document.getElementById(rid);
+    let maxB = 0;
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      maxB = Math.max(maxB, el.offsetTop + el.offsetHeight);
+    }
+    r.style.height = (maxB + 28 - r.offsetTop) + 'px';
+  }
+}
+
 const NS = 'http://www.w3.org/2000/svg';
 function drawWires() {
+  fitRegions();
   svg.innerHTML = '';
   const active = STEPS[step].wires || null;
   for (const w of WIRES) {
@@ -374,7 +458,7 @@ function centerOn(wx, wy, s, animate = true) {
   apply(animate);
 }
 function fitAll(animate = true) {
-  const x0 = 20, y0 = 90, x1 = 1710, y1 = 900;
+  const x0 = 20, y0 = 90, x1 = 1755, y1 = 900;
   const s = Math.min(Math.min(innerWidth / (x1 - x0), (innerHeight - 110) / (y1 - y0)) * 0.96, 1.15);
   centerOn((x0 + x1) / 2, (y0 + y1) / 2, s, animate);
 }
@@ -427,10 +511,21 @@ document.querySelectorAll('.card .hdr').forEach(h => {
   });
 });
 
+/* ---------- block fold / unfold ---------- */
+document.querySelectorAll('.bbar').forEach(b => {
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    const blk = b.parentElement;
+    blk.classList.toggle('folded');
+    b.querySelector('.bchev').textContent = blk.classList.contains('folded') ? '▸' : '▾';
+    drawWires();
+  });
+});
+
 /* ---------- pan / zoom ---------- */
 let drag = null;
 vp.addEventListener('pointerdown', e => {
-  if (e.target.closest('.hdr') || e.target.closest('#bar')) return;
+  if (e.target.closest('.hdr') || e.target.closest('.bbar') || e.target.closest('#bar')) return;
   drag = { sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y };
   vp.classList.add('dragging');
   vp.setPointerCapture(e.pointerId);
@@ -453,9 +548,15 @@ vp.addEventListener('wheel', e => {
 }, { passive: false });
 addEventListener('resize', () => { drawWires(); if (STEPS[step].fit) fitAll(false); });
 
-/* init (#s2 in the URL jumps straight to step 2 — handy for screenshots) */
-const m = location.hash.match(/^#s(\d+)$/);
-requestAnimationFrame(() => setStep(m ? +m[1] : 0, false));
+/* init (#s2 jumps to step 2; trailing x unfolds all blocks — handy for screenshots) */
+const m = location.hash.match(/^#s(\d+)(x?)$/);
+requestAnimationFrame(() => {
+  if (m && m[2]) document.querySelectorAll('.blk').forEach(b => {
+    b.classList.remove('folded');
+    b.querySelector('.bchev').textContent = '▾';
+  });
+  setStep(m ? +m[1] : 0, false);
+});
 </script>
 </body>
 </html>
