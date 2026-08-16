@@ -111,6 +111,8 @@
   .dot { width: 7px; height: 7px; border-radius: 99px; background: #3c4653; cursor: pointer; }
   .dot.cur { background: #79a8ff; }
   #stext { min-width: 0; }
+  .schip { display: inline-block; font-size: 10px; padding: 1px 8px; border-radius: 99px;
+    border: 1px solid; margin-right: 8px; vertical-align: 1px; }
   #stitle { font-weight: 600; font-size: 13px; color: #e3e9f2; margin-bottom: 2px; }
   #scap { font-size: 12px; color: #98a2b0; line-height: 1.5; max-width: 560px; }
 </style>
@@ -278,14 +280,20 @@ function layout() {
     // honor explicit folded:false
     applyFoldDefaults(c);
   }
-  // columns
-  const hasLeftNotes = (DATA.notes || []).some(n => n.place && (n.place.side === 'left' || n.place.corner));
-  const col0x = L.margin + (hasLeftNotes ? L.noteW + 80 : 0);
+  // columns; a column whose cards have left-notes gets a note lane in front of it
+  const hasLeftNotes = (DATA.notes || []).some(n => n.place
+    && (n.place.corner || (n.place.side === 'left' && cardById[n.place.of]?.layout.col === 0)));
+  const leftNoteCols = new Set();
+  for (const n of DATA.notes || []) if (n.place && n.place.side === 'left') {
+    const t = cardById[n.place.of];
+    if (t && t.layout.col > 0) leftNoteCols.add(t.layout.col);
+  }
   const cols = {};
   for (const c of DATA.cards) (cols[c.layout.col] ||= []).push(c);
-  let x = col0x;
+  let x = L.margin + (hasLeftNotes ? L.noteW + 80 : 0);
   const colX = {};
   for (const k of Object.keys(cols).map(Number).sort((a, b) => a - b)) {
+    if (leftNoteCols.has(k)) x += L.noteW + 70;
     colX[k] = x;
     x += Math.max(...cols[k].map(c => c._w)) + L.gutter;
   }
@@ -501,7 +509,7 @@ function focusOn(ids, animate = true) {
     x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.h);
   }
   if (x1 === 0) return fitAll(animate);
-  const s = Math.max(.42, Math.min(Math.min(innerWidth / (x1 - x0 + 160), (innerHeight - 170) / (y1 - y0 + 120)), 1.1));
+  const s = Math.max(.35, Math.min(Math.min(innerWidth / (x1 - x0 + 160), (innerHeight - 170) / (y1 - y0 + 120)), 1.1));
   centerOn((x0 + x1) / 2, (y0 + y1) / 2, s, animate);
 }
 
@@ -537,11 +545,21 @@ function setStep(i, animate = true) {
   });
   if (s.fit || !s.focus) fitAll(animate); else focusOn(s.focus, animate);
   drawWires();
-  document.getElementById('stitle').textContent = s.title || '';
+  const reg = (DATA.regions || []).find(r => r.id === s.storyline);
+  const hue = reg && (HUES[reg.hue] || HUES.blue);
+  document.getElementById('stitle').innerHTML =
+    (reg ? `<span class="schip" style="color:${hue.lb}; border-color:${hue.lb}">${esc(reg.title.replace(/^故事线\s*/, ''))}</span>` : '')
+    + esc(s.title || '');
   document.getElementById('scap').textContent = s.caption || '';
   document.getElementById('prev').disabled = step === 0;
   document.getElementById('next').disabled = step === STEPS.length - 1;
-  document.querySelectorAll('.dot').forEach((d, j) => d.classList.toggle('cur', j === step));
+  document.querySelectorAll('.dot').forEach((d, j) => {
+    d.classList.toggle('cur', j === step);
+    const r2 = (DATA.regions || []).find(r => r.id === STEPS[j].storyline);
+    const h2 = r2 && (HUES[r2.hue] || HUES.blue);
+    d.style.background = h2 ? (j === step ? h2.lb : rgba(h2.lb, .35))
+                            : (j === step ? '#79a8ff' : '#3c4653');
+  });
 }
 const dots = document.getElementById('dots');
 STEPS.forEach((_, i) => {
@@ -551,6 +569,16 @@ STEPS.forEach((_, i) => {
 });
 document.getElementById('prev').onclick = () => setStep(step - 1);
 document.getElementById('next').onclick = () => setStep(step + 1);
+/* region label -> jump to that storyline's first step */
+const firstStepOf = {};
+STEPS.forEach((s, i) => { if (s.storyline && !(s.storyline in firstStepOf)) firstStepOf[s.storyline] = i; });
+for (const r of DATA.regions || []) {
+  if (!(r.id in firstStepOf)) continue;
+  const lb = document.querySelector('#reg-' + r.id + ' .rlabel');
+  lb.style.cursor = 'pointer';
+  lb.title = '跳到这条故事线';
+  lb.addEventListener('click', () => setStep(firstStepOf[r.id]));
+}
 addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') setStep(step - 1);
   if (e.key === 'ArrowRight') setStep(step + 1);
@@ -575,7 +603,7 @@ world.addEventListener('click', e => {
 });
 let drag = null;
 vp.addEventListener('pointerdown', e => {
-  if (e.target.closest('.hdr') || e.target.closest('.bbar') || e.target.closest('#bar')) return;
+  if (e.target.closest('.hdr') || e.target.closest('.bbar') || e.target.closest('.rlabel') || e.target.closest('#bar')) return;
   drag = { sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y };
   vp.classList.add('dragging');
   vp.setPointerCapture(e.pointerId);
