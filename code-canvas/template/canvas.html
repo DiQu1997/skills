@@ -9,7 +9,7 @@
   html, body { height: 100%; overflow: hidden; background: #111418; color: #c9d1d9;
     font-family: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
 
-  #vp { position: fixed; inset: 0; overflow: hidden; cursor: grab; }
+  #vp { position: fixed; inset: 0; overflow: hidden; cursor: grab; touch-action: none; }
   #vp.dragging { cursor: grabbing; }
   #world { position: absolute; transform-origin: 0 0;
     transition: transform .55s cubic-bezier(.22,.9,.26,1);
@@ -940,12 +940,36 @@ world.addEventListener('click', e => {
 });
 /* Pan starts only after real movement (>4px). Capturing on pointerdown would
    retarget the click event to the viewport and swallow clicks on terms, bars,
-   headers etc. — so a still pointer is a click, a moved pointer is a drag. */
-let drag = null;
+   headers etc. — so a still pointer is a click, a moved pointer is a drag.
+   Two pointers = pinch zoom (touch); capture immediately, no click semantics. */
+let drag = null, pinch = null;
+const pts = new Map();
+function pinchState() {
+  const [a, b] = [...pts.values()];
+  return { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+}
 vp.addEventListener('pointerdown', e => {
-  drag = { sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y, moved: false, id: e.pointerId };
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pts.size === 2) {
+    drag = null;
+    pinch = { ...pinchState(), s0: cam.s, x0: cam.x, y0: cam.y };
+    world.classList.add('notrans');
+    for (const id of pts.keys()) { try { vp.setPointerCapture(id); } catch (err) {} }
+  } else if (pts.size === 1) {
+    drag = { sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y, moved: false, id: e.pointerId };
+  }
 });
 vp.addEventListener('pointermove', e => {
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pts.size === 2) {
+    const p = pinchState();
+    const ns = Math.min(1.8, Math.max(.1, pinch.s0 * (p.d / (pinch.d || 1))));
+    cam.x = p.cx - (pinch.cx - pinch.x0) * (ns / pinch.s0);
+    cam.y = p.cy - (pinch.cy - pinch.y0) * (ns / pinch.s0);
+    cam.s = ns;
+    apply(false);
+    return;
+  }
   if (!drag) return;
   const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
   if (!drag.moved) {
@@ -958,7 +982,13 @@ vp.addEventListener('pointermove', e => {
   cam.y = drag.oy + dy;
   apply(false);
 });
-vp.addEventListener('pointerup', () => { drag = null; vp.classList.remove('dragging'); });
+function endPointer(e) {
+  pts.delete(e.pointerId);
+  if (pts.size < 2) pinch = null;
+  if (pts.size === 0) { drag = null; vp.classList.remove('dragging'); }
+}
+vp.addEventListener('pointerup', endPointer);
+vp.addEventListener('pointercancel', endPointer);
 vp.addEventListener('wheel', e => {
   e.preventDefault();
   const f = Math.exp(-e.deltaY * .0012);
