@@ -614,9 +614,10 @@ function centerOn(wx, wy, s, animate = true) {
   apply(animate);
 }
 function fitAll(animate = true) {
+  // never crop the overview — wide canvases fit at whatever scale it takes
   const b = contentBBox();
   const s = Math.min(Math.min(innerWidth / (b.x1 - b.x0 + 60), (innerHeight - 110) / (b.y1 - b.y0 + 60)) * .98, 1.15);
-  centerOn((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, Math.max(s, .3), animate);
+  centerOn((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, Math.max(s, .1), animate);
 }
 function focusOn(ids, animate = true) {
   let x0 = 1e9, y0 = 1e9, x1 = 0, y1 = 0;
@@ -961,7 +962,7 @@ vp.addEventListener('pointerup', () => { drag = null; vp.classList.remove('dragg
 vp.addEventListener('wheel', e => {
   e.preventDefault();
   const f = Math.exp(-e.deltaY * .0012);
-  const ns = Math.min(1.8, Math.max(.3, cam.s * f));
+  const ns = Math.min(1.8, Math.max(.1, cam.s * f));
   cam.x = e.clientX - (e.clientX - cam.x) * (ns / cam.s);
   cam.y = e.clientY - (e.clientY - cam.y) * (ns / cam.s);
   cam.s = ns;
