@@ -56,6 +56,18 @@
     box-shadow: 0 0 0 1px rgba(200,164,90,.35), 0 8px 20px rgba(0,0,0,.45); }
   .note.dim { opacity: .32; }
 
+  /* background flavor: domain knowledge, not code intent */
+  .note.bg { background: #1b2330; border-color: #324459; border-left-color: #57a6c8;
+    color: #a4bfd2; }
+  .note.bg .tag { color: #5c86a0; }
+  .note.bg.hot { border-color: #57a6c8; border-left-color: #6fc0e0; color: #cfe4f2;
+    box-shadow: 0 0 0 1px rgba(87,166,200,.32), 0 8px 20px rgba(0,0,0,.45); }
+
+  .rblurb { position: absolute; top: 12px; left: 22px; font-size: 11px; opacity: .78;
+    letter-spacing: .3px; }
+  .regionA > .rblurb { color: #6f94c8; }
+  .regionB > .rblurb { color: #5da887; }
+
   /* ---- wires ---- */
   #wires { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: visible; }
   .wire { fill: none; transition: opacity .3s; }
@@ -107,9 +119,26 @@
     <!-- storyline regions -->
     <div class="region regionA" style="left:300px; top:180px; width:460px; height:700px;">
       <span class="rlabel">故事线 A · 请求主流程</span>
+      <span class="rblurb">请求的进与出：命中早退，未命中回源</span>
     </div>
     <div class="region regionB" style="left:940px; top:150px; width:760px; height:500px;">
       <span class="rlabel">故事线 B · 缓存子系统</span>
+      <span class="rblurb">key 的生成与存取——命中率与新鲜度都在这里决定</span>
+    </div>
+
+    <!-- canvas-level background: lit at overview, fades once you step in -->
+    <div class="note bg" id="note0" data-step="0" style="left:40px; top:120px; width:260px;">
+      <div class="tag">背景 · 这是什么</div>
+      一个 HTTP 缓存中间件：请求先查缓存，命中直接返回；未命中回源、写回再返回。
+      读懂它只需要三个问题——key 怎么算、命中走哪条路、未命中怎么写回。
+      下面的三步故事线正好各答一个。
+    </div>
+
+    <!-- concept-level background note (teal), lit at step 1 -->
+    <div class="note bg" id="note3" data-step="1" style="left:660px; top:105px; width:250px;">
+      <div class="tag">背景 · HTTP Vary</div>
+      Vary 头声明同一 URL 会因哪些请求头返回不同内容——所以这些头必须参与
+      key，否则会把 A 的响应错发给 B。
     </div>
 
     <!-- notes (line-anchored) -->
@@ -233,6 +262,7 @@ const WIRES = [
 const LEADERS = [
   { note:'note1', line:'hr-L6' },
   { note:'note2', line:'hr-L8' },
+  { note:'note3', line:'ck-L3' },
 ];
 
 /* ---------- storyline steps: camera path + progressive lighting ---------- */
@@ -320,12 +350,11 @@ function drawWires() {
     }
   }
   for (const l of LEADERS) {
-    const note = worldPos(document.getElementById(l.note));
-    const line = worldPos(document.getElementById(l.line));
     const noteEl = document.getElementById(l.note);
+    const note = worldPos(noteEl);
+    const b = resolveAnchor({ line: l.line, side: 'left' });
     const p = document.createElementNS(NS, 'path');
     const a = { x: note.x + note.w, y: note.y + note.h / 2 };
-    const b = { x: line.x, y: line.y + line.h / 2 };
     p.setAttribute('d', `M ${a.x} ${a.y} C ${a.x + 34} ${a.y}, ${b.x - 34} ${b.y}, ${b.x} ${b.y}`);
     p.setAttribute('class', 'leader' + (noteEl.classList.contains('dim') ? ' off' : ''));
     svg.appendChild(p);
@@ -345,7 +374,7 @@ function centerOn(wx, wy, s, animate = true) {
   apply(animate);
 }
 function fitAll(animate = true) {
-  const x0 = 20, y0 = 120, x1 = 1710, y1 = 900;
+  const x0 = 20, y0 = 90, x1 = 1710, y1 = 900;
   const s = Math.min(Math.min(innerWidth / (x1 - x0), (innerHeight - 110) / (y1 - y0)) * 0.96, 1.15);
   centerOn((x0 + x1) / 2, (y0 + y1) / 2, s, animate);
 }
