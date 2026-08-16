@@ -49,7 +49,14 @@
         "band": 0
       },
       "collapsed": false,
-      "code": "def step(self):\n    seqs, is_prefill = self.scheduler.schedule()\n    num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)\n    token_ids = self.model_runner.call(\"run\", seqs, is_prefill)\n    self.scheduler.postprocess(seqs, token_ids, is_prefill)\n    outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]\n    return outputs, num_tokens"
+      "code": "def step(self):\n    seqs, is_prefill = self.scheduler.schedule()\n    num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)\n    token_ids = self.model_runner.call(\"run\", seqs, is_prefill)\n    self.scheduler.postprocess(seqs, token_ids, is_prefill)\n    outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]\n    return outputs, num_tokens",
+      "terms": [
+        {
+          "line": 2,
+          "token": "is_prefill",
+          "note": "整批同型标志：一轮要么全 prefill 要么全 decode，attention 按它切换 varlen / paged 两条路径。"
+        }
+      ]
     },
     {
       "id": "run",
@@ -101,9 +108,11 @@
               "lines": [
                 11,
                 17
-              ]
+              ],
+              "explain": "can_allocate 返回的不是布尔而是「命中了几块」，-1 表示装不下。它只探测不落账——真正把块挂到 seq 上的是 allocate。探测与分配分离，预算判断失败时才能无副作用地退出循环。"
             }
-          ]
+          ],
+          "explain": "为什么 prefill 绝对优先？新请求的首 token 延迟对体验影响最大，而且 prefill 一次能吃进大量 token、GPU 利用率最高。只要 waiting 里还有装得下的请求就先不做 decode——这是吞吐与首字延迟之间的取舍，nano-vllm 选了最简单的一边。"
         },
         {
           "name": "Decode 批次",
@@ -119,9 +128,11 @@
               "lines": [
                 36,
                 41
-              ]
+              ],
+              "explain": "can_append 只在「下一个 token 恰好开新块」时才需要空块。没有空块：从队尾 pop 一条抢占（块全部回收、打回 waiting），最坏情况牺牲的是自己——此时 break 掉，本条不进批。"
             }
-          ]
+          ],
+          "explain": "一条新请求都收不进来才轮到 decode：每条 running seq 只续 1 个 token。注意 while…else 的用法：只有内层抢占循环正常结束（没有 break）才会调度这条 seq。"
         },
         {
           "name": "收尾",
@@ -129,7 +140,20 @@
           "lines": [
             47,
             49
-          ]
+          ],
+          "explain": "assert 兜底：decode 分支至少要产出一条，否则说明块账本泄漏。extendleft(reversed(…)) 把这批放回队头、保持原顺序，下一轮还是它们先跑。"
+        }
+      ],
+      "terms": [
+        {
+          "line": 3,
+          "token": "num_batched_tokens",
+          "note": "本批已占用的 token 预算，对着 max_num_batched_tokens 卡上限——prefill 批的大小由它决定。"
+        },
+        {
+          "line": 22,
+          "token": "num_scheduled_tokens",
+          "note": "这条 seq 本轮真正要算的 token 数；chunked prefill 时小于剩余全量，decode 时恒为 1。"
         }
       ]
     },
@@ -155,7 +179,14 @@
         "band": 3
       },
       "collapsed": true,
-      "code": "def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):\n    for seq, token_id in zip(seqs, token_ids):\n        self.block_manager.hash_blocks(seq)\n        seq.num_cached_tokens += seq.num_scheduled_tokens\n        seq.num_scheduled_tokens = 0\n        if is_prefill and seq.num_cached_tokens < seq.num_tokens:\n            continue\n        seq.append_token(token_id)\n        if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:\n            seq.status = SequenceStatus.FINISHED\n            self.block_manager.deallocate(seq)\n            self.running.remove(seq)"
+      "code": "def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):\n    for seq, token_id in zip(seqs, token_ids):\n        self.block_manager.hash_blocks(seq)\n        seq.num_cached_tokens += seq.num_scheduled_tokens\n        seq.num_scheduled_tokens = 0\n        if is_prefill and seq.num_cached_tokens < seq.num_tokens:\n            continue\n        seq.append_token(token_id)\n        if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:\n            seq.status = SequenceStatus.FINISHED\n            self.block_manager.deallocate(seq)\n            self.running.remove(seq)",
+      "terms": [
+        {
+          "line": 4,
+          "token": "num_cached_tokens",
+          "note": "已写入 KV cache 的 token 数；prefill 分几轮时靠它记录进度，也是下次增量的起点。"
+        }
+      ]
     },
     {
       "id": "can_allocate",
@@ -167,7 +198,14 @@
         "band": 0
       },
       "collapsed": true,
-      "code": "def can_allocate(self, seq: Sequence) -> int:\n    h = -1\n    num_cached_blocks = 0\n    num_new_blocks = seq.num_blocks\n    for i in range(seq.num_blocks - 1):\n        token_ids = seq.block(i)\n        h = self.compute_hash(token_ids, h)\n        block_id = self.hash_to_block_id.get(h, -1)\n        if block_id == -1 or self.blocks[block_id].token_ids != token_ids:\n            break\n        num_cached_blocks += 1\n        if block_id in self.used_block_ids:\n            num_new_blocks -= 1\n    if len(self.free_block_ids) < num_new_blocks:\n        return -1\n    return num_cached_blocks"
+      "code": "def can_allocate(self, seq: Sequence) -> int:\n    h = -1\n    num_cached_blocks = 0\n    num_new_blocks = seq.num_blocks\n    for i in range(seq.num_blocks - 1):\n        token_ids = seq.block(i)\n        h = self.compute_hash(token_ids, h)\n        block_id = self.hash_to_block_id.get(h, -1)\n        if block_id == -1 or self.blocks[block_id].token_ids != token_ids:\n            break\n        num_cached_blocks += 1\n        if block_id in self.used_block_ids:\n            num_new_blocks -= 1\n    if len(self.free_block_ids) < num_new_blocks:\n        return -1\n    return num_cached_blocks",
+      "terms": [
+        {
+          "line": 4,
+          "token": "num_new_blocks",
+          "note": "按全新分配估算的块数；每命中一个「在用」的共享块就减一，用来判断 free 池够不够。"
+        }
+      ]
     },
     {
       "id": "allocate",
@@ -187,7 +225,8 @@
           "lines": [
             4,
             15
-          ]
+          ],
+          "explain": "沿同一条哈希链重放认领：块可能正被别的 seq 用着（ref_count +1 共享），也可能已回到 free 队列但内容未被覆盖（从 free 里捞回来复活）。前缀缓存不需要独立存储——它就住在 KV cache 块里。"
         },
         {
           "name": "增量新块",
@@ -195,7 +234,15 @@
           "lines": [
             16,
             18
-          ]
+          ],
+          "explain": "缓存没覆盖的尾部照常拿新块。num_cached_tokens 按整块计，最后一个不满的块永远要重算。"
+        }
+      ],
+      "terms": [
+        {
+          "line": 15,
+          "token": "block_table",
+          "note": "seq 的页表：逻辑块序号 → 物理块 id。attention 用它把逻辑位置翻译成显存里的块。"
         }
       ]
     },

@@ -38,7 +38,14 @@
         "band": 0
       },
       "collapsed": false,
-      "code": "def handle_request(req):\n    key = cache_key(req)\n    cached = get_cached(key)\n    if cached is not None:\n        metrics.hit()\n        return cached\n    resp = fetch_upstream(req)\n    store(key, resp, ttl=req.ttl)\n    return resp"
+      "code": "def handle_request(req):\n    key = cache_key(req)\n    cached = get_cached(key)\n    if cached is not None:\n        metrics.hit()\n        return cached\n    resp = fetch_upstream(req)\n    store(key, resp, ttl=req.ttl)\n    return resp",
+      "terms": [
+        {
+          "line": 8,
+          "token": "ttl",
+          "note": "存活秒数，由请求方通过 req.ttl 声明——缓存不猜新鲜度。"
+        }
+      ]
     },
     {
       "id": "fetch",
@@ -62,7 +69,14 @@
         "band": 0
       },
       "collapsed": true,
-      "code": "def cache_key(req):\n    parts = [req.method, req.path]\n    for h in sorted(req.vary_headers):\n        parts.append(req.headers.get(h, \"\"))\n    return \"v1:\" + sha1(\"|\".join(parts))"
+      "code": "def cache_key(req):\n    parts = [req.method, req.path]\n    for h in sorted(req.vary_headers):\n        parts.append(req.headers.get(h, \"\"))\n    return \"v1:\" + sha1(\"|\".join(parts))",
+      "terms": [
+        {
+          "line": 3,
+          "token": "vary_headers",
+          "note": "该请求声明的 Vary 头列表：这些头的取值会改变响应内容，必须参与 key。"
+        }
+      ]
     },
     {
       "id": "get",
@@ -122,9 +136,11 @@
               "lines": [
                 9,
                 15
-              ]
+              ],
+              "explain": "分数 = 冷的程度 × 大小惩罚。过期条目给 INF 直接排最前——它们本来就该走。"
             }
-          ]
+          ],
+          "explain": "O(N) 扫全表换实现简单：这个量级的缓存不值得维护堆或 LRU 链表。锁粒度是 shard——扫描期间写入只被挡在一个分片上。"
         },
         {
           "name": "收割",

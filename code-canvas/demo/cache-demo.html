@@ -55,9 +55,56 @@
   .bchev { color: var(--bc); font-size: 8px; }
   .bname { color: var(--bc); font-weight: 600; }
   .bsum { color: #8b95a5; }
-  .brange { margin-left: auto; color: #566070; font-size: 9.5px; padding-left: 14px;
+  .brange { margin-left: 10px; color: #566070; font-size: 9.5px; padding-left: 4px;
     font-family: ui-monospace, Menlo, Consolas, monospace; }
   .blk.folded > .bcode { display: none; }
+  .bbtn { font-size: 9px; padding: 0 7px; border-radius: 99px; border: 1px solid #3e4854;
+    color: #8b95a5; cursor: pointer; line-height: 1.6; flex: none; align-self: center; }
+  .bbtn:hover { color: #d5dbe4; border-color: #5a6675; }
+  .bxplain { display: none; padding: 7px 14px 8px 10px; font-size: 11.5px; line-height: 1.7;
+    color: #b6bfcc; border-top: 1px dashed rgba(255,255,255,.09); white-space: normal;
+    max-width: 560px; }
+  .blk.explained > .bxplain { display: block; }
+  .blk.qa-target { box-shadow: 0 0 0 1.5px var(--bc); }
+
+  /* ---- term annotations: dotted identifiers that expand a note ---- */
+  .term { border-bottom: 1px dotted #91a0b4; cursor: pointer; }
+  .term:hover { border-bottom-color: #d5dbe4; color: #e8eef6; }
+  .term.on { background: rgba(176,141,63,.18); border-bottom-color: #e0b45c; }
+  .tnote { display: none; margin: 1px 14px 4px 48px; padding: 5px 10px; font-size: 11px;
+    line-height: 1.65; color: #cdbf9a; background: rgba(176,141,63,.08);
+    border-left: 2px solid #8f7d52; border-radius: 0 6px 6px 0; white-space: normal;
+    max-width: 480px; }
+  .tnote.open { display: block; }
+
+  /* ---- per-block Q&A drawer ---- */
+  #qa { position: fixed; top: 0; right: -420px; width: 390px; height: 100%; z-index: 20;
+    background: #161b22; border-left: 1px solid #313945; display: flex; flex-direction: column;
+    transition: right .3s ease; box-shadow: -12px 0 30px rgba(0,0,0,.35); }
+  #qa.open { right: 0; }
+  #qa header { padding: 14px 44px 10px 16px; border-bottom: 1px solid #2a323d; position: relative; }
+  #qa-path { font-size: 10.5px; color: #6b7684; margin-bottom: 3px; }
+  #qa-name { font: 600 13px ui-monospace, Menlo, Consolas, monospace; color: #e3e9f2; }
+  #qa-close { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px;
+    background: none; border: 1px solid #3c4653; border-radius: 7px; color: #8b95a5;
+    cursor: pointer; font-size: 12px; }
+  #qa-close:hover { color: #d5dbe4; }
+  #qa-log { flex: 1; overflow-y: auto; padding: 12px 16px; }
+  .qa-q { background: #232a33; border-radius: 10px 10px 3px 10px; padding: 8px 11px;
+    margin: 10px 0 6px auto; max-width: 88%; width: fit-content; font-size: 12px; color: #d7dde6; }
+  .qa-a { font-size: 12px; line-height: 1.7; color: #b9c2cf; margin: 0 0 10px;
+    padding: 8px 11px; background: #1b2129; border-radius: 10px 10px 10px 3px;
+    border-left: 2px solid #3f80d6; white-space: pre-wrap; }
+  .qa-a.err { border-left-color: #d65a5a; color: #d8a7a7; }
+  .qa-a.busy { border-left-color: #8b95a5; color: #8b95a5; font-style: italic; }
+  .qa-hint { font-size: 11px; color: #6b7684; line-height: 1.7; padding: 6px 0; }
+  #qa-form { padding: 12px 16px 16px; border-top: 1px solid #2a323d; display: flex; gap: 8px; }
+  #qa-input { flex: 1; background: #10141a; border: 1px solid #313945; color: #d7dde6;
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; resize: none; height: 62px;
+    font-family: inherit; }
+  #qa-send { align-self: flex-end; background: #2a5a9c; border: none; color: #e8eef6;
+    border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 12px; }
+  #qa-send:disabled { opacity: .45; cursor: default; }
 
   /* ---- notes ---- */
   .note { position: absolute; width: 250px; background: #26221a; border: 1px solid #55492f;
@@ -140,8 +187,21 @@
   <div id="stext"><div id="stitle"></div><div id="scap"></div></div>
 </div>
 
+<aside id="qa">
+  <header>
+    <div id="qa-path"></div>
+    <div id="qa-name"></div>
+    <button id="qa-close">✕</button>
+  </header>
+  <div id="qa-log"></div>
+  <div id="qa-form">
+    <textarea id="qa-input" placeholder="就这个块提问…（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button id="qa-send">发送</button>
+  </div>
+</aside>
+
 <script>
-const DATA = {"meta": {"title": "Code Canvas", "subtitle": "缓存中间件 demo · 生成器渲染"}, "regions": [{"id": "A", "title": "故事线 A · 请求主流程", "blurb": "请求的进与出：命中早退，未命中回源", "hue": "blue", "cards": ["handler", "fetch"]}, {"id": "B", "title": "故事线 B · 缓存子系统", "blurb": "key 的生成与存取——命中率与新鲜度都在这里决定", "hue": "green", "cards": ["cachekey", "get", "store", "evict"]}], "cards": [{"id": "handler", "name": "handle_request(req)", "file": "server/handler.py", "lang": "py", "layout": {"col": 0, "band": 0}, "collapsed": false, "code": "def handle_request(req):\n    key = cache_key(req)\n    cached = get_cached(key)\n    if cached is not None:\n        metrics.hit()\n        return cached\n    resp = fetch_upstream(req)\n    store(key, resp, ttl=req.ttl)\n    return resp"}, {"id": "fetch", "name": "fetch_upstream(req)", "file": "server/upstream.py", "lang": "py", "layout": {"col": 0, "band": 2}, "collapsed": true, "code": "def fetch_upstream(req):\n    conn = pool.acquire(req.host)\n    try:\n        return conn.send(req)\n    finally:\n        pool.release(conn)"}, {"id": "cachekey", "name": "cache_key(req)", "file": "server/keys.py", "lang": "py", "layout": {"col": 1, "band": 0}, "collapsed": true, "code": "def cache_key(req):\n    parts = [req.method, req.path]\n    for h in sorted(req.vary_headers):\n        parts.append(req.headers.get(h, \"\"))\n    return \"v1:\" + sha1(\"|\".join(parts))"}, {"id": "get", "name": "get_cached(key)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 0}, "collapsed": true, "code": "def get_cached(key):\n    entry = _table.get(key)\n    if entry is None or entry.expired():\n        return None\n    return entry.value"}, {"id": "store", "name": "store(key, resp, ttl)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 1}, "collapsed": true, "code": "def store(key, resp, ttl):\n    _table[key] = Entry(resp, now() + ttl)\n    _evict_if_needed()"}, {"id": "evict", "name": "_evict_if_needed()", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 2}, "collapsed": false, "code": "def _evict_if_needed():\n    if _table.size() < HIGH_WATER:\n        return\n    target = _table.size() - LOW_WATER\n    victims = []\n    for shard in _table.shards():\n        with shard.lock():\n            for key, e in shard.items():\n                if e.expired():\n                    victims.append((INF, key))\n                    continue\n                score = now() - e.last_used\n                if e.size > BIG_OBJECT:\n                    score *= 2\n                victims.append((score, key))\n    victims.sort(reverse=True)\n    for _, key in victims[:target]:\n        _table.delete(key)\n    metrics.evicted(target)", "blocks": [{"name": "水位检查", "summary": "低于高水位就什么都不做", "lines": [2, 4]}, {"name": "全表扫描打分", "summary": "锁一个 shard 扫一个", "lines": [5, 15], "children": [{"name": "单个 entry 打分", "summary": "过期白送；越冷越大越先死", "lines": [9, 15]}]}, {"name": "收割", "summary": "分数最高的 target 个删掉", "lines": [16, 19]}]}], "wires": [{"id": "w-key", "kind": "call", "from": {"card": "handler", "line": 2}, "to": {"card": "cachekey"}}, {"id": "w-get", "kind": "call", "from": {"card": "handler", "line": 3}, "to": {"card": "get"}}, {"id": "w-fetch", "kind": "call", "from": {"card": "handler", "line": 7, "side": "left"}, "to": {"card": "fetch", "side": "left"}}, {"id": "w-store", "kind": "call", "from": {"card": "handler", "line": 8}, "to": {"card": "store"}}, {"id": "w-evict", "kind": "call", "from": {"card": "store", "line": 3, "side": "left"}, "to": {"card": "evict", "side": "left"}}, {"id": "d-key1", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "get"}}, {"id": "d-key2", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "store"}}, {"id": "d-resp", "kind": "data", "label": "resp", "from": {"card": "fetch", "line": 4}, "to": {"card": "store"}}], "notes": [{"id": "bg0", "flavor": "bg", "tag": "背景 · 这是什么", "text": "一个 HTTP 缓存中间件：请求先查缓存，命中直接返回；未命中回源、写回再返回。读懂它只需要三个问题——key 怎么算、命中走哪条路、未命中怎么写回。故事线正好各答一个。", "place": {"corner": "nw"}, "step": 0}, {"id": "n1", "flavor": "intent", "tag": "NOTE · handler.py:6", "text": "命中直接返回：完全绕过 upstream。这个 early return 就是缓存存在的意义。", "anchor": {"card": "handler", "line": 6}, "place": {"side": "left", "of": "handler"}, "step": 2}, {"id": "n2", "flavor": "intent", "tag": "NOTE · handler.py:8", "text": "ttl 由请求方声明——新鲜度是调用方的决定，缓存只负责执行。", "anchor": {"card": "handler", "line": 8}, "place": {"side": "left", "of": "handler"}, "step": 3}, {"id": "n3", "flavor": "bg", "tag": "背景 · HTTP Vary", "text": "Vary 头声明同一 URL 会因哪些请求头返回不同内容——所以这些头必须参与 key，否则会把 A 的响应错发给 B。", "anchor": {"card": "cachekey", "line": 3}, "place": {"side": "above", "of": "cachekey"}, "step": 1}], "steps": [{"title": "总览", "caption": "一次带缓存的请求处理。左边是请求主流程，右边是缓存子系统。灰线 = 调用，琥珀线 = 数据流。可以自由拖拽查看，或用 ▶ 沿故事线走。", "fit": true}, {"title": "① 请求如何变成 key", "caption": "第一步把请求归一化成缓存键（cache_key 已展开）。第 3 行先对 vary_headers 排序——保证同一请求永远得到同一个 key。两根琥珀线预告了 key 接下来的去向。", "wires": ["w-key", "d-key1", "d-key2"], "lines": [["handler", 2]], "expand": ["cachekey"], "focus": ["handler", "cachekey", "n3", "get"], "storyline": "B"}, {"title": "② 命中路径", "caption": "拿 key 查表，命中就直接返回。注意左侧点亮的行注释：这个 early return 绕过了整个下半段，是缓存存在的意义。", "wires": ["w-get", "d-key1"], "lines": [["handler", 3], ["handler", 4], ["handler", 5], ["handler", 6]], "focus": ["n1", "handler", "get"], "storyline": "A"}, {"title": "③ 未命中：回源并写回", "caption": "回源拿到 resp，连同 key 一起写回。两根琥珀线在 store 汇合——「这个值从哪来」在文本里要人肉追踪变量，在图上是一眼的事。", "wires": ["w-fetch", "w-store", "d-key2", "d-resp"], "lines": [["handler", 7], ["handler", 8], ["handler", 9]], "focus": ["n2", "handler", "fetch", "store"], "storyline": "A"}, {"title": "④ 后台淘汰：长函数先读大纲", "caption": "store 写完顺手检查水位。_evict_if_needed 是个 19 行的嵌套函数——先读三根色条组成的大纲，点条展开代码；「单个 entry 打分」里还能再展一层。层级：卡片 → 块大纲 → 代码。", "wires": ["w-evict"], "lines": [["store", 3]], "expand": ["store"], "focus": ["store", "evict"], "storyline": "B"}]};
+const DATA = {"meta": {"title": "Code Canvas", "subtitle": "缓存中间件 demo · 生成器渲染"}, "regions": [{"id": "A", "title": "故事线 A · 请求主流程", "blurb": "请求的进与出：命中早退，未命中回源", "hue": "blue", "cards": ["handler", "fetch"]}, {"id": "B", "title": "故事线 B · 缓存子系统", "blurb": "key 的生成与存取——命中率与新鲜度都在这里决定", "hue": "green", "cards": ["cachekey", "get", "store", "evict"]}], "cards": [{"id": "handler", "name": "handle_request(req)", "file": "server/handler.py", "lang": "py", "layout": {"col": 0, "band": 0}, "collapsed": false, "code": "def handle_request(req):\n    key = cache_key(req)\n    cached = get_cached(key)\n    if cached is not None:\n        metrics.hit()\n        return cached\n    resp = fetch_upstream(req)\n    store(key, resp, ttl=req.ttl)\n    return resp", "terms": [{"line": 8, "token": "ttl", "note": "存活秒数，由请求方通过 req.ttl 声明——缓存不猜新鲜度。"}]}, {"id": "fetch", "name": "fetch_upstream(req)", "file": "server/upstream.py", "lang": "py", "layout": {"col": 0, "band": 2}, "collapsed": true, "code": "def fetch_upstream(req):\n    conn = pool.acquire(req.host)\n    try:\n        return conn.send(req)\n    finally:\n        pool.release(conn)"}, {"id": "cachekey", "name": "cache_key(req)", "file": "server/keys.py", "lang": "py", "layout": {"col": 1, "band": 0}, "collapsed": true, "code": "def cache_key(req):\n    parts = [req.method, req.path]\n    for h in sorted(req.vary_headers):\n        parts.append(req.headers.get(h, \"\"))\n    return \"v1:\" + sha1(\"|\".join(parts))", "terms": [{"line": 3, "token": "vary_headers", "note": "该请求声明的 Vary 头列表：这些头的取值会改变响应内容，必须参与 key。"}]}, {"id": "get", "name": "get_cached(key)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 0}, "collapsed": true, "code": "def get_cached(key):\n    entry = _table.get(key)\n    if entry is None or entry.expired():\n        return None\n    return entry.value"}, {"id": "store", "name": "store(key, resp, ttl)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 1}, "collapsed": true, "code": "def store(key, resp, ttl):\n    _table[key] = Entry(resp, now() + ttl)\n    _evict_if_needed()"}, {"id": "evict", "name": "_evict_if_needed()", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 2}, "collapsed": false, "code": "def _evict_if_needed():\n    if _table.size() < HIGH_WATER:\n        return\n    target = _table.size() - LOW_WATER\n    victims = []\n    for shard in _table.shards():\n        with shard.lock():\n            for key, e in shard.items():\n                if e.expired():\n                    victims.append((INF, key))\n                    continue\n                score = now() - e.last_used\n                if e.size > BIG_OBJECT:\n                    score *= 2\n                victims.append((score, key))\n    victims.sort(reverse=True)\n    for _, key in victims[:target]:\n        _table.delete(key)\n    metrics.evicted(target)", "blocks": [{"name": "水位检查", "summary": "低于高水位就什么都不做", "lines": [2, 4]}, {"name": "全表扫描打分", "summary": "锁一个 shard 扫一个", "lines": [5, 15], "children": [{"name": "单个 entry 打分", "summary": "过期白送；越冷越大越先死", "lines": [9, 15], "explain": "分数 = 冷的程度 × 大小惩罚。过期条目给 INF 直接排最前——它们本来就该走。"}], "explain": "O(N) 扫全表换实现简单：这个量级的缓存不值得维护堆或 LRU 链表。锁粒度是 shard——扫描期间写入只被挡在一个分片上。"}, {"name": "收割", "summary": "分数最高的 target 个删掉", "lines": [16, 19]}]}], "wires": [{"id": "w-key", "kind": "call", "from": {"card": "handler", "line": 2}, "to": {"card": "cachekey"}}, {"id": "w-get", "kind": "call", "from": {"card": "handler", "line": 3}, "to": {"card": "get"}}, {"id": "w-fetch", "kind": "call", "from": {"card": "handler", "line": 7, "side": "left"}, "to": {"card": "fetch", "side": "left"}}, {"id": "w-store", "kind": "call", "from": {"card": "handler", "line": 8}, "to": {"card": "store"}}, {"id": "w-evict", "kind": "call", "from": {"card": "store", "line": 3, "side": "left"}, "to": {"card": "evict", "side": "left"}}, {"id": "d-key1", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "get"}}, {"id": "d-key2", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "store"}}, {"id": "d-resp", "kind": "data", "label": "resp", "from": {"card": "fetch", "line": 4}, "to": {"card": "store"}}], "notes": [{"id": "bg0", "flavor": "bg", "tag": "背景 · 这是什么", "text": "一个 HTTP 缓存中间件：请求先查缓存，命中直接返回；未命中回源、写回再返回。读懂它只需要三个问题——key 怎么算、命中走哪条路、未命中怎么写回。故事线正好各答一个。", "place": {"corner": "nw"}, "step": 0}, {"id": "n1", "flavor": "intent", "tag": "NOTE · handler.py:6", "text": "命中直接返回：完全绕过 upstream。这个 early return 就是缓存存在的意义。", "anchor": {"card": "handler", "line": 6}, "place": {"side": "left", "of": "handler"}, "step": 2}, {"id": "n2", "flavor": "intent", "tag": "NOTE · handler.py:8", "text": "ttl 由请求方声明——新鲜度是调用方的决定，缓存只负责执行。", "anchor": {"card": "handler", "line": 8}, "place": {"side": "left", "of": "handler"}, "step": 3}, {"id": "n3", "flavor": "bg", "tag": "背景 · HTTP Vary", "text": "Vary 头声明同一 URL 会因哪些请求头返回不同内容——所以这些头必须参与 key，否则会把 A 的响应错发给 B。", "anchor": {"card": "cachekey", "line": 3}, "place": {"side": "above", "of": "cachekey"}, "step": 1}], "steps": [{"title": "总览", "caption": "一次带缓存的请求处理。左边是请求主流程，右边是缓存子系统。灰线 = 调用，琥珀线 = 数据流。可以自由拖拽查看，或用 ▶ 沿故事线走。", "fit": true}, {"title": "① 请求如何变成 key", "caption": "第一步把请求归一化成缓存键（cache_key 已展开）。第 3 行先对 vary_headers 排序——保证同一请求永远得到同一个 key。两根琥珀线预告了 key 接下来的去向。", "wires": ["w-key", "d-key1", "d-key2"], "lines": [["handler", 2]], "expand": ["cachekey"], "focus": ["handler", "cachekey", "n3", "get"], "storyline": "B"}, {"title": "② 命中路径", "caption": "拿 key 查表，命中就直接返回。注意左侧点亮的行注释：这个 early return 绕过了整个下半段，是缓存存在的意义。", "wires": ["w-get", "d-key1"], "lines": [["handler", 3], ["handler", 4], ["handler", 5], ["handler", 6]], "focus": ["n1", "handler", "get"], "storyline": "A"}, {"title": "③ 未命中：回源并写回", "caption": "回源拿到 resp，连同 key 一起写回。两根琥珀线在 store 汇合——「这个值从哪来」在文本里要人肉追踪变量，在图上是一眼的事。", "wires": ["w-fetch", "w-store", "d-key2", "d-resp"], "lines": [["handler", 7], ["handler", 8], ["handler", 9]], "focus": ["n2", "handler", "fetch", "store"], "storyline": "A"}, {"title": "④ 后台淘汰：长函数先读大纲", "caption": "store 写完顺手检查水位。_evict_if_needed 是个 19 行的嵌套函数——先读三根色条组成的大纲，点条展开代码；「单个 entry 打分」里还能再展一层。层级：卡片 → 块大纲 → 代码。", "wires": ["w-evict"], "lines": [["store", 3]], "expand": ["store"], "focus": ["store", "evict"], "storyline": "B"}]};
 
 const vp = document.getElementById('vp');
 const world = document.getElementById('world');
@@ -220,10 +280,15 @@ function buildBlocks(blocks, lines, lo, hi, cardId, depth) {
   for (const b of blks) {
     for (; i < b.lines[0]; i++) html += lines[i - 1];
     const c = BLOCK_PALETTE[Math.min(depth, 1)][b._idx % BLOCK_PALETTE[Math.min(depth, 1)].length];
+    const btns = (b.explain ? `<span class="bbtn" style="margin-left:auto" data-act="explain">说明</span>` : '')
+      + `<span class="bbtn"${b.explain ? '' : ' style="margin-left:auto"'} data-act="ask">问</span>`;
     html += `<div class="blk${b.folded !== false ? ' folded' : ''}" style="--bc:${c}; --bt:${rgba(c, .05)}">`
-      + `<div class="bbar"><span class="bchev">${b.folded !== false ? '▸' : '▾'}</span>`
+      + `<div class="bbar" data-card="${cardId}" data-bname="${esc(b.name)}">`
+      + `<span class="bchev">${b.folded !== false ? '▸' : '▾'}</span>`
       + `<span class="bname">${esc(b.name)}</span><span class="bsum">${esc(b.summary || '')}</span>`
-      + `<span class="brange">${b.lines[0]}–${b.lines[1]}</span></div><div class="bcode">`
+      + btns + `<span class="brange">${b.lines[0]}–${b.lines[1]}</span></div>`
+      + (b.explain ? `<div class="bxplain">${esc(b.explain)}</div>` : '')
+      + `<div class="bcode">`
       + buildBlocks(b.children, lines, b.lines[0], b.lines[1], cardId, depth + 1)
       + `</div></div>`;
     i = b.lines[1] + 1;
@@ -231,12 +296,26 @@ function buildBlocks(blocks, lines, lo, hi, cardId, depth) {
   for (; i <= hi; i++) html += lines[i - 1];
   return html;
 }
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const cardById = {};
 for (const c of DATA.cards) {
   cardById[c.id] = c;
   const raw = c.code.split('\n');
-  const lineHtml = raw.map((t, i) =>
-    `<div class="ln" id="${c.id}-L${i + 1}"><span class="no">${i + 1}</span>${highlight(t, c.lang)}</div>`);
+  const lineHtml = raw.map((t, i) => {
+    // mark annotated terms with sentinels before highlighting, wrap after
+    let marked = t;
+    const terms = (c.terms || []).map((tm, j) => ({ ...tm, _id: `tn-${c.id}-${j}` }))
+      .filter(tm => tm.line === i + 1);
+    for (const tm of terms)
+      marked = marked.replace(new RegExp('\\b' + escRe(tm.token) + '\\b'), '\x01' + tm.token + '\x02');
+    let h = highlight(marked, c.lang);
+    for (const tm of terms) {
+      h = h.replace('\x01', `<span class="term" data-tn="${tm._id}">`).replace('\x02', '</span>');
+    }
+    const notes = terms.map(tm =>
+      `<div class="tnote" id="${tm._id}"><b>${esc(tm.token)}</b> — ${esc(tm.note)}</div>`).join('');
+    return `<div class="ln" id="${c.id}-L${i + 1}"><span class="no">${i + 1}</span>${h}</div>${notes}`;
+  });
   (c.blocks || []).forEach((b, i) => { b._idx = i; (function mark(bs) { (bs || []).forEach((x, j) => { x._idx = j; mark(x.children); }); })(b.children); });
   const el = document.createElement('div');
   el.className = 'card';
@@ -584,8 +663,128 @@ addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') setStep(step + 1);
 });
 
+/* ================= per-block Q&A ================= */
+const QA = { live: false, cur: null, log: {} };
+const QA_STORE = 'canvas-qa:' + (DATA.meta?.title || 'untitled');
+try { QA.log = JSON.parse(localStorage.getItem(QA_STORE) || '{}'); } catch (e) {}
+fetch('__alive').then(r => r.json()).then(() => { QA.live = true; }).catch(() => {});
+
+function findBlock(blocks, name) {
+  for (const b of blocks || []) {
+    if (b.name === name) return b;
+    const c = findBlock(b.children, name);
+    if (c) return c;
+  }
+  return null;
+}
+function qaKey() { return QA.cur.card + '::' + QA.cur.block; }
+function buildQAPrompt(question) {
+  const card = cardById[QA.cur.card];
+  const b = findBlock(card.blocks, QA.cur.block);
+  const lines = card.code.split('\n');
+  const blockCode = lines.slice(b.lines[0] - 1, b.lines[1])
+    .map((t, i) => `${b.lines[0] + i}  ${t}`).join('\n');
+  const hist = (QA.log[qaKey()] || []).filter(x => x.a && !x.err).slice(-3)
+    .map(x => `Q: ${x.q}\nA: ${x.a}`).join('\n');
+  return `你是一张交互式代码画布（Code Canvas）的讲解员。只根据给出的代码与上下文回答；代码里没有依据的不要编造；不确定就直说不确定。用中文回答，尽量不超过 200 字。\n\n主题: ${DATA.meta?.title || ''} — ${DATA.meta?.subtitle || ''}\n卡片: ${card.name}（${card.file || ''}）\n逻辑块: ${b.name} — ${b.summary || ''}${b.explain ? '\n已有说明: ' + b.explain : ''}\n\n块内代码（卡片内行号 ${b.lines[0]}–${b.lines[1]}）:\n${blockCode}\n\n所在函数完整代码:\n${card.code}\n${hist ? '\n此前的问答:\n' + hist + '\n' : ''}\n读者的问题: ${question}`;
+}
+function renderQALog() {
+  const el = document.getElementById('qa-log');
+  el.innerHTML = '';
+  if (!QA.live) {
+    el.innerHTML = `<div class="qa-hint">未检测到本地问答服务：发送会把「问题 + 块代码 + 上下文」复制到剪贴板，粘贴给任意 agent 即可。<br>在线问答：<code>python3 serve.py 本画布.html</code> 后从 localhost 打开。</div>`;
+  }
+  for (const x of QA.log[qaKey()] || []) {
+    el.insertAdjacentHTML('beforeend', `<div class="qa-q">${esc(x.q)}</div>`);
+    el.insertAdjacentHTML('beforeend',
+      `<div class="qa-a${x.err ? ' err' : x.busy ? ' busy' : ''}">${esc(x.a || '…')}</div>`);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+function openQA(cardId, bname) {
+  QA.cur = { card: cardId, block: bname };
+  document.querySelectorAll('.blk.qa-target').forEach(b => b.classList.remove('qa-target'));
+  const bar = [...document.querySelectorAll('.bbar')]
+    .find(b => b.dataset.card === cardId && b.dataset.bname === bname);
+  if (bar) bar.parentElement.classList.add('qa-target');
+  const card = cardById[cardId];
+  document.getElementById('qa-path').textContent = `${card.name} · ${card.file || ''}`;
+  document.getElementById('qa-name').textContent = bname;
+  document.getElementById('qa').classList.add('open');
+  renderQALog();
+  document.getElementById('qa-input').focus();
+}
+function closeQA() {
+  document.getElementById('qa').classList.remove('open');
+  document.querySelectorAll('.blk.qa-target').forEach(b => b.classList.remove('qa-target'));
+  QA.cur = null;
+}
+async function sendQA() {
+  const input = document.getElementById('qa-input');
+  const q = input.value.trim();
+  if (!q || !QA.cur) return;
+  input.value = '';
+  const entry = { q, a: '', busy: true };
+  (QA.log[qaKey()] ||= []).push(entry);
+  const prompt = buildQAPrompt(q);
+  if (!QA.live) {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      entry.a = '已复制完整上下文提问到剪贴板 ✓ 粘贴给你的 agent 即可。';
+    } catch (e) {
+      entry.a = '复制失败（浏览器限制）。启动 serve.py 使用在线问答。';
+      entry.err = true;
+    }
+    entry.busy = false;
+    renderQALog();
+    return;
+  }
+  entry.a = '思考中…';
+  renderQALog();
+  document.getElementById('qa-send').disabled = true;
+  try {
+    const r = await fetch('ask', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, card: QA.cur.card, block: QA.cur.block, question: q }),
+    });
+    const j = await r.json();
+    if (j.ok) entry.a = j.answer;
+    else { entry.a = '出错了：' + (j.error || '未知错误'); entry.err = true; }
+  } catch (e) {
+    entry.a = '请求失败：' + e.message; entry.err = true;
+  }
+  entry.busy = false;
+  document.getElementById('qa-send').disabled = false;
+  try { localStorage.setItem(QA_STORE, JSON.stringify(QA.log)); } catch (e) {}
+  renderQALog();
+}
+document.getElementById('qa-close').onclick = closeQA;
+document.getElementById('qa-send').onclick = sendQA;
+document.getElementById('qa-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQA(); }
+  e.stopPropagation();
+});
+
 /* ================= interactions ================= */
 world.addEventListener('click', e => {
+  const term = e.target.closest('.term');
+  if (term) {
+    const note = document.getElementById(term.dataset.tn);
+    term.classList.toggle('on');
+    note.classList.toggle('open');
+    drawWires(); return;
+  }
+  const btn = e.target.closest('.bbtn');
+  if (btn) {
+    const bar = btn.closest('.bbar');
+    if (btn.dataset.act === 'explain') {
+      bar.parentElement.classList.toggle('explained');
+      drawWires();
+    } else {
+      openQA(bar.dataset.card, bar.dataset.bname);
+    }
+    return;
+  }
   const bar = e.target.closest('.bbar');
   if (bar) {
     const blk = bar.parentElement;
@@ -626,15 +825,26 @@ vp.addEventListener('wheel', e => {
 }, { passive: false });
 addEventListener('resize', () => { drawWires(); if (STEPS[step].fit) fitAll(false); });
 
-/* ================= init ================= */
-const m = location.hash.match(/^#s(\d+)(x?)$/);
+/* ================= init =================
+   #s2 jumps to step 2; trailing debug letters: x = unfold everything,
+   e = open all block explanations, t = open all term notes, q = open Q&A drawer */
+const m = location.hash.match(/^#s(\d+)([a-z]*)$/);
+const flags = m ? m[2] : '';
 requestAnimationFrame(() => {
   layout();
-  if (m && m[2]) document.querySelectorAll('.blk, .card').forEach(b => {
+  if (flags.includes('x')) document.querySelectorAll('.blk, .card').forEach(b => {
     b.classList.remove('folded'); b.classList.remove('collapsed');
     const v = b.querySelector('.bchev, .chev'); if (v) v.textContent = '▾';
   });
+  if (flags.includes('e')) document.querySelectorAll('.blk').forEach(b => {
+    if (b.querySelector(':scope > .bxplain')) b.classList.add('explained');
+  });
+  if (flags.includes('t')) document.querySelectorAll('.tnote').forEach(n => n.classList.add('open'));
   setStep(m ? +m[1] : 0, false);
+  if (flags.includes('q')) {
+    const bar = document.querySelector('.bbar');
+    if (bar) openQA(bar.dataset.card, bar.dataset.bname);
+  }
 });
 </script>
 </body>

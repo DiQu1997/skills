@@ -18,7 +18,9 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
    故事需要的"值的旅程"（值产生行 → 消费卡片，带值名 label）
 4. **分层细节**：重点卡 `collapsed:false` + 行级 note；次要卡折叠。
    长函数（约 15 行以上或嵌套深）写 `blocks` 行段树——按"一句话说得清
-   功能"分段，不按 AST；嵌套结构套 children
+   功能"分段，不按 AST；嵌套结构套 children。值得多讲两句的块加
+   `explain`（≤120 字，回答"为什么这么写/坑在哪"，不复述代码）。
+   不好懂的标识符加 `terms` 变元注释（≤60 字，回答"这个变量装的是什么"）
 5. **背景三层**：画布级 bg note（corner nw，step 0 点亮）、region blurb、
    概念级 bg note（锚到行，在相关 step 点亮）。字数硬上限见 schema.md
 6. **写 steps**：第 0 步总览（fit），后续每步 = 点亮的线 + 高亮的行 +
@@ -30,7 +32,11 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
    ```
 
 8. **验证**（有 headless chromium 时）：截图总览和每个 step，检查
-   压盖 / 溢出 / 越界；`#s2` 直达步骤，尾缀 `x` 全展开
+   压盖 / 溢出 / 越界；`#s2` 直达步骤，调试尾缀 `x` 全展开、`e` 开说明、
+   `t` 开变元注释、`q` 开问答抽屉
+9. **（可选）开启块级问答**：`python3 serve.py output.html --repo <仓库路径>`，
+   从 localhost 打开——每个块的「问」变成真问答（桥接 `claude -p`）。
+   静态打开时「问」降级为复制上下文提问到剪贴板
 
 ## 布局：agent 只给粗位置
 
@@ -66,6 +72,7 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
 - `schema.md` — canvas JSON 格式
 - `template/canvas.html` — 数据驱动的单文件渲染模板（布局引擎在里面）
 - `render.py` — JSON → HTML 注入脚本
+- `serve.py` — 块级问答服务：serve HTML + `/ask` 桥接 claude/codex CLI
 - `demo/cache-demo.json` / `.html` — 参考示例（缓存中间件，4 步故事线）
 - `mock/canvas-mock-v1.html` — 手工排版的形态原型（历史参考，勿再改）
 
