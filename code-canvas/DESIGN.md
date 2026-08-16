@@ -107,6 +107,10 @@ Blueprint / Node-RED 这类 node-and-wire 图：**写起来低效（图作为源
 
 ## 现状
 
-- `mock/canvas-mock-v1.html` — 手工排版的形态 mock：真代码卡片、两种线、
-  行级端口 + note、折叠/展开、平移缩放、故事线区域 + 步进镜头。
-  用于钉死视觉形态，不是生成器产物。
+- **生成管线已落地**（v0.1）：`schema.md`（JSON 格式）→ `render.py` +
+  `template/canvas.html`（数据驱动渲染器，含测量布局 / 锚点级联 /
+  focus 镜头计算）→ 自包含 HTML。skill 定义见 `SKILL.md`
+- 布局折中方案已实现：agent 给 `{col, band}` 粗位置，渲染器测行宽定列宽、
+  同列冲突下推、region 实时包住成员、镜头由 focus bbox 自动计算
+- `demo/cache-demo.json` / `.html` — 生成管线的参考示例（与手工 mock 同内容）
+- `mock/canvas-mock-v1.html` — 手工排版的形态原型，历史参考，勿再改
