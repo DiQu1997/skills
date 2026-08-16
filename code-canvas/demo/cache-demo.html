@@ -146,6 +146,33 @@
   #hint { position: fixed; top: 16px; right: 18px; z-index: 10; font-size: 11px; color: #5d6875;
     text-align: right; line-height: 1.7; }
 
+  /* ---- reader profile ---- */
+  #profile-btn { position: fixed; top: 86px; right: 18px; z-index: 15; font-size: 11px;
+    padding: 4px 12px; border-radius: 99px; border: 1px solid #3e4854; background: #1b2027;
+    color: #8b95a5; cursor: pointer; }
+  #profile-btn:hover { color: #d5dbe4; border-color: #5a6675; }
+  body.has-profile #profile-btn { color: #6fc0e0; border-color: #3a5a6b; }
+  #pp { position: fixed; top: 120px; right: 18px; z-index: 15; width: 320px;
+    background: #161b22; border: 1px solid #313945; border-radius: 12px; padding: 14px;
+    box-shadow: 0 14px 34px rgba(0,0,0,.4); }
+  #pp[hidden] { display: none; }
+  .pp-t { font-size: 12px; font-weight: 600; color: #e3e9f2; margin-bottom: 8px; }
+  #pp-input { width: 100%; height: 92px; background: #10141a; border: 1px solid #313945;
+    color: #d7dde6; border-radius: 8px; padding: 8px 10px; font-size: 11.5px; resize: none;
+    font-family: inherit; line-height: 1.6; }
+  .pp-row { display: flex; gap: 8px; margin: 10px 0 8px; }
+  .pp-row button { border-radius: 7px; padding: 5px 14px; font-size: 11.5px; cursor: pointer;
+    border: 1px solid #3c4653; background: #2a323d; color: #c9d1d9; }
+  #pp-save { background: #2a5a9c; border-color: #2a5a9c; color: #e8eef6; }
+  .pp-hint { font-size: 10.5px; color: #6b7684; line-height: 1.65; }
+
+  /* rewrite affordances only exist once a profile is set */
+  body:not(.has-profile) .bbtn[data-act="rewrite"] { display: none; }
+  .bx-tools, .tn-tools { display: inline-flex; gap: 8px; align-items: center; }
+  .bx-tools { display: flex; margin-top: 7px; }
+  .rw-badge { font-size: 9px; color: #6fc0e0; border: 1px solid #3a5a6b; border-radius: 99px;
+    padding: 0 7px; line-height: 1.6; flex: none; }
+
   #bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 10;
     display: flex; align-items: center; gap: 14px; padding: 11px 16px;
     background: rgba(18,22,28,.93); border: 1px solid #313945; border-radius: 14px;
@@ -180,6 +207,15 @@
 
 <div id="hint">拖拽平移 · 滚轮缩放<br>点击卡片标题 / 块条展开收起<br>◀ ▶ 或 ←→ 沿故事线走</div>
 
+<button id="profile-btn">阅读画像</button>
+<div id="pp" hidden>
+  <div class="pp-t">阅读画像 — 你想被怎么讲</div>
+  <textarea id="pp-input" placeholder="你是谁、想看懂什么、偏好什么讲法…
+例：刚接手推理服务的后端，Python 一般；重点想懂显存管理；多用类比，中文。"></textarea>
+  <div class="pp-row"><button id="pp-save">保存</button><button id="pp-clear">清除</button></div>
+  <div class="pp-hint">设置后：块问答按画像回答；每条「说明」和变元注释出现「按我的画像重讲」。只存在本机 localStorage。</div>
+</div>
+
 <div id="bar">
   <button class="navbtn" id="prev">◀</button>
   <div id="dots"></div>
@@ -201,7 +237,7 @@
 </aside>
 
 <script>
-const DATA = {"meta": {"title": "Code Canvas", "subtitle": "缓存中间件 demo · 生成器渲染"}, "regions": [{"id": "A", "title": "故事线 A · 请求主流程", "blurb": "请求的进与出：命中早退，未命中回源", "hue": "blue", "cards": ["handler", "fetch"]}, {"id": "B", "title": "故事线 B · 缓存子系统", "blurb": "key 的生成与存取——命中率与新鲜度都在这里决定", "hue": "green", "cards": ["cachekey", "get", "store", "evict"]}], "cards": [{"id": "handler", "name": "handle_request(req)", "file": "server/handler.py", "lang": "py", "layout": {"col": 0, "band": 0}, "collapsed": false, "code": "def handle_request(req):\n    key = cache_key(req)\n    cached = get_cached(key)\n    if cached is not None:\n        metrics.hit()\n        return cached\n    resp = fetch_upstream(req)\n    store(key, resp, ttl=req.ttl)\n    return resp", "terms": [{"line": 8, "token": "ttl", "note": "存活秒数，由请求方通过 req.ttl 声明——缓存不猜新鲜度。"}]}, {"id": "fetch", "name": "fetch_upstream(req)", "file": "server/upstream.py", "lang": "py", "layout": {"col": 0, "band": 2}, "collapsed": true, "code": "def fetch_upstream(req):\n    conn = pool.acquire(req.host)\n    try:\n        return conn.send(req)\n    finally:\n        pool.release(conn)"}, {"id": "cachekey", "name": "cache_key(req)", "file": "server/keys.py", "lang": "py", "layout": {"col": 1, "band": 0}, "collapsed": true, "code": "def cache_key(req):\n    parts = [req.method, req.path]\n    for h in sorted(req.vary_headers):\n        parts.append(req.headers.get(h, \"\"))\n    return \"v1:\" + sha1(\"|\".join(parts))", "terms": [{"line": 3, "token": "vary_headers", "note": "该请求声明的 Vary 头列表：这些头的取值会改变响应内容，必须参与 key。"}]}, {"id": "get", "name": "get_cached(key)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 0}, "collapsed": true, "code": "def get_cached(key):\n    entry = _table.get(key)\n    if entry is None or entry.expired():\n        return None\n    return entry.value"}, {"id": "store", "name": "store(key, resp, ttl)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 1}, "collapsed": true, "code": "def store(key, resp, ttl):\n    _table[key] = Entry(resp, now() + ttl)\n    _evict_if_needed()"}, {"id": "evict", "name": "_evict_if_needed()", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 2}, "collapsed": false, "code": "def _evict_if_needed():\n    if _table.size() < HIGH_WATER:\n        return\n    target = _table.size() - LOW_WATER\n    victims = []\n    for shard in _table.shards():\n        with shard.lock():\n            for key, e in shard.items():\n                if e.expired():\n                    victims.append((INF, key))\n                    continue\n                score = now() - e.last_used\n                if e.size > BIG_OBJECT:\n                    score *= 2\n                victims.append((score, key))\n    victims.sort(reverse=True)\n    for _, key in victims[:target]:\n        _table.delete(key)\n    metrics.evicted(target)", "blocks": [{"name": "水位检查", "summary": "低于高水位就什么都不做", "lines": [2, 4]}, {"name": "全表扫描打分", "summary": "锁一个 shard 扫一个", "lines": [5, 15], "children": [{"name": "单个 entry 打分", "summary": "过期白送；越冷越大越先死", "lines": [9, 15], "explain": "分数 = 冷的程度 × 大小惩罚。过期条目给 INF 直接排最前——它们本来就该走。"}], "explain": "O(N) 扫全表换实现简单：这个量级的缓存不值得维护堆或 LRU 链表。锁粒度是 shard——扫描期间写入只被挡在一个分片上。"}, {"name": "收割", "summary": "分数最高的 target 个删掉", "lines": [16, 19]}]}], "wires": [{"id": "w-key", "kind": "call", "from": {"card": "handler", "line": 2}, "to": {"card": "cachekey"}}, {"id": "w-get", "kind": "call", "from": {"card": "handler", "line": 3}, "to": {"card": "get"}}, {"id": "w-fetch", "kind": "call", "from": {"card": "handler", "line": 7, "side": "left"}, "to": {"card": "fetch", "side": "left"}}, {"id": "w-store", "kind": "call", "from": {"card": "handler", "line": 8}, "to": {"card": "store"}}, {"id": "w-evict", "kind": "call", "from": {"card": "store", "line": 3, "side": "left"}, "to": {"card": "evict", "side": "left"}}, {"id": "d-key1", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "get"}}, {"id": "d-key2", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "store"}}, {"id": "d-resp", "kind": "data", "label": "resp", "from": {"card": "fetch", "line": 4}, "to": {"card": "store"}}], "notes": [{"id": "bg0", "flavor": "bg", "tag": "背景 · 这是什么", "text": "一个 HTTP 缓存中间件：请求先查缓存，命中直接返回；未命中回源、写回再返回。读懂它只需要三个问题——key 怎么算、命中走哪条路、未命中怎么写回。故事线正好各答一个。", "place": {"corner": "nw"}, "step": 0}, {"id": "n1", "flavor": "intent", "tag": "NOTE · handler.py:6", "text": "命中直接返回：完全绕过 upstream。这个 early return 就是缓存存在的意义。", "anchor": {"card": "handler", "line": 6}, "place": {"side": "left", "of": "handler"}, "step": 2}, {"id": "n2", "flavor": "intent", "tag": "NOTE · handler.py:8", "text": "ttl 由请求方声明——新鲜度是调用方的决定，缓存只负责执行。", "anchor": {"card": "handler", "line": 8}, "place": {"side": "left", "of": "handler"}, "step": 3}, {"id": "n3", "flavor": "bg", "tag": "背景 · HTTP Vary", "text": "Vary 头声明同一 URL 会因哪些请求头返回不同内容——所以这些头必须参与 key，否则会把 A 的响应错发给 B。", "anchor": {"card": "cachekey", "line": 3}, "place": {"side": "above", "of": "cachekey"}, "step": 1}], "steps": [{"title": "总览", "caption": "一次带缓存的请求处理。左边是请求主流程，右边是缓存子系统。灰线 = 调用，琥珀线 = 数据流。可以自由拖拽查看，或用 ▶ 沿故事线走。", "fit": true}, {"title": "① 请求如何变成 key", "caption": "第一步把请求归一化成缓存键（cache_key 已展开）。第 3 行先对 vary_headers 排序——保证同一请求永远得到同一个 key。两根琥珀线预告了 key 接下来的去向。", "wires": ["w-key", "d-key1", "d-key2"], "lines": [["handler", 2]], "expand": ["cachekey"], "focus": ["handler", "cachekey", "n3", "get"], "storyline": "B"}, {"title": "② 命中路径", "caption": "拿 key 查表，命中就直接返回。注意左侧点亮的行注释：这个 early return 绕过了整个下半段，是缓存存在的意义。", "wires": ["w-get", "d-key1"], "lines": [["handler", 3], ["handler", 4], ["handler", 5], ["handler", 6]], "focus": ["n1", "handler", "get"], "storyline": "A"}, {"title": "③ 未命中：回源并写回", "caption": "回源拿到 resp，连同 key 一起写回。两根琥珀线在 store 汇合——「这个值从哪来」在文本里要人肉追踪变量，在图上是一眼的事。", "wires": ["w-fetch", "w-store", "d-key2", "d-resp"], "lines": [["handler", 7], ["handler", 8], ["handler", 9]], "focus": ["n2", "handler", "fetch", "store"], "storyline": "A"}, {"title": "④ 后台淘汰：长函数先读大纲", "caption": "store 写完顺手检查水位。_evict_if_needed 是个 19 行的嵌套函数——先读三根色条组成的大纲，点条展开代码；「单个 entry 打分」里还能再展一层。层级：卡片 → 块大纲 → 代码。", "wires": ["w-evict"], "lines": [["store", 3]], "expand": ["store"], "focus": ["store", "evict"], "storyline": "B"}]};
+const DATA = {"meta": {"title": "Code Canvas", "subtitle": "缓存中间件 demo · 生成器渲染", "audience": "一般后端工程师；中文；简洁"}, "regions": [{"id": "A", "title": "故事线 A · 请求主流程", "blurb": "请求的进与出：命中早退，未命中回源", "hue": "blue", "cards": ["handler", "fetch"]}, {"id": "B", "title": "故事线 B · 缓存子系统", "blurb": "key 的生成与存取——命中率与新鲜度都在这里决定", "hue": "green", "cards": ["cachekey", "get", "store", "evict"]}], "cards": [{"id": "handler", "name": "handle_request(req)", "file": "server/handler.py", "lang": "py", "layout": {"col": 0, "band": 0}, "collapsed": false, "code": "def handle_request(req):\n    key = cache_key(req)\n    cached = get_cached(key)\n    if cached is not None:\n        metrics.hit()\n        return cached\n    resp = fetch_upstream(req)\n    store(key, resp, ttl=req.ttl)\n    return resp", "terms": [{"line": 8, "token": "ttl", "note": "存活秒数，由请求方通过 req.ttl 声明——缓存不猜新鲜度。"}]}, {"id": "fetch", "name": "fetch_upstream(req)", "file": "server/upstream.py", "lang": "py", "layout": {"col": 0, "band": 2}, "collapsed": true, "code": "def fetch_upstream(req):\n    conn = pool.acquire(req.host)\n    try:\n        return conn.send(req)\n    finally:\n        pool.release(conn)"}, {"id": "cachekey", "name": "cache_key(req)", "file": "server/keys.py", "lang": "py", "layout": {"col": 1, "band": 0}, "collapsed": true, "code": "def cache_key(req):\n    parts = [req.method, req.path]\n    for h in sorted(req.vary_headers):\n        parts.append(req.headers.get(h, \"\"))\n    return \"v1:\" + sha1(\"|\".join(parts))", "terms": [{"line": 3, "token": "vary_headers", "note": "该请求声明的 Vary 头列表：这些头的取值会改变响应内容，必须参与 key。"}]}, {"id": "get", "name": "get_cached(key)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 0}, "collapsed": true, "code": "def get_cached(key):\n    entry = _table.get(key)\n    if entry is None or entry.expired():\n        return None\n    return entry.value"}, {"id": "store", "name": "store(key, resp, ttl)", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 1}, "collapsed": true, "code": "def store(key, resp, ttl):\n    _table[key] = Entry(resp, now() + ttl)\n    _evict_if_needed()"}, {"id": "evict", "name": "_evict_if_needed()", "file": "server/cache.py", "lang": "py", "layout": {"col": 2, "band": 2}, "collapsed": false, "code": "def _evict_if_needed():\n    if _table.size() < HIGH_WATER:\n        return\n    target = _table.size() - LOW_WATER\n    victims = []\n    for shard in _table.shards():\n        with shard.lock():\n            for key, e in shard.items():\n                if e.expired():\n                    victims.append((INF, key))\n                    continue\n                score = now() - e.last_used\n                if e.size > BIG_OBJECT:\n                    score *= 2\n                victims.append((score, key))\n    victims.sort(reverse=True)\n    for _, key in victims[:target]:\n        _table.delete(key)\n    metrics.evicted(target)", "blocks": [{"name": "水位检查", "summary": "低于高水位就什么都不做", "lines": [2, 4]}, {"name": "全表扫描打分", "summary": "锁一个 shard 扫一个", "lines": [5, 15], "children": [{"name": "单个 entry 打分", "summary": "过期白送；越冷越大越先死", "lines": [9, 15], "explain": "分数 = 冷的程度 × 大小惩罚。过期条目给 INF 直接排最前——它们本来就该走。"}], "explain": "O(N) 扫全表换实现简单：这个量级的缓存不值得维护堆或 LRU 链表。锁粒度是 shard——扫描期间写入只被挡在一个分片上。"}, {"name": "收割", "summary": "分数最高的 target 个删掉", "lines": [16, 19]}]}], "wires": [{"id": "w-key", "kind": "call", "from": {"card": "handler", "line": 2}, "to": {"card": "cachekey"}}, {"id": "w-get", "kind": "call", "from": {"card": "handler", "line": 3}, "to": {"card": "get"}}, {"id": "w-fetch", "kind": "call", "from": {"card": "handler", "line": 7, "side": "left"}, "to": {"card": "fetch", "side": "left"}}, {"id": "w-store", "kind": "call", "from": {"card": "handler", "line": 8}, "to": {"card": "store"}}, {"id": "w-evict", "kind": "call", "from": {"card": "store", "line": 3, "side": "left"}, "to": {"card": "evict", "side": "left"}}, {"id": "d-key1", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "get"}}, {"id": "d-key2", "kind": "data", "label": "key", "from": {"card": "cachekey", "line": 5}, "to": {"card": "store"}}, {"id": "d-resp", "kind": "data", "label": "resp", "from": {"card": "fetch", "line": 4}, "to": {"card": "store"}}], "notes": [{"id": "bg0", "flavor": "bg", "tag": "背景 · 这是什么", "text": "一个 HTTP 缓存中间件：请求先查缓存，命中直接返回；未命中回源、写回再返回。读懂它只需要三个问题——key 怎么算、命中走哪条路、未命中怎么写回。故事线正好各答一个。", "place": {"corner": "nw"}, "step": 0}, {"id": "n1", "flavor": "intent", "tag": "NOTE · handler.py:6", "text": "命中直接返回：完全绕过 upstream。这个 early return 就是缓存存在的意义。", "anchor": {"card": "handler", "line": 6}, "place": {"side": "left", "of": "handler"}, "step": 2}, {"id": "n2", "flavor": "intent", "tag": "NOTE · handler.py:8", "text": "ttl 由请求方声明——新鲜度是调用方的决定，缓存只负责执行。", "anchor": {"card": "handler", "line": 8}, "place": {"side": "left", "of": "handler"}, "step": 3}, {"id": "n3", "flavor": "bg", "tag": "背景 · HTTP Vary", "text": "Vary 头声明同一 URL 会因哪些请求头返回不同内容——所以这些头必须参与 key，否则会把 A 的响应错发给 B。", "anchor": {"card": "cachekey", "line": 3}, "place": {"side": "above", "of": "cachekey"}, "step": 1}], "steps": [{"title": "总览", "caption": "一次带缓存的请求处理。左边是请求主流程，右边是缓存子系统。灰线 = 调用，琥珀线 = 数据流。可以自由拖拽查看，或用 ▶ 沿故事线走。", "fit": true}, {"title": "① 请求如何变成 key", "caption": "第一步把请求归一化成缓存键（cache_key 已展开）。第 3 行先对 vary_headers 排序——保证同一请求永远得到同一个 key。两根琥珀线预告了 key 接下来的去向。", "wires": ["w-key", "d-key1", "d-key2"], "lines": [["handler", 2]], "expand": ["cachekey"], "focus": ["handler", "cachekey", "n3", "get"], "storyline": "B"}, {"title": "② 命中路径", "caption": "拿 key 查表，命中就直接返回。注意左侧点亮的行注释：这个 early return 绕过了整个下半段，是缓存存在的意义。", "wires": ["w-get", "d-key1"], "lines": [["handler", 3], ["handler", 4], ["handler", 5], ["handler", 6]], "focus": ["n1", "handler", "get"], "storyline": "A"}, {"title": "③ 未命中：回源并写回", "caption": "回源拿到 resp，连同 key 一起写回。两根琥珀线在 store 汇合——「这个值从哪来」在文本里要人肉追踪变量，在图上是一眼的事。", "wires": ["w-fetch", "w-store", "d-key2", "d-resp"], "lines": [["handler", 7], ["handler", 8], ["handler", 9]], "focus": ["n2", "handler", "fetch", "store"], "storyline": "A"}, {"title": "④ 后台淘汰：长函数先读大纲", "caption": "store 写完顺手检查水位。_evict_if_needed 是个 19 行的嵌套函数——先读三根色条组成的大纲，点条展开代码；「单个 entry 打分」里还能再展一层。层级：卡片 → 块大纲 → 代码。", "wires": ["w-evict"], "lines": [["store", 3]], "expand": ["store"], "focus": ["store", "evict"], "storyline": "B"}]};
 
 const vp = document.getElementById('vp');
 const world = document.getElementById('world');
@@ -287,7 +323,9 @@ function buildBlocks(blocks, lines, lo, hi, cardId, depth) {
       + `<span class="bchev">${b.folded !== false ? '▸' : '▾'}</span>`
       + `<span class="bname">${esc(b.name)}</span><span class="bsum">${esc(b.summary || '')}</span>`
       + btns + `<span class="brange">${b.lines[0]}–${b.lines[1]}</span></div>`
-      + (b.explain ? `<div class="bxplain">${esc(b.explain)}</div>` : '')
+      + (b.explain ? `<div class="bxplain" data-card="${cardId}" data-bname="${esc(b.name)}">`
+        + `<span class="bx-text">${esc(b.explain)}</span>`
+        + `<div class="bx-tools"><span class="bbtn" data-act="rewrite">按我的画像重讲</span></div></div>` : '')
       + `<div class="bcode">`
       + buildBlocks(b.children, lines, b.lines[0], b.lines[1], cardId, depth + 1)
       + `</div></div>`;
@@ -304,7 +342,7 @@ for (const c of DATA.cards) {
   const lineHtml = raw.map((t, i) => {
     // mark annotated terms with sentinels before highlighting, wrap after
     let marked = t;
-    const terms = (c.terms || []).map((tm, j) => ({ ...tm, _id: `tn-${c.id}-${j}` }))
+    const terms = (c.terms || []).map((tm, j) => ({ ...tm, _id: `tn-${c.id}-${j}`, _j: j }))
       .filter(tm => tm.line === i + 1);
     for (const tm of terms)
       marked = marked.replace(new RegExp('\\b' + escRe(tm.token) + '\\b'), '\x01' + tm.token + '\x02');
@@ -313,7 +351,9 @@ for (const c of DATA.cards) {
       h = h.replace('\x01', `<span class="term" data-tn="${tm._id}">`).replace('\x02', '</span>');
     }
     const notes = terms.map(tm =>
-      `<div class="tnote" id="${tm._id}"><b>${esc(tm.token)}</b> — ${esc(tm.note)}</div>`).join('');
+      `<div class="tnote" id="${tm._id}" data-card="${c.id}" data-tid="${tm._j}">`
+      + `<b>${esc(tm.token)}</b> — <span class="tn-text">${esc(tm.note)}</span> `
+      + `<span class="tn-tools"><span class="bbtn" data-act="rewrite">重讲</span></span></div>`).join('');
     return `<div class="ln" id="${c.id}-L${i + 1}"><span class="no">${i + 1}</span>${h}</div>${notes}`;
   });
   (c.blocks || []).forEach((b, i) => { b._idx = i; (function mark(bs) { (bs || []).forEach((x, j) => { x._idx = j; mark(x.children); }); })(b.children); });
@@ -678,6 +718,99 @@ function findBlock(blocks, name) {
   return null;
 }
 function qaKey() { return QA.cur.card + '::' + QA.cur.block; }
+
+/* ---- reader profile + personalized rewrites ---- */
+const PROFILE_KEY = 'canvas-reader-profile';
+function getProfile() { try { return localStorage.getItem(PROFILE_KEY) || ''; } catch (e) { return ''; } }
+function setProfile(v) {
+  try { v ? localStorage.setItem(PROFILE_KEY, v) : localStorage.removeItem(PROFILE_KEY); } catch (e) {}
+  document.body.classList.toggle('has-profile', !!v);
+}
+function djb2(s) { let h = 5381; for (const ch of s) h = (h * 33 + ch.codePointAt(0)) >>> 0; return h.toString(36); }
+function rwContext(el) {
+  const card = cardById[el.dataset.card];
+  if (el.classList.contains('bxplain')) {
+    const b = findBlock(card.blocks, el.dataset.bname);
+    return { orig: b.explain, textEl: el.querySelector('.bx-text'), key: `bx-${card.id}-${b.name}`,
+      ctx: `卡片: ${card.name}（${card.file || ''}）\n逻辑块: ${b.name} — ${b.summary || ''}\n块内代码:\n`
+        + card.code.split('\n').slice(b.lines[0] - 1, b.lines[1]).join('\n') };
+  }
+  const tm = card.terms[+el.dataset.tid];
+  return { orig: tm.note, textEl: el.querySelector('.tn-text'), key: el.id,
+    ctx: `卡片: ${card.name}（${card.file || ''}）\n标识符: ${tm.token}（卡片内第 ${tm.line} 行）\n所在函数完整代码:\n${card.code}` };
+}
+function setTools(el, html) { el.querySelector('.bx-tools, .tn-tools').innerHTML = html; }
+function toolsDefault(el) {
+  return `<span class="bbtn" data-act="rewrite">${el.classList.contains('tnote') ? '重讲' : '按我的画像重讲'}</span>`;
+}
+const TOOLS_RW = `<span class="rw-badge">已按画像重讲</span>`
+  + `<span class="bbtn" data-act="revert">还原原文</span><span class="bbtn" data-act="rewrite">重新生成</span>`;
+async function rewriteEl(el, force = false) {
+  const profile = getProfile();
+  if (!profile) return;
+  const { orig, textEl, key, ctx } = rwContext(el);
+  const cacheKey = 'canvas-rw:' + djb2(profile) + ':' + key;
+  if (!force) {
+    let cached = null;
+    try { cached = localStorage.getItem(cacheKey); } catch (e) {}
+    if (cached) { textEl.textContent = cached; setTools(el, TOOLS_RW); drawWires(); return; }
+  }
+  const prompt = `把下面这段代码注释改写给特定读者。保持事实与代码依据不变，只调整讲法、详略、术语和语言风格；长度不超过原文两倍；只输出改写后的正文，不要任何前后缀。\n\n读者画像: ${profile}\n\n${ctx}\n\n原注释: ${orig}`;
+  if (!QA.live) {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setTools(el, `<span class="rw-badge">已复制改写提问 ✓ 粘给任意 agent</span>`);
+    } catch (e) {
+      setTools(el, `<span class="rw-badge">复制失败——用 serve.py 开启在线模式</span>`);
+    }
+    setTimeout(() => setTools(el, toolsDefault(el)), 3000);
+    return;
+  }
+  const prevText = textEl.textContent;
+  textEl.textContent = '为你重讲中…';
+  try {
+    const r = await fetch('ask', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, kind: 'rewrite', target: key }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      textEl.textContent = j.answer;
+      setTools(el, TOOLS_RW);
+      try { localStorage.setItem(cacheKey, j.answer); } catch (e) {}
+    } else {
+      textEl.textContent = prevText;
+      setTools(el, `<span class="rw-badge">出错：${esc((j.error || '').slice(0, 60))}</span>`);
+      setTimeout(() => setTools(el, toolsDefault(el)), 4000);
+    }
+  } catch (e) {
+    textEl.textContent = prevText;
+  }
+  drawWires();
+}
+function revertEl(el) {
+  const { orig, textEl } = rwContext(el);
+  textEl.textContent = orig;
+  setTools(el, toolsDefault(el));
+  drawWires();
+}
+document.getElementById('profile-btn').onclick = () => {
+  const pp = document.getElementById('pp');
+  pp.hidden = !pp.hidden;
+  if (!pp.hidden) document.getElementById('pp-input').value = getProfile();
+};
+document.getElementById('pp-save').onclick = () => {
+  setProfile(document.getElementById('pp-input').value.trim());
+  document.getElementById('pp').hidden = true;
+};
+document.getElementById('pp-clear').onclick = () => {
+  setProfile('');
+  document.getElementById('pp-input').value = '';
+  document.getElementById('pp').hidden = true;
+};
+document.getElementById('pp-input').addEventListener('keydown', e => e.stopPropagation());
+setProfile(getProfile());
+
 function buildQAPrompt(question) {
   const card = cardById[QA.cur.card];
   const b = findBlock(card.blocks, QA.cur.block);
@@ -686,7 +819,8 @@ function buildQAPrompt(question) {
     .map((t, i) => `${b.lines[0] + i}  ${t}`).join('\n');
   const hist = (QA.log[qaKey()] || []).filter(x => x.a && !x.err).slice(-3)
     .map(x => `Q: ${x.q}\nA: ${x.a}`).join('\n');
-  return `你是一张交互式代码画布（Code Canvas）的讲解员。只根据给出的代码与上下文回答；代码里没有依据的不要编造；不确定就直说不确定。用中文回答，尽量不超过 200 字。\n\n主题: ${DATA.meta?.title || ''} — ${DATA.meta?.subtitle || ''}\n卡片: ${card.name}（${card.file || ''}）\n逻辑块: ${b.name} — ${b.summary || ''}${b.explain ? '\n已有说明: ' + b.explain : ''}\n\n块内代码（卡片内行号 ${b.lines[0]}–${b.lines[1]}）:\n${blockCode}\n\n所在函数完整代码:\n${card.code}\n${hist ? '\n此前的问答:\n' + hist + '\n' : ''}\n读者的问题: ${question}`;
+  const profile = getProfile();
+  return `你是一张交互式代码画布（Code Canvas）的讲解员。只根据给出的代码与上下文回答；代码里没有依据的不要编造；不确定就直说不确定。用中文回答，尽量不超过 200 字。${profile ? `\n读者画像: ${profile}（回答的深度、术语与语言风格按画像来）` : ''}\n\n主题: ${DATA.meta?.title || ''} — ${DATA.meta?.subtitle || ''}\n卡片: ${card.name}（${card.file || ''}）\n逻辑块: ${b.name} — ${b.summary || ''}${b.explain ? '\n已有说明: ' + b.explain : ''}\n\n块内代码（卡片内行号 ${b.lines[0]}–${b.lines[1]}）:\n${blockCode}\n\n所在函数完整代码:\n${card.code}\n${hist ? '\n此前的问答:\n' + hist + '\n' : ''}\n读者的问题: ${question}`;
 }
 function renderQALog() {
   const el = document.getElementById('qa-log');
@@ -776,8 +910,11 @@ world.addEventListener('click', e => {
   }
   const btn = e.target.closest('.bbtn');
   if (btn) {
+    const act = btn.dataset.act;
+    if (act === 'rewrite') { rewriteEl(btn.closest('.bxplain, .tnote'), btn.textContent === '重新生成'); return; }
+    if (act === 'revert') { revertEl(btn.closest('.bxplain, .tnote')); return; }
     const bar = btn.closest('.bbar');
-    if (btn.dataset.act === 'explain') {
+    if (act === 'explain') {
       bar.parentElement.classList.toggle('explained');
       drawWires();
     } else {

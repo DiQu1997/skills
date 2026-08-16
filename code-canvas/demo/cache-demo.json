@@ -1,7 +1,8 @@
 {
   "meta": {
     "title": "Code Canvas",
-    "subtitle": "缓存中间件 demo · 生成器渲染"
+    "subtitle": "缓存中间件 demo · 生成器渲染",
+    "audience": "一般后端工程师；中文；简洁"
   },
   "regions": [
     {

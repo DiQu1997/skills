@@ -1,7 +1,8 @@
 {
   "meta": {
     "title": "nano-vllm 推理引擎",
-    "subtitle": "github.com/GeeeekExplorer/nano-vllm · ~1200 行的 vLLM 教学重写"
+    "subtitle": "github.com/GeeeekExplorer/nano-vllm · ~1200 行的 vLLM 教学重写",
+    "audience": "有后端经验、想读懂推理引擎内部机制的工程师；中文；准确优先，类比点到为止"
   },
   "regions": [
     {

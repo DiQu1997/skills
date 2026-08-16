@@ -11,6 +11,11 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
 
 ## 管线
 
+0. **确认读者画像**：问（或从对话中提取）这张图为谁生成——经验水平、
+   关注点、语言、讲法偏好。写进 `meta.audience`，所有文字字段按它来写。
+   用户没说就用默认："有经验的工程师；中文；准确优先"。
+   注意：这只是默认视角——读者还能在页面上设置自己的画像，对说明和
+   变元注释做运行时的「按我的画像重讲」（见 schema.md）
 1. **确定范围**（同旧 skill 的 Mode A/B：给了文件直接读；给了主题先提
    scope 提案，用户确认后继续）
 2. **读全文**，识别故事线（region）与卡片（函数/方法级）
