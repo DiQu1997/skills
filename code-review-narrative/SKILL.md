@@ -1,7 +1,12 @@
 ---
 name: code-review-narrative
-description: Analyzes a git diff or PR and produces an interactive HTML review document organized by logical groups (storylines) rather than alphabetically by file. Each storyline contains step-by-step changes with full code context, prerequisite reminders, factual context (behavior delta, callers, test coverage, codebase patterns, alternative approaches), and analytical commentary (summary/evaluation/suggestions/analysis). Use when a user wants help reviewing a PR, commit range, or git diff in a structured way that surfaces logical units of change rather than file-by-file. Triggers include "review this PR", "analyze this diff", "help me review", or being given a diff and asked to walk through it.
+description: DEPRECATED — superseded by the code-canvas skill (diff canvas mode), which handles all PR/diff review requests. Do NOT trigger this skill for any review request; use code-canvas instead. Only invoke this skill when the user explicitly asks for "code-review-narrative" by name.
 ---
+
+> **⚠️ 已废弃**：本 skill 由 `code-canvas` 的 diff 画布类型取代（见其 SKILL.md）。
+> 保留仅供按名显式调用与历史参考，不再演进。
+
+
 
 # code-review-narrative skill (v0.4)
 

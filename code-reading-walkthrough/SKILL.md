@@ -1,7 +1,12 @@
 ---
 name: code-reading-walkthrough
-description: Reads existing source code and produces an interactive HTML walkthrough document organized by logical groups (storylines) rather than alphabetically by file. Each full-depth storyline is rendered as a flow inspector — a canvas of phase-tagged code blocks laid out in columns (one per function by default), with cross-block control-flow edges (CALL / CATCH / FINALLY / EMIT). Clicking a block expands its code inline and opens a right-side dock with rationale (what it does, why it's here, touches, failure mode). Two modes — Mode A (user gives files/folder; agent identifies storylines and selects the top-N most important to walk through deeply, the rest as summary cards) and Mode B (user gives a topic question like "how does X work"; agent first proposes a scope, gets user confirmation, then runs the same pipeline). Use when a user wants to understand an unfamiliar codebase by reading rather than reviewing changes. Triggers include "explain this code", "walk me through", "how does X work", "help me read this", or being given a folder and asked to make sense of it.
+description: DEPRECATED — superseded by the code-canvas skill, which handles all code-reading, walkthrough, and "how does X work" requests. Do NOT trigger this skill for any code-explaining request; use code-canvas instead. Only invoke this skill when the user explicitly asks for "code-reading-walkthrough" by name.
 ---
+
+> **⚠️ 已废弃**：本 skill 由 `code-canvas` 取代（空间画布形态，见其 SKILL.md）。
+> 保留仅供按名显式调用与历史参考，不再演进。
+
+
 
 # code-reading-walkthrough skill (v0.5-reading)
 
