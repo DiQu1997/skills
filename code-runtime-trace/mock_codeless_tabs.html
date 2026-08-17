@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock v2 — graph-primary + storyline tabs</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+
+    --blk-bg:#fefefe;
+    --blk-border:#d0d7de;
+    --blk-active-bg:#fff8c5;
+    --blk-active-border:#bf8700;
+    --blk-past-bg:#eaeef2;
+    --blk-future-bg:#fafbfc;
+
+    --ds-waiting:#fff8c5;  --ds-waiting-border:#c79a09;
+    --ds-running:#ddd3f0;  --ds-running-border:#5b3e9c;
+    --ds-pool:#d6e4f5;     --ds-pool-border:#205493;
+    --ds-cache:#d4ead4;    --ds-cache-border:#1f883d;
+
+    --arrow-read:#5b6cff;
+    --arrow-write:#a4332a;
+    --arrow-rw:#8a5a14;
+
+    --tab-st1:#fff8c5; --tab-st2:#d6e4f5; --tab-st3:#ddd3f0;
+    --tab-st4:#d4ead4; --tab-st5:#f5cdc6;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    grid-template-rows: auto auto 1fr;
+    height: 100vh;
+  }
+  .topbar {
+    grid-column: 1 / 3;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .legend { margin-left: auto; display: flex; gap: 14px; font-size: 11px; color: var(--fg-soft); }
+  .topbar .legend .swatch {
+    display: inline-block; width: 16px; height: 2px;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  /* Tabs */
+  .tabs {
+    grid-column: 1 / 3;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    padding: 0 22px;
+    gap: 4px;
+  }
+  .tab {
+    padding: 9px 18px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    border-top: 1px solid transparent;
+    border-left: 1px solid transparent;
+    border-right: 1px solid transparent;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -1px;
+    user-select: none;
+    transition: all 120ms;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg);
+    background: var(--bg);
+    border-color: var(--border);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    margin-right: 5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+  .tab.t-ST1.active { border-bottom-color: var(--ds-waiting-border); }
+  .tab.t-ST2.active { border-bottom-color: var(--ds-pool-border); }
+  .tab.t-ST3.active { border-bottom-color: var(--ds-running-border); }
+  .tab.t-ST4.active { border-bottom-color: var(--ds-cache-border); }
+  .tab.t-ST5.active { border-bottom-color: #a4332a; }
+
+  /* Canvas */
+  .canvas {
+    position: relative;
+    overflow: auto;
+    background-image: radial-gradient(circle, #e1e4e8 1px, transparent 1px);
+    background-size: 18px 18px;
+    background-position: 0 0;
+  }
+  .canvas-inner {
+    position: relative;
+    min-width: 100%;
+    min-height: 100%;
+    padding: 24px;
+  }
+
+  .storyline-banner {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-left-width: 6px;
+    border-radius: 6px;
+    padding: 10px 16px;
+    margin-bottom: 18px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+  }
+  .storyline-banner.b-ST1 { border-left-color: var(--ds-waiting-border); }
+  .storyline-banner.b-ST2 { border-left-color: var(--ds-pool-border); }
+  .storyline-banner.b-ST3 { border-left-color: var(--ds-running-border); }
+  .storyline-banner.b-ST4 { border-left-color: var(--ds-cache-border); }
+  .storyline-banner.b-ST5 { border-left-color: #a4332a; }
+  .storyline-banner .b-title {
+    font-size: 14px; font-weight: 700; color: var(--fg);
+    margin-bottom: 2px;
+  }
+
+  /* Data structures */
+  .ds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 12px;
+    margin-bottom: 200px;
+  }
+  .ds-box {
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 14px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    position: relative;
+    min-height: 70px;
+  }
+  .ds-box .ds-label {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .ds-box.touched-this-storyline {
+    box-shadow: 0 0 0 3px rgba(91,108,255,0.10), 0 2px 6px rgba(0,0,0,0.04);
+  }
+  .ds-box.untouched-this-storyline {
+    opacity: 0.45;
+  }
+  .ds-box.waiting { border-color: var(--ds-waiting-border); background: var(--ds-waiting); }
+  .ds-box.running { border-color: var(--ds-running-border); background: var(--ds-running); }
+  .ds-box.pool    { border-color: var(--ds-pool-border);    background: var(--ds-pool); grid-column: 1 / 3; }
+  .ds-box.cache   { border-color: var(--ds-cache-border);   background: var(--ds-cache); grid-column: 1 / 3; }
+
+  .deque {
+    display: flex; gap: 6px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+  }
+  .deque .seq-chip {
+    background: var(--bg-card);
+    border: 1.5px solid var(--fg-soft);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-weight: 600;
+  }
+  .deque-empty {
+    color: var(--fg-faint); font-style: italic;
+    font-size: 12px; font-family: inherit;
+  }
+
+  .pool-grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 4px;
+  }
+  .pool-cell {
+    aspect-ratio: 1 / 1;
+    background: var(--bg-card);
+    border: 1.5px solid #c9cdd2;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--fg-faint);
+  }
+  .pool-cell.used {
+    background: #b6cbe5;
+    border-color: var(--ds-pool-border);
+    color: var(--ds-pool-border);
+    font-weight: 700;
+  }
+
+  .cache-empty {
+    color: var(--fg-faint); font-style: italic;
+    font-family: ui-monospace, monospace;
+  }
+  .cache-entry {
+    display: inline-block;
+    background: var(--bg-card);
+    border: 1.5px solid var(--ds-cache-border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    margin-right: 6px; margin-top: 4px;
+  }
+
+  /* Logic blocks */
+  .blocks-area {
+    position: absolute;
+    left: 24px; right: 24px;
+    bottom: 24px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .blk {
+    background: var(--blk-bg);
+    border: 1.5px solid var(--blk-border);
+    border-radius: 8px;
+    padding: 8px 11px;
+    min-width: 140px;
+    max-width: 175px;
+    position: relative;
+    cursor: pointer;
+    transition: transform 120ms, box-shadow 120ms;
+  }
+  .blk:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+  .blk.past {
+    background: var(--blk-past-bg); color: var(--fg-soft); opacity: 0.72;
+  }
+  .blk.active {
+    background: var(--blk-active-bg);
+    border-color: var(--blk-active-border);
+    border-width: 2px; padding: 7px 10px;
+    box-shadow: 0 0 0 4px rgba(191,135,0,0.18);
+  }
+  .blk.future {
+    background: var(--blk-future-bg); color: var(--fg-faint); opacity: 0.55;
+    border-style: dashed;
+  }
+  .blk .blk-tag {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .blk .blk-name { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .blk .blk-detail { font-size: 11px; color: var(--fg-soft); line-height: 1.4; }
+  .blk .blk-source {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint); margin-top: 5px;
+  }
+  .flow-arrow {
+    align-self: center; color: var(--fg-faint);
+    font-size: 14px; user-select: none;
+  }
+
+  /* Side panel */
+  .side {
+    grid-row: 3 / 4;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px 18px 40px;
+  }
+  .side h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 6px; font-weight: 700;
+  }
+  .focus-name {
+    font-size: 18px; font-weight: 700; margin-bottom: 4px;
+    color: var(--blk-active-border);
+  }
+  .focus-purpose {
+    font-size: 13px; color: var(--fg);
+    margin-bottom: 12px; line-height: 1.55;
+  }
+  .reads-writes { margin-bottom: 14px; font-size: 12px; line-height: 1.5; }
+  .reads-writes .rw-label {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg-faint);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-right: 6px;
+  }
+  .reads-writes .rw-chip {
+    display: inline-block;
+    font-family: ui-monospace, monospace; font-size: 11px;
+    background: var(--bg-soft);
+    padding: 1px 7px; border-radius: 3px;
+    margin-right: 4px; margin-top: 2px;
+    border: 1px solid var(--border);
+  }
+  .reads-writes .rw-chip.read  { color: var(--arrow-read); border-color: #c5d0fc; background:#eef0ff; }
+  .reads-writes .rw-chip.write { color: var(--arrow-write); border-color: #f8c5c5; background:#fff0f0; }
+  pre.code {
+    background: #fbfaf7;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px; line-height: 1.55;
+    overflow-x: auto;
+    margin: 0 0 12px;
+    color: var(--fg);
+  }
+  .code-loc {
+    font-size: 11px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    margin-bottom: 6px;
+  }
+
+  svg.arrows {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
+  }
+
+  .placeholder {
+    margin: 80px auto 0;
+    max-width: 480px;
+    text-align: center;
+    color: var(--fg-faint);
+    font-style: italic;
+  }
+  .placeholder strong { color: var(--fg-soft); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1>📐 Mock v2 — graph-primary, storyline tabs</h1>
+    <div class="crumb">
+      <code>nano-vllm</code> · two prompts sharing 8-token prefix · click tabs to switch storyline
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--arrow-read)"></span>read</span>
+      <span><span class="swatch" style="background:var(--arrow-write)"></span>write</span>
+      <span><span class="swatch" style="background:var(--arrow-rw)"></span>read+write</span>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <section class="canvas" id="canvas">
+    <div class="canvas-inner" id="canvas-inner"></div>
+  </section>
+
+  <aside class="side" id="side">
+    <h2>Selected logic block</h2>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-purpose" id="focus-purpose">Click any block in the canvas.</div>
+    <div class="reads-writes" id="focus-rw"></div>
+    <div class="code-loc" id="focus-loc"></div>
+    <pre class="code" id="focus-code"></pre>
+  </aside>
+</div>
+
+<script>
+  // ============ Storyline data ============
+  // Each storyline knows:
+  //  - title + summary (banner)
+  //  - which data structures it touches (others get dimmed)
+  //  - values for each data structure to display
+  //  - logic blocks in order (the row at the bottom)
+  //  - default active block (highlighted on enter)
+  //  - block-id → {reads, writes, code, loc} for side-panel content
+  //  - connections (arrows from block-id → data structure id, with kind)
+
+  const STORYLINES = {
+
+    ST1: {
+      title: "1. Request arrives",
+      summary: "Two prompts enter via add_request and queue up. KV cache is untouched; the scheduler doesn't admit them until a future step().",
+      touches: new Set(['ds-waiting']),
+      ds: {
+        waiting: { items: ['seq 0', 'seq 1'], note: 'after both add_requests' },
+        running: { items: [],                 note: 'still empty' },
+        pool:    { used: [],                  note: 'all 16 free' },
+        cache:   { entries: [],               note: 'empty' },
+      },
+      blocks: [
+        { id: 'b-st1-1', tag: 'L1 · ENQUEUE',   name: 'ENQUEUE-A',
+          detail: 'tokenize promptA → Sequence(0, WAITING) → push waiting', source: 'llm_engine.py:43-47', state: 'past' },
+        { id: 'b-st1-2', tag: 'L2 · ENQUEUE',   name: 'ENQUEUE-B',
+          detail: 'tokenize promptB → Sequence(1, WAITING) → push waiting', source: 'llm_engine.py:43-47', state: 'active' },
+        { id: 'b-st1-3', tag: 'L3 · CONTROL',   name: 'ENTER-PUMP',
+          detail: 'enter while not is_finished(): self.step()', source: 'llm_engine.py:73', state: 'future' },
+      ],
+      defaultActive: 'b-st1-2',
+      connections: [
+        { from: 'b-st1-1', to: 'ds-waiting', kind: 'write' },
+        { from: 'b-st1-2', to: 'ds-waiting', kind: 'write' },
+        { from: 'b-st1-3', to: 'ds-waiting', kind: 'read'  },
+        { from: 'b-st1-3', to: 'ds-running', kind: 'read'  },
+      ],
+      detail: {
+        'b-st1-1': {
+          name: 'ENQUEUE-A',
+          purpose: 'Tokenize promptA into 12 token ids, construct a Sequence object with status=WAITING, push it onto the scheduler.waiting deque. No GPU memory touched.',
+          reads: ['(prompt text input)'],
+          writes: ['scheduler.waiting'],
+          loc: 'llm_engine.py:43-47',
+          code:
+`def add_request(self, prompt, sampling_params):
+    if isinstance(prompt, str):
+        prompt = self.tokenizer.encode(prompt)
+    seq = Sequence(prompt, sampling_params)
+    self.scheduler.add(seq)            # waiting.append(seq)`
+        },
+        'b-st1-2': {
+          name: 'ENQUEUE-B',
+          purpose: 'Same path for promptB. waiting now holds [seq 0, seq 1]. Both prompts share their first 8 tokens, but the scheduler does not notice prefix sharing at enqueue time.',
+          reads: ['(prompt text input)'],
+          writes: ['scheduler.waiting'],
+          loc: 'llm_engine.py:43-47',
+          code:
+`# same body as ENQUEUE-A, called for promptB:
+seq = Sequence(prompt, sampling_params)
+self.scheduler.add(seq)
+# After this call:
+#   scheduler.waiting == deque([seq 0, seq 1])`
+        },
+        'b-st1-3': {
+          name: 'ENTER-PUMP',
+          purpose: "generate()'s for-loop finishes. It now enters the engine pump: while not self.is_finished(): output, num = self.step(). Pure control flow; no side effects.",
+          reads: ['scheduler.waiting (peek)', 'scheduler.running (peek)'],
+          writes: ['(none — control flow)'],
+          loc: 'llm_engine.py:73',
+          code:
+`# inside LLMEngine.generate(), after the enqueue loop:
+outputs = {}
+prefill_throughput = decode_throughput = 0.
+while not self.is_finished():          # is_finished:
+    t = perf_counter()                  #   return not self.scheduler.waiting
+    output, num_tokens = self.step()   #          and not self.scheduler.running`
+        },
+      },
+    },
+
+    ST2: {
+      title: "2. First prefill — cold cache",
+      summary: "Scheduler admits seq 0, allocates 3 fresh blocks for its prompt, model runs prefill, the 3 full blocks are hashed into the prefix cache. seq 1 deferred — chunked-prefill rule.",
+      touches: new Set(['ds-waiting', 'ds-running', 'ds-pool', 'ds-cache']),
+      ds: {
+        // Snapshot at the moment ALLOC-3 just fired
+        waiting: { items: ['seq 0', 'seq 1'], note: 'before PROMOTE moves seq 0' },
+        running: { items: [],                 note: '(seq 0 will land here next)' },
+        pool:    { used: [0, 1, 2],           note: '3 fresh blocks just popped' },
+        cache:   { entries: [],               note: 'still empty (HASH-3 has not fired)' },
+      },
+      blocks: [
+        { id: 'b-st2-1', tag: 'L1 · ITER',       name: 'POP-WAITING',
+          detail: 'peek head of waiting → seq 0', source: 'scheduler.py:31', state: 'past' },
+        { id: 'b-st2-2', tag: 'L2 · LOOKUP',     name: 'PROBE-CACHE',
+          detail: 'chain hash walk → MISS (cache empty)', source: 'block_manager.py:58', state: 'past' },
+        { id: 'b-st2-3', tag: 'L3 · ALLOC',      name: 'ALLOC-3',
+          detail: 'pop 3 fresh from free_deque → seq 0.block_table', source: 'block_manager.py:75', state: 'active' },
+        { id: 'b-st2-4', tag: 'L4 · TRANSITION', name: 'PROMOTE',
+          detail: 'seq 0: WAITING → RUNNING, move queue', source: 'scheduler.py:48-50', state: 'future' },
+        { id: 'b-st2-5', tag: 'L5 · COMPUTE',    name: 'FORWARD-PASS',
+          detail: '12 tokens through model → sample 401', source: 'llm_engine.py:52', state: 'future' },
+        { id: 'b-st2-6', tag: 'L6 · REGISTER',   name: 'HASH-3',
+          detail: 'chain hashes for 3 full blocks → cache', source: 'block_manager.py:110', state: 'future' },
+      ],
+      defaultActive: 'b-st2-3',
+      connections: [
+        { from: 'b-st2-1', to: 'ds-waiting', kind: 'read'  },
+        { from: 'b-st2-2', to: 'ds-cache',   kind: 'read'  },
+        { from: 'b-st2-2', to: 'ds-pool',    kind: 'read'  },
+        { from: 'b-st2-3', to: 'ds-pool',    kind: 'write' },
+        { from: 'b-st2-4', to: 'ds-waiting', kind: 'write' },
+        { from: 'b-st2-4', to: 'ds-running', kind: 'write' },
+        { from: 'b-st2-5', to: 'ds-pool',    kind: 'read'  },
+        { from: 'b-st2-6', to: 'ds-cache',   kind: 'write' },
+        { from: 'b-st2-6', to: 'ds-pool',    kind: 'write' },
+      ],
+      detail: {
+        'b-st2-1': {
+          name: 'POP-WAITING',
+          purpose: 'Peek the head of the waiting deque (oldest-first fairness).',
+          reads: ['scheduler.waiting (peek)'],
+          writes: ['(none yet — commit happens at PROMOTE)'],
+          loc: 'scheduler.py:31',
+          code:
+`# inside Scheduler.schedule()'s prefill loop:
+while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
+    seq = self.waiting[0]              # ← peek, not pop`
+        },
+        'b-st2-2': {
+          name: 'PROBE-CACHE',
+          purpose: "Walk seq's blocks, compute the chained hash for each, look up in hash_to_block_id. First miss terminates the walk.",
+          reads: ['hash_to_block_id', 'block_pool.blocks[i].token_ids'],
+          writes: ['(pure read)'],
+          loc: 'block_manager.py:58-73',
+          code:
+`def can_allocate(self, seq) -> int:
+    h = -1
+    num_cached_blocks = 0
+    num_new_blocks = seq.num_blocks
+    for i in range(seq.num_blocks - 1):
+        token_ids = seq.block(i)
+        h = self.compute_hash(token_ids, h)
+        block_id = self.hash_to_block_id.get(h, -1)
+        if block_id == -1 \\
+                or self.blocks[block_id].token_ids != token_ids:
+            break                                # first miss → stop
+        num_cached_blocks += 1
+        ...
+    return num_cached_blocks`
+        },
+        'b-st2-3': {
+          name: 'ALLOC-3',
+          purpose: "Pop 3 fresh physical blocks from the free deque and bind them to seq 0's block_table.",
+          reads: ['block_pool.free_block_ids'],
+          writes: ['block_pool.{free, used, blocks[i].ref_count}', 'seq 0.block_table'],
+          loc: 'block_manager.py:75-92',
+          code:
+`def allocate(self, seq, num_cached_blocks):
+    assert not seq.block_table
+    for i in range(num_cached_blocks, seq.num_blocks):
+        seq.block_table.append(
+            self._allocate_block())
+    seq.num_cached_tokens = (
+        num_cached_blocks * self.block_size)
+
+def _allocate_block(self) -> int:
+    block_id = self.free_block_ids.popleft()
+    block = self.blocks[block_id]
+    if block.hash != -1:
+        del self.hash_to_block_id[block.hash]   # invalidate stale
+    block.reset()                                # ref_count = 1
+    self.used_block_ids.add(block_id)
+    return block_id`
+        },
+        'b-st2-4': {
+          name: 'PROMOTE',
+          purpose: "Flip seq.status WAITING → RUNNING, popleft from waiting, append to running.",
+          reads: ['scheduler.waiting'],
+          writes: ['seq.status', 'scheduler.waiting', 'scheduler.running'],
+          loc: 'scheduler.py:48-50',
+          code:
+`# still inside the prefill loop:
+if seq.num_cached_tokens + seq.num_scheduled_tokens \\
+        == seq.num_tokens:
+    seq.status = SequenceStatus.RUNNING
+    self.waiting.popleft()
+    self.running.append(seq)`
+        },
+        'b-st2-5': {
+          name: 'FORWARD-PASS',
+          purpose: "Run the model on seq 0's 12 prompt tokens; attention reads KV slots via block_table; sample next token (401).",
+          reads: ['block_pool.blocks[i].{k_cache, v_cache}', 'seq 0.token_ids'],
+          writes: ['(model side effects + returned tokens)'],
+          loc: 'llm_engine.py:52',
+          code:
+`# inside LLMEngine.step():
+token_ids = self.model_runner.call(
+    "run", seqs, is_prefill)            # → [401]`
+        },
+        'b-st2-6': {
+          name: 'HASH-3',
+          purpose: "For each FULL block just filled, compute its chained hash and register hash → block_id in the prefix cache.",
+          reads: ['block_pool.blocks[i].token_ids', 'seq.block_table'],
+          writes: ['block_pool.blocks[i].hash', 'hash_to_block_id'],
+          loc: 'block_manager.py:110-120',
+          code:
+`def hash_blocks(self, seq):
+    start = seq.num_cached_tokens // self.block_size
+    end = (seq.num_cached_tokens
+            + seq.num_scheduled_tokens) // self.block_size
+    h = (self.blocks[seq.block_table[start - 1]].hash
+            if start > 0 else -1)
+    for i in range(start, end):
+        block = self.blocks[seq.block_table[i]]
+        token_ids = seq.block(i)
+        h = self.compute_hash(token_ids, h)     # CHAINED
+        block.update(h, token_ids)
+        self.hash_to_block_id[h] = block.block_id`
+        },
+      },
+    },
+
+    ST3: { title: '3. Second prefill — prefix-cache hit', summary: 'seq 1 reuses 2 cached blocks; forward pass shrinks from 12 to 4 tokens.', placeholder: true },
+    ST4: { title: '4. Decode — continuous batching',       summary: 'Both seqs advance by one token in a single fused forward pass.',          placeholder: true },
+    ST5: { title: '5. Teardown — refs unwind',             summary: 'Both reach max_tokens. deallocate cascades; hash entries stay in cache.', placeholder: true },
+  };
+
+  const STATE = { activeStoryline: 'ST2', activeBlock: null };
+
+  function el(tag, cls, html) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html != null) e.innerHTML = html;
+    return e;
+  }
+
+  // ============ Tabs ============
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    for (const id of Object.keys(STORYLINES)) {
+      const sl = STORYLINES[id];
+      const t = el('div', 'tab t-' + id + (id === STATE.activeStoryline ? ' active' : ''));
+      t.innerHTML = `<span class="tab-num">${id}</span>${sl.title.replace(/^\d+\.\s*/, '')}`;
+      t.onclick = () => setStoryline(id);
+      root.appendChild(t);
+    }
+  }
+
+  // ============ Canvas ============
+  function renderCanvas() {
+    const inner = document.getElementById('canvas-inner');
+    inner.innerHTML = '';
+    const sl = STORYLINES[STATE.activeStoryline];
+
+    // Banner
+    inner.appendChild(el('div', 'storyline-banner b-' + STATE.activeStoryline,
+      `<div class="b-title">${sl.title}</div><div>${sl.summary}</div>`));
+
+    if (sl.placeholder) {
+      inner.appendChild(el('div', 'placeholder',
+        `<strong>${sl.title}</strong> not drawn in this mock — would render the same way<br>` +
+        '(data structures top, logic blocks bottom, arrows showing reads/writes,<br>' +
+        'click any block for code drill-down on the right).'));
+      return;
+    }
+
+    // Data structures
+    const grid = el('div', 'ds-grid');
+
+    const dsW = el('div', 'ds-box waiting' + (sl.touches.has('ds-waiting') ? ' touched-this-storyline' : ' untouched-this-storyline'));
+    dsW.id = 'ds-waiting';
+    dsW.innerHTML = `<div class="ds-label">waiting · deque <span style="color:var(--fg-soft); text-transform:none; letter-spacing:0;">${sl.ds.waiting.note}</span></div>`;
+    const dwq = el('div', 'deque');
+    if (sl.ds.waiting.items.length) sl.ds.waiting.items.forEach(it => dwq.appendChild(el('div', 'seq-chip', it)));
+    else dwq.appendChild(el('div', 'deque-empty', '(empty)'));
+    dsW.appendChild(dwq);
+    grid.appendChild(dsW);
+
+    const dsR = el('div', 'ds-box running' + (sl.touches.has('ds-running') ? ' touched-this-storyline' : ' untouched-this-storyline'));
+    dsR.id = 'ds-running';
+    dsR.innerHTML = `<div class="ds-label">running · deque <span style="color:var(--fg-soft); text-transform:none; letter-spacing:0;">${sl.ds.running.note}</span></div>`;
+    const drq = el('div', 'deque');
+    if (sl.ds.running.items.length) sl.ds.running.items.forEach(it => drq.appendChild(el('div', 'seq-chip', it)));
+    else drq.appendChild(el('div', 'deque-empty', '(empty)'));
+    dsR.appendChild(drq);
+    grid.appendChild(dsR);
+
+    const dsP = el('div', 'ds-box pool' + (sl.touches.has('ds-pool') ? ' touched-this-storyline' : ' untouched-this-storyline'));
+    dsP.id = 'ds-pool';
+    dsP.innerHTML = `<div class="ds-label">block_pool · 16 physical · free_deque popleft + refcount <span style="color:var(--fg-soft); text-transform:none; letter-spacing:0;">${sl.ds.pool.note}</span></div>`;
+    const pg = el('div', 'pool-grid');
+    const usedSet = new Set(sl.ds.pool.used || []);
+    for (let i = 0; i < 16; i++) {
+      pg.appendChild(el('div', 'pool-cell' + (usedSet.has(i) ? ' used' : ''),
+        usedSet.has(i) ? `#${i} r1` : `#${i}`));
+    }
+    dsP.appendChild(pg);
+    grid.appendChild(dsP);
+
+    const dsC = el('div', 'ds-box cache' + (sl.touches.has('ds-cache') ? ' touched-this-storyline' : ' untouched-this-storyline'));
+    dsC.id = 'ds-cache';
+    dsC.innerHTML = `<div class="ds-label">hash_to_block_id · prefix cache <span style="color:var(--fg-soft); text-transform:none; letter-spacing:0;">${sl.ds.cache.note}</span></div>`;
+    if ((sl.ds.cache.entries || []).length === 0) {
+      dsC.appendChild(el('div', 'cache-empty', '(empty)'));
+    } else {
+      sl.ds.cache.entries.forEach(e => dsC.appendChild(el('span', 'cache-entry', e)));
+    }
+    grid.appendChild(dsC);
+
+    inner.appendChild(grid);
+
+    // Logic blocks
+    const blocks = el('div', 'blocks-area');
+    sl.blocks.forEach((b, idx) => {
+      if (idx > 0) blocks.appendChild(el('div', 'flow-arrow', '▶'));
+      const stateCls = STATE.activeBlock === b.id ? 'active'
+                      : sl.blocks.findIndex(x => x.id === STATE.activeBlock) > idx ? 'past'
+                      : sl.blocks.findIndex(x => x.id === STATE.activeBlock) < idx ? 'future'
+                      : b.state;
+      const blk = el('div', 'blk ' + stateCls,
+        `<div class="blk-tag">${b.tag}</div>
+         <div class="blk-name">${b.name}</div>
+         <div class="blk-detail">${b.detail}</div>
+         <div class="blk-source">${b.source}</div>`);
+      blk.id = b.id;
+      blk.onclick = () => { STATE.activeBlock = b.id; renderCanvas(); renderSidePanel(); };
+      blocks.appendChild(blk);
+    });
+    inner.appendChild(blocks);
+
+    // SVG arrows overlay
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'arrows');
+    svg.id = 'arrows';
+    inner.appendChild(svg);
+
+    requestAnimationFrame(() => drawArrows());
+  }
+
+  function drawArrows() {
+    const sl = STORYLINES[STATE.activeStoryline];
+    const svg = document.getElementById('arrows');
+    if (!svg || sl.placeholder) return;
+    const canvas = document.getElementById('canvas-inner');
+    const rect = canvas.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${canvas.scrollWidth} ${canvas.scrollHeight}`);
+    svg.setAttribute('width', canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+
+    const defs = `<defs>
+      <marker id="m-read"  markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#5b6cff" /></marker>
+      <marker id="m-write" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#a4332a" /></marker>
+      <marker id="m-rw"    markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M 0 0 L 9 4.5 L 0 9 z" fill="#8a5a14" /></marker>
+    </defs>`;
+
+    const paths = (sl.connections || []).map(c => {
+      const fromEl = document.getElementById(c.from);
+      const toEl = document.getElementById(c.to);
+      if (!fromEl || !toEl) return '';
+      const fr = fromEl.getBoundingClientRect();
+      const tr = toEl.getBoundingClientRect();
+      const x1 = fr.left - rect.left + fr.width / 2;
+      const y1 = fr.top - rect.top;
+      const dsLeft = tr.left - rect.left;
+      const dsRight = tr.right - rect.left;
+      const dsBottom = tr.bottom - rect.top;
+      const x2 = Math.max(dsLeft + 25, Math.min(dsRight - 25, x1));
+      const y2 = dsBottom;
+      const midY = (y1 + y2) / 2;
+      const d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+      const color = c.kind === 'read' ? '#5b6cff' : c.kind === 'write' ? '#a4332a' : '#8a5a14';
+      const marker = c.kind === 'read' ? 'm-read' : c.kind === 'write' ? 'm-write' : 'm-rw';
+      const isActiveBlock = c.from === STATE.activeBlock;
+      const opacity = isActiveBlock ? 1 : 0.28;
+      const sw = isActiveBlock ? 2.4 : 1.4;
+      const dash = isActiveBlock ? '' : 'stroke-dasharray="4,4"';
+      return `<path d="${d}" stroke="${color}" stroke-width="${sw}" fill="none" marker-end="url(#${marker})" opacity="${opacity}" ${dash} />`;
+    }).join('');
+
+    svg.innerHTML = defs + paths;
+  }
+
+  // ============ Side panel ============
+  function renderSidePanel() {
+    const sl = STORYLINES[STATE.activeStoryline];
+    const detail = (sl.detail || {})[STATE.activeBlock];
+    if (!detail) {
+      document.getElementById('focus-name').textContent = '—';
+      document.getElementById('focus-purpose').textContent =
+        sl.placeholder ? '(This storyline is a placeholder in the mock.)' : 'Click any block in the canvas.';
+      document.getElementById('focus-rw').innerHTML = '';
+      document.getElementById('focus-loc').textContent = '';
+      document.getElementById('focus-code').textContent = '';
+      return;
+    }
+    document.getElementById('focus-name').textContent = detail.name;
+    document.getElementById('focus-purpose').textContent = detail.purpose;
+    document.getElementById('focus-rw').innerHTML =
+      '<div><span class="rw-label">reads</span>' +
+      detail.reads.map(s => '<span class="rw-chip read">' + s + '</span>').join('') + '</div>' +
+      '<div style="margin-top:4px"><span class="rw-label">writes</span>' +
+      detail.writes.map(s => '<span class="rw-chip write">' + s + '</span>').join('') + '</div>';
+    document.getElementById('focus-loc').textContent = detail.loc;
+    document.getElementById('focus-code').textContent = detail.code;
+  }
+
+  // ============ Navigation ============
+  function setStoryline(id) {
+    STATE.activeStoryline = id;
+    STATE.activeBlock = STORYLINES[id].defaultActive || null;
+    renderTabs();
+    renderCanvas();
+    renderSidePanel();
+  }
+
+  // Init
+  setStoryline('ST2');
+  window.addEventListener('resize', drawArrows);
+</script>
+
+</body>
+</html>

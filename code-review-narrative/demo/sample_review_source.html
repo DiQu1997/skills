@@ -1,16 +1,971 @@
-{
-  "schema_version": "0.3",
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Code review — source view</title>
+<style>
+  :root {
+    --bg:#f5f5f4; --bg-card:#ffffff; --bg-soft:#f1f0ec;
+    --fg:#1f2328; --fg-soft:#57606a; --fg-faint:#8b949e;
+    --border:#e1e4e8; --accent:#5b6cff; --accent-soft:#eef0ff;
+    --code-bg:#fbfaf7;
+    --gutter:#f6f5f1; --gutter-fg:#a8b1c0;
+
+    --tok-kw:#5b3e9c; --tok-type:#205493; --tok-str:#8a5a14;
+    --tok-num:#2b6b5e; --tok-com:#8b949e; --tok-fn:#2f7a2f;
+
+    /* Diff line backgrounds — GitHub-ish. */
+    --diff-add-bg:  rgba(70, 149, 74, 0.14);
+    --diff-add-mk:  #2f7a2f;
+    --diff-add-gutter: rgba(70, 149, 74, 0.28);
+    --diff-rem-bg:  rgba(197, 67, 67, 0.14);
+    --diff-rem-mk:  #c54343;
+    --diff-rem-gutter: rgba(197, 67, 67, 0.28);
+
+    /* Severity palette — reviewed step's highlight band color. */
+    --sev-high-fg:   #b0281e;  --sev-high-bg:   #fdecea;
+    --sev-medium-fg: #b56a00;  --sev-medium-bg: #fff5df;
+    --sev-low-fg:    #2560b8;  --sev-low-bg:    #e6efff;
+    --sev-info-fg:   #6d7885;  --sev-info-bg:   #eef0f2;
+    --sev-clean-fg:  #1f883d;  --sev-clean-bg:  #dff0df;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--fg);
+    font-size: 13px; line-height: 1.5;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "tabs   tabs"
+      "main   side";
+    height: 100vh;
+  }
+  .topbar { grid-area: topbar; }
+  .tabs   { grid-area: tabs; }
+  .main   { grid-area: main; }
+  .side   { grid-area: side; }
+
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 9px 22px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .topbar h1 { font-size: 14px; font-weight: 700; margin: 0; }
+  .topbar .crumb { font-size: 12px; color: var(--fg-soft); }
+  .topbar .crumb code {
+    font-family: ui-monospace, monospace; font-size: 11.5px;
+    background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  }
+  .topbar .view-pill {
+    margin-left: auto;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-family: ui-monospace, monospace;
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: 10px;
+  }
+
+  .tabs {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex; padding: 0 22px; gap: 4px;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 9px 14px;
+    cursor: pointer; font-size: 12.5px; color: var(--fg-soft);
+    border-bottom: 3px solid transparent;
+    user-select: none;
+    white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg-soft); }
+  .tab.active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab .tab-num {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint);
+    padding: 1px 5px; border-radius: 3px; background: var(--bg);
+  }
+  .tab.active .tab-num { background: var(--accent-soft); color: var(--accent); }
+  .tab .tab-counts {
+    font-family: ui-monospace, monospace; font-size: 9.5px;
+    color: var(--fg-faint);
+    letter-spacing: 0.04em;
+  }
+  .tab .tab-counts .high   { color: var(--sev-high-fg); font-weight: 700; }
+  .tab .tab-counts .medium { color: var(--sev-medium-fg); font-weight: 700; }
+  .tab .tab-counts .low    { color: var(--sev-low-fg); }
+
+  .main { overflow-y: auto; padding: 14px 22px 60px; }
+
+  /* Top-level PR intro */
+  .pr-intro {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    color: var(--fg-soft);
+    line-height: 1.6;
+  }
+  .pr-intro .pi-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 4px;
+  }
+  .pr-intro details { margin-top: 6px; }
+  .pr-intro summary { cursor: pointer; color: var(--accent); font-size: 11.5px; font-family: ui-monospace, monospace; user-select: none; }
+  .pr-intro .pi-desc { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .pr-intro .stat-strip {
+    display: flex; gap: 12px; flex-wrap: wrap;
+    margin-top: 6px;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+  }
+  .pr-intro .stat-strip .stat {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 8px;
+  }
+  .pr-intro .stat.high   { border-color: var(--sev-high-fg);   color: var(--sev-high-fg);   background: var(--sev-high-bg); }
+  .pr-intro .stat.medium { border-color: var(--sev-medium-fg); color: var(--sev-medium-fg); background: var(--sev-medium-bg); }
+  .pr-intro .stat.low    { border-color: var(--sev-low-fg);    color: var(--sev-low-fg);    background: var(--sev-low-bg); }
+  .pr-intro .stat.clean  { border-color: var(--sev-clean-fg);  color: var(--sev-clean-fg);  background: var(--sev-clean-bg); }
+
+  /* Storyline prologue card (前情提要) */
+  .storyline-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+  }
+  .storyline-banner .b-position {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .storyline-banner .b-position .pos-dot {
+    display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--border);
+    margin: 0 2px; vertical-align: middle;
+  }
+  .storyline-banner .b-position .pos-dot.active { background: var(--accent); transform: scale(1.4); }
+  .storyline-banner .b-position .pos-dot.done   { background: var(--fg-faint); }
+  .storyline-banner .b-title {
+    font-family: ui-monospace, monospace;
+    font-size: 17px; font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .storyline-banner .b-summary {
+    font-size: 12.5px; color: var(--fg-soft); line-height: 1.55;
+    margin-bottom: 10px;
+  }
+  .storyline-banner .b-confidence {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px;
+    display: inline-block;
+    padding: 2px 8px; border-radius: 4px;
+    margin-left: 8px;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    color: var(--fg-soft);
+  }
+
+  /* Purpose (stated / evident / discrepancy) */
+  .b-purpose {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .b-purpose .p-row { margin-top: 4px; }
+  .b-purpose .p-row:first-child { margin-top: 0; }
+  .b-purpose .p-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    display: inline-block; min-width: 90px;
+  }
+  .b-purpose .p-row.discrepancy {
+    color: var(--sev-high-fg);
+    font-weight: 500;
+    background: var(--sev-high-bg);
+    padding: 4px 6px; border-radius: 3px;
+    margin-top: 8px;
+  }
+
+  /* Architectural context — structured facts */
+  .b-context {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    font-size: 11.5px;
+    color: var(--fg-soft);
+    line-height: 1.5;
+  }
+  .b-context dt {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin: 0; padding-top: 2px;
+    white-space: nowrap;
+  }
+  .b-context dd { margin: 0; }
+  .b-context .module-chip {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg);
+    margin: 1px 3px 1px 0;
+  }
+  .b-context .module-chip .role {
+    color: var(--fg-faint);
+    font-style: italic;
+    margin-left: 5px;
+    font-family: -apple-system, sans-serif;
+    font-size: 10px;
+  }
+  .b-change-overview {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg);
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  /* Prev / next storyline bridge */
+  .storyline-bridge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+  }
+  .bridge-cell {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms;
+  }
+  .bridge-cell:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .bridge-cell.empty { background: transparent; cursor: default; border-style: dashed; opacity: 0.5; }
+  .bridge-cell.empty:hover { background: transparent; border-color: var(--border); }
+  .bridge-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 3px;
+  }
+  .bridge-cell.next .bridge-label { text-align: right; }
+  .bridge-title {
+    font-family: ui-monospace, monospace;
+    font-size: 12px; font-weight: 700;
+    color: var(--fg); margin-bottom: 3px;
+  }
+  .bridge-cell.next .bridge-title { text-align: right; }
+  .bridge-summary {
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .bridge-counts {
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: var(--fg-faint); margin-top: 4px;
+  }
+  .bridge-cell.next .bridge-counts { text-align: right; }
+  .bridge-counts .h { color: var(--sev-high-fg); font-weight: 700; }
+  .bridge-counts .m { color: var(--sev-medium-fg); font-weight: 700; }
+
+  /* File section — one per file touched in this storyline */
+  .file-section { margin-bottom: 28px; }
+  .file-header {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px 6px 0 0;
+    padding: 10px 14px;
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  .file-path {
+    font-family: ui-monospace, monospace;
+    font-size: 13px; font-weight: 700;
+    color: var(--fg);
+  }
+  .file-counts {
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+    color: var(--fg-faint);
+    margin-left: auto;
+  }
+  .file-counts .add { color: var(--diff-add-mk); font-weight: 700; }
+  .file-counts .rem { color: var(--diff-rem-mk); font-weight: 700; }
+
+  .file-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    padding: 10px 14px;
+  }
+  .code-flow { position: relative; min-width: 0; }
+  .annotations { position: relative; }
+
+  /* Continuous code with diff coloring. Two gutter columns: old line-num
+     and new line-num (a la GitHub), then a +/-/space marker, then source. */
+  .code-line {
+    display: grid;
+    grid-template-columns: 36px 36px 14px 1fr;
+    font-family: ui-monospace, monospace;
+    font-size: 12px; line-height: 1.55;
+  }
+  .code-line .ln {
+    color: var(--gutter-fg);
+    text-align: right;
+    padding-right: 8px;
+    user-select: none;
+    background: var(--gutter);
+    border-right: 1px solid var(--border);
+  }
+  .code-line .marker {
+    text-align: center;
+    color: var(--gutter-fg);
+    user-select: none;
+  }
+  .code-line .src {
+    padding: 0 10px;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--fg);
+  }
+  .code-line.add { background: var(--diff-add-bg); }
+  .code-line.add .ln { background: var(--diff-add-gutter); }
+  .code-line.add .marker { color: var(--diff-add-mk); font-weight: 700; }
+  .code-line.rem { background: var(--diff-rem-bg); }
+  .code-line.rem .ln { background: var(--diff-rem-gutter); }
+  .code-line.rem .marker { color: var(--diff-rem-mk); font-weight: 700; }
+  .code-line .src .tok-kw { color: var(--tok-kw); font-weight: 600; }
+  .code-line .src .tok-type { color: var(--tok-type); }
+  .code-line .src .tok-str { color: var(--tok-str); }
+  .code-line .src .tok-com { color: var(--tok-com); font-style: italic; }
+  .code-line .src .tok-fn { color: var(--tok-fn); }
+
+  /* Step region — wraps a range of code_view lines belonging to one step */
+  .step-region {
+    position: relative;
+    margin: 8px 0;
+    border-left: 4px solid;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: box-shadow 100ms;
+  }
+  .step-region:hover { filter: brightness(0.98); }
+  .step-region.active { box-shadow: 0 0 0 2px currentColor inset; }
+  /* Severity-driven region colors */
+  .step-region.sev-high    { border-left-color: var(--sev-high-fg);   background: var(--sev-high-bg);   color: var(--sev-high-fg); }
+  .step-region.sev-medium  { border-left-color: var(--sev-medium-fg); background: var(--sev-medium-bg); color: var(--sev-medium-fg); }
+  .step-region.sev-low     { border-left-color: var(--sev-low-fg);    background: var(--sev-low-bg);    color: var(--sev-low-fg); }
+  .step-region.sev-info    { border-left-color: var(--sev-info-fg);   background: var(--sev-info-bg);   color: var(--sev-info-fg); }
+  .step-region.sev-clean   { border-left-color: var(--sev-clean-fg);  background: var(--sev-clean-bg);  color: var(--sev-clean-fg); }
+  .step-region .code-line .ln { background: rgba(255,255,255,0.55); }
+
+  /* Elision */
+  .elision {
+    display: grid;
+    grid-template-columns: 36px 36px 14px 1fr;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--fg-faint);
+    margin: 2px 0;
+  }
+  .elision .ln { color: var(--gutter-fg); text-align: right; padding-right: 8px; background: var(--gutter); border-right: 1px solid var(--border); }
+  .elision .marker { text-align: center; }
+  .elision .src { padding: 2px 10px; font-style: italic; }
+
+  /* Annotation chip — beside its step-region */
+  .annot {
+    position: absolute;
+    left: 0; right: 0;
+    border: 1px solid var(--border);
+    border-left: 4px solid;
+    background: var(--bg-card);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: box-shadow 100ms, transform 100ms;
+  }
+  .annot:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateY(-1px); }
+  .annot.active { box-shadow: 0 2px 10px rgba(91,108,255,0.18); }
+  .annot.sev-high    { border-left-color: var(--sev-high-fg); }
+  .annot.sev-medium  { border-left-color: var(--sev-medium-fg); }
+  .annot.sev-low     { border-left-color: var(--sev-low-fg); }
+  .annot.sev-info    { border-left-color: var(--sev-info-fg); }
+  .annot.sev-clean   { border-left-color: var(--sev-clean-fg); }
+  .annot-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .annot-step-badge {
+    width: 26px; height: 22px; padding: 0 4px;
+    border-radius: 11px;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    color: var(--fg-soft);
+    font-family: ui-monospace, monospace; font-size: 10.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .annot-sev-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .annot-sev-badge.sev-high    { background: var(--sev-high-fg);   color: #fff; }
+  .annot-sev-badge.sev-medium  { background: var(--sev-medium-fg); color: #fff; }
+  .annot-sev-badge.sev-low     { background: var(--sev-low-fg);    color: #fff; }
+  .annot-sev-badge.sev-info    { background: var(--sev-info-fg);   color: #fff; }
+  .annot-sev-badge.sev-clean   { background: var(--sev-clean-fg);  color: #fff; }
+  .annot-track {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.07em; text-transform: uppercase;
+  }
+  .annot-name {
+    font-family: ui-monospace, monospace;
+    font-weight: 700; font-size: 12px;
+    color: var(--fg);
+    line-height: 1.35;
+    margin-top: 2px;
+  }
+  .annot-says {
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.45;
+    margin-top: 3px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .annot-concern-preview {
+    font-size: 10.5px;
+    color: var(--fg);
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+    line-height: 1.4;
+  }
+  .annot-concern-preview .cp-count {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    color: var(--sev-high-fg);
+    margin-right: 4px;
+  }
+
+  /* SIDE: detail panel */
+  .side {
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 16px 30px;
+  }
+  .side h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 0 0 5px; font-weight: 700;
+  }
+  .step-nav {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .step-nav .step-counter { color: var(--fg-soft); flex: 1; }
+  .step-nav .step-counter strong { color: var(--fg); font-weight: 700; }
+  .step-nav button {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 9px; font-size: 11px;
+    font-family: ui-monospace, monospace; color: var(--fg); cursor: pointer;
+  }
+  .step-nav button:hover:not(:disabled) {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+  .step-nav button:disabled { color: var(--fg-faint); opacity: 0.5; cursor: default; }
+
+  .focus-track {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    color: var(--fg-faint); letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .focus-name {
+    font-family: ui-monospace, monospace;
+    font-size: 17px; font-weight: 700;
+    color: var(--fg); margin-bottom: 6px;
+    line-height: 1.35;
+  }
+  .focus-summary {
+    font-size: 12.5px; color: var(--fg); line-height: 1.55;
+    margin-bottom: 12px;
+  }
+
+  .focus-section {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .focus-section-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .focus-section .body { font-size: 12px; color: var(--fg); line-height: 1.55; }
+
+  /* Before/after cards for behavior_delta */
+  .ba-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+  .ba-cell {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 7px 9px;
+  }
+  .ba-cell .ba-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    margin-bottom: 3px;
+  }
+  .ba-cell.before .ba-label { color: var(--diff-rem-mk); }
+  .ba-cell.after .ba-label { color: var(--diff-add-mk); }
+  .ba-cell .ba-text { font-size: 11.5px; color: var(--fg); line-height: 1.5; }
+
+  /* Concern items */
+  .concern {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 6px;
+  }
+  .concern.sev-high    { border-left-color: var(--sev-high-fg);   background: var(--sev-high-bg); }
+  .concern.sev-medium  { border-left-color: var(--sev-medium-fg); background: var(--sev-medium-bg); }
+  .concern.sev-low     { border-left-color: var(--sev-low-fg);    background: var(--sev-low-bg); }
+  .concern.sev-informational { border-left-color: var(--sev-info-fg); background: var(--sev-info-bg); }
+  .concern .concern-head {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+  }
+  .concern .concern-sev-pill {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 3px;
+    color: #fff;
+  }
+  .concern.sev-high         .concern-sev-pill { background: var(--sev-high-fg); }
+  .concern.sev-medium       .concern-sev-pill { background: var(--sev-medium-fg); }
+  .concern.sev-low          .concern-sev-pill { background: var(--sev-low-fg); }
+  .concern.sev-informational .concern-sev-pill { background: var(--sev-info-fg); }
+  .concern .concern-title {
+    font-size: 12px; color: var(--fg); font-weight: 600;
+    line-height: 1.4;
+    flex: 1;
+  }
+  .concern .concern-evidence {
+    margin-top: 4px;
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.5;
+    padding-left: 8px;
+    border-left: 2px solid rgba(0,0,0,0.06);
+  }
+  .concern .concern-evidence .ev-label {
+    font-family: ui-monospace, monospace;
+    font-size: 9px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    display: block; margin-bottom: 2px;
+  }
+
+  .suggestion {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-top: 5px;
+    font-size: 11.5px; color: var(--fg);
+    line-height: 1.5;
+  }
+
+  .alt-approach {
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-top: 5px;
+    font-size: 11.5px;
+  }
+  .alt-approach .alt-name { font-family: ui-monospace, monospace; font-weight: 700; color: var(--fg); }
+  .alt-approach .alt-kind { color: var(--fg-faint); font-size: 10px; margin-left: 6px; }
+  .alt-approach .alt-tradeoff { color: var(--fg-soft); margin-top: 3px; }
+
+  .test-coverage-grid { display: grid; gap: 4px; margin-top: 4px; }
+  .test-item {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .test-item .t-file { font-family: ui-monospace, monospace; color: var(--fg); }
+  .test-item .t-name { color: var(--accent); margin-left: 4px; }
+  .test-item .t-what { color: var(--fg-soft); margin-top: 2px; font-size: 10.5px; line-height: 1.45; }
+
+  pre.focus-code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px; line-height: 1.55;
+    overflow-x: auto; margin: 0;
+    color: var(--fg);
+  }
+
+  .next-hint {
+    margin-top: 14px; padding: 8px 10px;
+    background: var(--bg-soft);
+    border: 1px dashed var(--border);
+    border-radius: 5px;
+    font-size: 11.5px; color: var(--fg-soft);
+  }
+  .next-hint .nh-label {
+    font-family: ui-monospace, monospace; font-size: 9px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    display: block; margin-bottom: 3px;
+  }
+  .next-hint .nh-link {
+    color: var(--accent); cursor: pointer;
+    font-family: ui-monospace, monospace; font-weight: 700;
+  }
+  .next-hint .nh-link:hover { text-decoration: underline; }
+
+  .placeholder {
+    margin: 80px auto 0; max-width: 520px; text-align: center;
+    color: var(--fg-faint); font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1 id="hdr-title">🔍 Code review</h1>
+    <div class="crumb" id="hdr-crumb"></div>
+    <span class="view-pill">source view · ←/→ walks steps</span>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <section class="main" id="main"></section>
+  <aside class="side" id="side">
+    <div class="step-nav" id="step-nav">
+      <span class="step-counter" id="step-counter">—</span>
+      <button id="btn-prev" title="Previous step (←)">◀ Prev</button>
+      <button id="btn-next" title="Next step (→)">Next ▶</button>
+    </div>
+    <div class="focus-track" id="focus-track"></div>
+    <div class="focus-name" id="focus-name">—</div>
+    <div class="focus-summary" id="focus-summary">Click a highlighted change region in the code to focus a step.</div>
+    <div id="focus-extras"></div>
+    <div id="focus-next"></div>
+  </aside>
+</div>
+
+<script>
+  const REVIEW_DATA = {
+  "schema_version": "0.4",
   "metadata": {
     "repo": "github.com/google/leveldb (fabricated)",
     "base_commit": "a5394e1...",
     "head_commit": "b7f2c8d...",
     "title": "Track MemTable size at write time + tests + comment cleanup",
-    "generated_at": "2026-04-26T00:00:00Z"
+    "generated_at": "2026-04-26T00:00:00Z",
+    "locale": "zh"
   },
   "summary": {
     "one_line": "Replace on-demand arena memory query with a write-time counter, plus tests and a comment cleanup.",
     "description": "Currently MemTable::ApproximateMemoryUsage() reads from arena, which the PR description claims is expensive. This change introduces a tracked_bytes_ counter updated in Add(). Includes tests for the new tracking and an unrelated comment fix in the header."
   },
+  "diff_hunks": [
+    {
+      "file": "db/memtable.cc",
+      "lines": [
+        {
+          "line_num": 17,
+          "content": "      table_(comparator_, &arena_),",
+          "change": "added"
+        },
+        {
+          "line_num": 17,
+          "content": "      table_(comparator_, &arena_) {}",
+          "change": "removed"
+        },
+        {
+          "line_num": 18,
+          "content": "      tracked_bytes_(0) {}",
+          "change": "added"
+        },
+        {
+          "line_num": 27,
+          "content": "  return tracked_bytes_;",
+          "change": "added"
+        },
+        {
+          "line_num": 27,
+          "content": "  return arena_.MemoryUsage();",
+          "change": "removed"
+        },
+        {
+          "line_num": 94,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 95,
+          "content": "  // Track size: entry bytes + an estimate of skiplist node overhead.",
+          "change": "added"
+        },
+        {
+          "line_num": 96,
+          "content": "  tracked_bytes_ += encoded_len + kApproxSkipListNodeOverhead;",
+          "change": "added"
+        }
+      ]
+    },
+    {
+      "file": "db/memtable.h",
+      "lines": [
+        {
+          "line_num": 40,
+          "content": "  // Returns a cached counter updated at write time; O(1).",
+          "change": "added"
+        },
+        {
+          "line_num": 40,
+          "content": "  // Note: this iterates arena blocks; do not call in tight loops.",
+          "change": "removed"
+        },
+        {
+          "line_num": 77,
+          "content": "  // Cached approximate byte usage, updated in Add().",
+          "change": "added"
+        },
+        {
+          "line_num": 78,
+          "content": "  // Includes both encoded entry bytes and skiplist node overhead.",
+          "change": "added"
+        },
+        {
+          "line_num": 79,
+          "content": "  size_t tracked_bytes_;",
+          "change": "added"
+        }
+      ]
+    },
+    {
+      "file": "db/memtable_test.cc",
+      "lines": [
+        {
+          "line_num": 47,
+          "content": "TEST(MemTableTest, TrackedSizeMonotonic) {",
+          "change": "added"
+        },
+        {
+          "line_num": 48,
+          "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+          "change": "added"
+        },
+        {
+          "line_num": 49,
+          "content": "  MemTable* mem = new MemTable(cmp);",
+          "change": "added"
+        },
+        {
+          "line_num": 50,
+          "content": "  mem->Ref();",
+          "change": "added"
+        },
+        {
+          "line_num": 51,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 52,
+          "content": "  size_t prev = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 53,
+          "content": "  for (int i = 0; i < 100; i++) {",
+          "change": "added"
+        },
+        {
+          "line_num": 54,
+          "content": "    mem->Add(i, kTypeValue, \"k\" + std::to_string(i), \"v\");",
+          "change": "added"
+        },
+        {
+          "line_num": 55,
+          "content": "    size_t now = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 56,
+          "content": "    ASSERT_GT(now, prev) << \"size should grow after each Add\";",
+          "change": "added"
+        },
+        {
+          "line_num": 57,
+          "content": "    prev = now;",
+          "change": "added"
+        },
+        {
+          "line_num": 58,
+          "content": "  }",
+          "change": "added"
+        },
+        {
+          "line_num": 59,
+          "content": "",
+          "change": "added"
+        },
+        {
+          "line_num": 60,
+          "content": "  mem->Unref();",
+          "change": "added"
+        },
+        {
+          "line_num": 61,
+          "content": "}",
+          "change": "added"
+        },
+        {
+          "line_num": 63,
+          "content": "TEST(MemTableTest, TrackedSizeApproximatesArena) {",
+          "change": "added"
+        },
+        {
+          "line_num": 64,
+          "content": "  InternalKeyComparator cmp(BytewiseComparator());",
+          "change": "added"
+        },
+        {
+          "line_num": 65,
+          "content": "  MemTable* mem = new MemTable(cmp);",
+          "change": "added"
+        },
+        {
+          "line_num": 66,
+          "content": "  mem->Ref();",
+          "change": "added"
+        },
+        {
+          "line_num": 67,
+          "content": "  for (int i = 0; i < 1000; i++) {",
+          "change": "added"
+        },
+        {
+          "line_num": 68,
+          "content": "    mem->Add(i, kTypeValue, \"key\" + std::to_string(i), \"value\");",
+          "change": "added"
+        },
+        {
+          "line_num": 69,
+          "content": "  }",
+          "change": "added"
+        },
+        {
+          "line_num": 70,
+          "content": "  size_t tracked = mem->ApproximateMemoryUsage();",
+          "change": "added"
+        },
+        {
+          "line_num": 71,
+          "content": "  // Tracked size should be in the same order of magnitude as arena.",
+          "change": "added"
+        },
+        {
+          "line_num": 72,
+          "content": "  // We allow 50% slop in either direction.",
+          "change": "added"
+        },
+        {
+          "line_num": 73,
+          "content": "  // (No direct arena access in test; this is a placeholder for",
+          "change": "added"
+        },
+        {
+          "line_num": 74,
+          "content": "  //  whatever ground-truth comparison the team agrees on.)",
+          "change": "added"
+        },
+        {
+          "line_num": 75,
+          "content": "  ASSERT_GT(tracked, 1000 * 10);",
+          "change": "added"
+        },
+        {
+          "line_num": 76,
+          "content": "  ASSERT_LT(tracked, 1000 * 1000);",
+          "change": "added"
+        },
+        {
+          "line_num": 77,
+          "content": "  mem->Unref();",
+          "change": "added"
+        },
+        {
+          "line_num": 78,
+          "content": "}",
+          "change": "added"
+        }
+      ]
+    }
+  ],
   "storylines": [
     {
       "id": "S1",
@@ -1586,4 +2541,635 @@
       ]
     }
   ]
-}
+};
+
+  const STATE = { activeStorylineId: null, activeStepId: null };
+
+  // ---------- Helpers ----------
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  const KW = new Set(['def','class','if','elif','else','return','while','for','in','not','and','or','break','continue','import','from','as','with','try','except','finally','raise','yield','lambda','self','None','True','False','pass','assert','const','let','var','function','new','delete','typeof','instanceof','extends','implements','interface','type','enum','public','private','protected','static','void','int','size_t','bool','true','false','nullptr','null','undefined','struct','namespace','using','template','typename']);
+  function highlight(line) {
+    const src = String(line == null ? '' : line);
+    const out = []; let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === '/' && src[i+1] === '/') { out.push(['com', src.slice(i)]); break; }
+      if (c === '#') { out.push(['com', src.slice(i)]); break; }
+      if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < src.length && src[j] !== c) { if (src[j] === '\\') j += 2; else j++; }
+        out.push(['str', src.slice(i, Math.min(j + 1, src.length))]);
+        i = Math.min(j + 1, src.length); continue;
+      }
+      if (/[0-9]/.test(c) && (i === 0 || !/[A-Za-z_]/.test(src[i-1]))) {
+        let j = i;
+        while (j < src.length && /[0-9._x]/.test(src[j])) j++;
+        out.push(['num', src.slice(i, j)]); i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+        const word = src.slice(i, j);
+        out.push([KW.has(word) ? 'kw' : null, word]);
+        i = j; continue;
+      }
+      out.push([null, c]); i++;
+    }
+    return out.map(([cls, text]) =>
+      cls ? '<span class="tok-' + cls + '">' + esc(text) + '</span>' : esc(text)
+    ).join('');
+  }
+
+  const SEV_ORDER = { high: 0, medium: 1, low: 2, informational: 3, clean: 4 };
+  const SEV_CANON = { high: 'high', medium: 'medium', low: 'low', informational: 'info', info: 'info', clean: 'clean' };
+  function stepSeverity(step) {
+    const concerns = step.concerns || [];
+    if (!concerns.length) return 'clean';
+    let worst = 'informational';
+    concerns.forEach(c => {
+      const s = c.severity || 'informational';
+      if ((SEV_ORDER[s] ?? 99) < (SEV_ORDER[worst] ?? 99)) worst = s;
+    });
+    return worst;
+  }
+  function sevClass(sev) { return 'sev-' + (SEV_CANON[sev] || 'info'); }
+
+  // ---------- View: build per-storyline data ----------
+  function viewForStoryline(sl) {
+    const steps = (sl.steps || []).map((s, i) => ({
+      ...s,
+      _step: i + 1,
+      _severity: stepSeverity(s),
+    }));
+    // Flatten (step, file, primary_change) triples
+    const perFile = new Map();  // file → [{step, change}]
+    steps.forEach(s => {
+      const pcs = (s.code_view && s.code_view.primary_changes) || [];
+      pcs.forEach(pc => {
+        const f = pc.file || '(unknown)';
+        if (!perFile.has(f)) perFile.set(f, []);
+        perFile.get(f).push({ step: s, change: pc });
+      });
+    });
+    return {
+      id: sl.id,
+      title: sl.title,
+      summary: sl.summary || '',
+      files: sl.files_touched || Array.from(perFile.keys()),
+      purpose: sl.purpose || {},
+      arch: sl.architectural_context || {},
+      change_overview: sl.change_overview || '',
+      confidence: sl.confidence || '',
+      confidence_reasoning: sl.confidence_reasoning || '',
+      steps, perFile,
+      defaultActive: steps[0]?.id || null,
+    };
+  }
+
+  function countSeverities(sl) {
+    const c = { high: 0, medium: 0, low: 0, informational: 0, clean: 0 };
+    (sl.steps || []).forEach(s => {
+      const sev = stepSeverity(s);
+      c[sev] = (c[sev] || 0) + 1;
+    });
+    return c;
+  }
+
+  // ---------- Tabs ----------
+  function renderTabs() {
+    const root = document.getElementById('tabs');
+    root.innerHTML = '';
+    (REVIEW_DATA.storylines || []).forEach(sl => {
+      const t = document.createElement('div');
+      t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
+      const c = countSeverities(sl);
+      const parts = [];
+      if (c.high)   parts.push('<span class="high">' + c.high + 'H</span>');
+      if (c.medium) parts.push('<span class="medium">' + c.medium + 'M</span>');
+      if (c.low)    parts.push('<span class="low">' + c.low + 'L</span>');
+      const counts = parts.length ? '<span class="tab-counts">' + parts.join(' ') + '</span>' : '';
+      t.innerHTML = '<span class="tab-num">' + esc(sl.id) + '</span>' + esc(sl.title) + counts;
+      t.onclick = () => setStoryline(sl.id);
+      root.appendChild(t);
+    });
+  }
+
+  // ---------- PR intro (first storyline only) ----------
+  function renderPRIntro() {
+    const sm = REVIEW_DATA.summary || {};
+    const md = REVIEW_DATA.metadata || {};
+    const storylines = REVIEW_DATA.storylines || [];
+    const totals = { high: 0, medium: 0, low: 0, informational: 0, clean: 0 };
+    storylines.forEach(sl => {
+      const c = countSeverities(sl);
+      Object.keys(c).forEach(k => totals[k] += c[k]);
+    });
+    const intro = document.createElement('div');
+    intro.className = 'pr-intro';
+    const stats = [];
+    if (totals.high)          stats.push('<span class="stat high">'   + totals.high + ' HIGH</span>');
+    if (totals.medium)        stats.push('<span class="stat medium">' + totals.medium + ' MEDIUM</span>');
+    if (totals.low)           stats.push('<span class="stat low">'    + totals.low + ' LOW</span>');
+    if (totals.informational) stats.push('<span class="stat">'        + totals.informational + ' INFO</span>');
+    if (totals.clean)         stats.push('<span class="stat clean">'  + totals.clean + ' CLEAN</span>');
+    const files = new Set();
+    storylines.forEach(sl => (sl.files_touched || []).forEach(f => files.add(f)));
+    if (files.size) stats.push('<span class="stat">' + files.size + ' files</span>');
+    const longDesc = sm.description && sm.description !== sm.one_line
+      ? '<details><summary>What this PR does in full</summary><div class="pi-desc">' + esc(sm.description) + '</div></details>'
+      : '';
+    intro.innerHTML =
+      '<div class="pi-label">🔍 Reviewing · ' + esc(md.title || md.repo || '') + '</div>' +
+      (sm.one_line ? esc(sm.one_line) : '') +
+      (stats.length ? '<div class="stat-strip">' + stats.join('') + '</div>' : '') +
+      longDesc;
+    return intro;
+  }
+
+  // ---------- Storyline prologue ----------
+  function renderStorylineBanner(sl, slIdx, storylines, view) {
+    const banner = document.createElement('div');
+    banner.className = 'storyline-banner';
+    const dots = storylines.map((s, i) => {
+      const cls = i === slIdx ? 'active' : (i < slIdx ? 'done' : '');
+      return '<span class="pos-dot ' + cls + '" title="' + esc(s.id + ': ' + s.title) + '"></span>';
+    }).join('');
+    const position = '<div class="b-position">Storyline ' + (slIdx + 1) + ' of ' + storylines.length + '   ' + dots + '</div>';
+    const confBadge = view.confidence ? '<span class="b-confidence" title="' + esc(view.confidence_reasoning) + '">confidence: ' + esc(view.confidence) + '</span>' : '';
+    const title = '<div class="b-title">' + esc(sl.title) + confBadge + '</div>';
+    const summary = view.summary ? '<div class="b-summary">' + esc(view.summary) + '</div>' : '';
+
+    // Purpose (stated / evident / discrepancy)
+    const p = view.purpose;
+    let purposeHtml = '';
+    if (p && (p.stated || p.evident || p.discrepancy)) {
+      const rows = [];
+      if (p.stated)  rows.push('<div class="p-row"><span class="p-label">Stated</span> ' + esc(p.stated) + '</div>');
+      if (p.evident) rows.push('<div class="p-row"><span class="p-label">Evident</span> ' + esc(p.evident) + '</div>');
+      if (p.discrepancy) rows.push('<div class="p-row discrepancy"><span class="p-label">⚠ Discrepancy</span> ' + esc(p.discrepancy) + '</div>');
+      purposeHtml = '<div class="b-purpose">' + rows.join('') + '</div>';
+    }
+
+    // Architectural context
+    const ac = view.arch;
+    const contextRows = [];
+    if (ac.system_role)       contextRows.push('<dt>Role</dt><dd>' + esc(ac.system_role) + '</dd>');
+    if (Array.isArray(ac.involved_modules) && ac.involved_modules.length) {
+      const chips = ac.involved_modules.map(m =>
+        '<span class="module-chip">' + esc(m.module || m.file || '') +
+        (m.role_in_storyline ? '<span class="role">— ' + esc(m.role_in_storyline) + '</span>' : '') +
+        '</span>'
+      ).join('');
+      contextRows.push('<dt>Modules</dt><dd>' + chips + '</dd>');
+    }
+    if (ac.data_flow)         contextRows.push('<dt>Data flow</dt><dd>' + esc(ac.data_flow) + '</dd>');
+    const context = contextRows.length ? '<dl class="b-context">' + contextRows.join('') + '</dl>' : '';
+
+    const change = view.change_overview ? '<div class="b-change-overview">' + esc(view.change_overview) + '</div>' : '';
+
+    // Bridges
+    const prev = slIdx > 0 ? storylines[slIdx - 1] : null;
+    const next = slIdx < storylines.length - 1 ? storylines[slIdx + 1] : null;
+    const countsBadge = (s) => {
+      const c = countSeverities(s);
+      const parts = [];
+      if (c.high) parts.push('<span class="h">' + c.high + ' HIGH</span>');
+      if (c.medium) parts.push('<span class="m">' + c.medium + ' MEDIUM</span>');
+      if (c.low) parts.push(c.low + ' LOW');
+      if (!parts.length) parts.push('clean');
+      return '<div class="bridge-counts">' + parts.join(' · ') + '</div>';
+    };
+    const prevHtml = prev
+      ? '<div class="bridge-cell" data-go-sl="' + esc(prev.id) + '">' +
+          '<div class="bridge-label">◀ Previously · ' + esc(prev.id) + '</div>' +
+          '<div class="bridge-title">' + esc(prev.title) + '</div>' +
+          (prev.summary ? '<div class="bridge-summary">' + esc(prev.summary) + '</div>' : '') +
+          countsBadge(prev) +
+        '</div>'
+      : '<div class="bridge-cell empty"><div class="bridge-label">— start of review —</div></div>';
+    const nextHtml = next
+      ? '<div class="bridge-cell next" data-go-sl="' + esc(next.id) + '">' +
+          '<div class="bridge-label">Coming up · ' + esc(next.id) + ' ▶</div>' +
+          '<div class="bridge-title">' + esc(next.title) + '</div>' +
+          (next.summary ? '<div class="bridge-summary">' + esc(next.summary) + '</div>' : '') +
+          countsBadge(next) +
+        '</div>'
+      : '<div class="bridge-cell next empty"><div class="bridge-label">— end of review —</div></div>';
+    const bridge = '<div class="storyline-bridge">' + prevHtml + nextHtml + '</div>';
+
+    banner.innerHTML = position + title + summary + purposeHtml + context + change + bridge;
+    banner.querySelectorAll('[data-go-sl]').forEach(el => {
+      el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+    });
+    return banner;
+  }
+
+  // ---------- File section: header + code body with diff coloring ----------
+  function renderFileSection(file, changes, view) {
+    const section = document.createElement('div');
+    section.className = 'file-section';
+    section.id = 'file-' + file.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Aggregate line counts
+    let adds = 0, rems = 0;
+    changes.forEach(({change}) => (change.lines || []).forEach(l => {
+      if (l.change === 'added') adds++;
+      else if (l.change === 'removed') rems++;
+    }));
+
+    const header = document.createElement('div');
+    header.className = 'file-header';
+    header.innerHTML =
+      '<span class="file-path">' + esc(file) + '</span>' +
+      '<span class="file-counts">' +
+        (adds ? '<span class="add">+' + adds + '</span>' : '') +
+        (adds && rems ? ' ' : '') +
+        (rems ? '<span class="rem">−' + rems + '</span>' : '') +
+      '</span>';
+    section.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'file-body';
+    const codeFlow = document.createElement('div');
+    codeFlow.className = 'code-flow';
+    const annotations = document.createElement('div');
+    annotations.className = 'annotations';
+
+    // Build the merged line stream. A "position" is either:
+    //   an unchanged line (single row, both old+new line-num set)
+    //   an added line (row with new line-num, no old)
+    //   a removed line (row with old line-num, no new)
+    // Sort:
+    //   primary key = the "new file" line number for added / unchanged lines,
+    //                 the "removed" line is placed AT the position it was in old
+    //                 file — visually, we tie the removed line to the closest
+    //                 unchanged/added line by its recorded line_num.
+    //
+    // Simpler heuristic that works for typical unified diffs: sort by
+    // line_num, and for ties put removed BEFORE added.
+    // Group by step so we can wrap each step's line-range in a region.
+
+    const stepRanges = changes.map(({step, change}) => {
+      const lines = (change.lines || []).slice();
+      // We need to compute (start, end) covering all lines this step contributes
+      // to this file, expressed in the visual row-order sense.
+      let lo = Infinity, hi = -Infinity;
+      lines.forEach(l => {
+        if (typeof l.line_num === 'number') {
+          if (l.line_num < lo) lo = l.line_num;
+          if (l.line_num > hi) hi = l.line_num;
+        }
+      });
+      const ctxLo = typeof change.context_start_line === 'number' ? Math.min(change.context_start_line, lo) : lo;
+      const ctxHi = typeof change.context_end_line === 'number' ? Math.max(change.context_end_line, hi) : hi;
+      return { step, change, lo: ctxLo, hi: ctxHi, lines };
+    }).sort((a, b) => a.lo - b.lo || a.hi - b.hi);
+
+    // Render step by step: each step becomes its own region containing its lines.
+    // Between steps, if there's a gap, insert an elision.
+    let prevHi = null;
+    stepRanges.forEach(({ step, change, lo, hi, lines }, idx) => {
+      if (prevHi != null && lo > prevHi + 1) {
+        const el = document.createElement('div');
+        el.className = 'elision';
+        el.innerHTML = '<span class="ln"></span><span class="ln"></span><span class="marker">…</span><span class="src">' +
+          esc('lines ' + (prevHi + 1) + (lo - 1 > prevHi + 1 ? '–' + (lo - 1) : '') + ' elided') + '</span>';
+        codeFlow.appendChild(el);
+      }
+      const sev = step._severity;
+      const region = document.createElement('div');
+      region.className = 'step-region ' + sevClass(sev);
+      region.id = 'reg-' + file.replace(/[^a-zA-Z0-9]/g, '_') + '-' + step.id;
+      region.dataset.stepId = step.id;
+
+      // Sort lines: primary by line_num, ties → removed before added, unchanged before both.
+      const rank = { unchanged: 0, removed: 1, added: 2 };
+      const sorted = lines.slice().sort((a, b) => {
+        const la = a.line_num ?? 0, lb = b.line_num ?? 0;
+        if (la !== lb) return la - lb;
+        return (rank[a.change] ?? 9) - (rank[b.change] ?? 9);
+      });
+
+      sorted.forEach(l => {
+        const cls = l.change === 'added' ? 'add' : l.change === 'removed' ? 'rem' : '';
+        const oldLn = (l.change === 'unchanged' || l.change === 'removed') ? l.line_num : '';
+        const newLn = (l.change === 'unchanged' || l.change === 'added') ? l.line_num : '';
+        const marker = l.change === 'added' ? '+' : l.change === 'removed' ? '−' : ' ';
+        const lineEl = document.createElement('div');
+        lineEl.className = 'code-line ' + cls;
+        lineEl.innerHTML =
+          '<span class="ln">' + esc(String(oldLn || '')) + '</span>' +
+          '<span class="ln">' + esc(String(newLn || '')) + '</span>' +
+          '<span class="marker">' + marker + '</span>' +
+          '<span class="src">' + highlight(l.content || '') + '</span>';
+        region.appendChild(lineEl);
+      });
+      region.onclick = () => gotoStep(step.id);
+      codeFlow.appendChild(region);
+
+      // Annotation
+      const annot = document.createElement('div');
+      annot.className = 'annot ' + sevClass(sev);
+      annot.dataset.stepId = step.id;
+      const sevLabel = sev === 'clean' ? '✓ CLEAN' :
+                       sev === 'high' ? '⚠ HIGH' :
+                       sev === 'medium' ? '⚠ MED' :
+                       sev === 'low' ? 'LOW' : 'INFO';
+      const concerns = step.concerns || [];
+      const concernPreview = concerns.length
+        ? '<div class="annot-concern-preview"><span class="cp-count">' + concerns.length + '</span>' +
+          esc(concerns[0].concern || '') + '</div>'
+        : '';
+      annot.innerHTML =
+        '<div class="annot-head">' +
+          '<div class="annot-step-badge">#' + step._step + '</div>' +
+          '<div class="annot-sev-badge ' + sevClass(sev) + '">' + sevLabel + '</div>' +
+          '<div class="annot-track">' + esc(step.track || '') + '</div>' +
+        '</div>' +
+        '<div class="annot-name">' + esc(step.title || step.id) + '</div>' +
+        (step.summary ? '<div class="annot-says">' + esc(step.summary) + '</div>' : '') +
+        concernPreview;
+      annot.onclick = () => gotoStep(step.id);
+      annotations.appendChild(annot);
+
+      prevHi = hi;
+    });
+
+    body.appendChild(codeFlow);
+    body.appendChild(annotations);
+    section.appendChild(body);
+    return section;
+  }
+
+  // ---------- Layout: align each annot to its step-region vertically ----------
+  function layoutAnnotations() {
+    document.querySelectorAll('.file-section').forEach(section => {
+      const body = section.querySelector('.file-body');
+      if (!body) return;
+      const annotations = section.querySelector('.annotations');
+      if (!annotations) return;
+      const bodyRect = body.getBoundingClientRect();
+      const regions = section.querySelectorAll('.step-region');
+      const annots = section.querySelectorAll('.annot');
+      const positions = [];
+      regions.forEach((reg, idx) => {
+        const annot = annots[idx];
+        if (!annot) return;
+        const rr = reg.getBoundingClientRect();
+        const desiredTop = rr.top - bodyRect.top + body.scrollTop;
+        positions.push({ idx, desired: desiredTop, height: 0, annot });
+      });
+      positions.forEach(p => { p.annot.style.top = p.desired + 'px'; });
+      positions.forEach(p => { p.height = p.annot.offsetHeight; });
+      const MIN_GAP = 6;
+      let lastBottom = -Infinity;
+      positions.forEach(p => {
+        const top = Math.max(p.desired, lastBottom + MIN_GAP);
+        p.annot.style.top = top + 'px';
+        lastBottom = top + p.height;
+      });
+      if (positions.length) {
+        const lowest = positions[positions.length - 1];
+        const need = parseFloat(lowest.annot.style.top) + lowest.height;
+        annotations.style.minHeight = need + 'px';
+      }
+    });
+  }
+
+  // ---------- Step navigation ----------
+  function nextStep(view, stepId) {
+    const i = view.steps.findIndex(s => s.id === stepId);
+    return view.steps[i + 1] ? { id: view.steps[i + 1].id } : null;
+  }
+  function prevStep(view, stepId) {
+    const i = view.steps.findIndex(s => s.id === stepId);
+    return view.steps[i - 1] ? { id: view.steps[i - 1].id } : null;
+  }
+  function gotoStep(stepId) {
+    if (!stepId) return;
+    STATE.activeStepId = stepId;
+    renderActiveState();
+    renderSidePanel();
+    // Scroll first matching region into view
+    const reg = document.querySelector('.step-region[data-step-id="' + stepId + '"]');
+    if (reg) reg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function renderActiveState() {
+    document.querySelectorAll('.step-region.active, .annot.active').forEach(el => el.classList.remove('active'));
+    if (!STATE.activeStepId) return;
+    document.querySelectorAll('.step-region').forEach(r => {
+      if (r.dataset.stepId === STATE.activeStepId) r.classList.add('active');
+    });
+    document.querySelectorAll('.annot').forEach(a => {
+      if (a.dataset.stepId === STATE.activeStepId) a.classList.add('active');
+    });
+  }
+
+  // ---------- Side panel ----------
+  function renderSidePanel() {
+    const sl = (REVIEW_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+    if (!sl) return;
+    const view = viewForStoryline(sl);
+    const s = view.steps.find(x => x.id === STATE.activeStepId);
+    const f = id => document.getElementById(id);
+
+    const total = view.steps.length;
+    const stepNum = s ? s._step : 0;
+    const prev = s ? prevStep(view, s.id) : null;
+    const next = s ? nextStep(view, s.id) : null;
+    f('step-counter').innerHTML = s ? 'Step <strong>' + stepNum + '</strong> / ' + total : '—';
+    f('btn-prev').disabled = !prev;
+    f('btn-next').disabled = !next;
+    f('btn-prev').onclick = () => prev && gotoStep(prev.id);
+    f('btn-next').onclick = () => next && gotoStep(next.id);
+
+    if (!s) {
+      f('focus-track').textContent = '';
+      f('focus-name').textContent = '—';
+      f('focus-summary').textContent = 'Click a highlighted change region in the code to focus a step.';
+      f('focus-extras').innerHTML = '';
+      f('focus-next').innerHTML = '';
+      return;
+    }
+    f('focus-track').textContent = (s.track || '') + '  ·  ' + view.title;
+    f('focus-name').textContent = s.title || s.id;
+    f('focus-summary').textContent = s.summary || '';
+
+    const extras = [];
+    // Behavior delta (before/after)
+    if (s.behavior_delta && (s.behavior_delta.before || s.behavior_delta.after)) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Behavior delta</div>' +
+        '<div class="ba-grid">' +
+          '<div class="ba-cell before"><div class="ba-label">Before</div><div class="ba-text">' + esc(s.behavior_delta.before || '') + '</div></div>' +
+          '<div class="ba-cell after"><div class="ba-label">After</div><div class="ba-text">' + esc(s.behavior_delta.after || '') + '</div></div>' +
+        '</div></div>');
+    }
+    // Concerns
+    if ((s.concerns || []).length) {
+      const items = s.concerns.map(c => {
+        const sev = c.severity || 'informational';
+        const sevPill = (sev.toUpperCase());
+        return '<div class="concern ' + sevClass(sev) + '">' +
+          '<div class="concern-head">' +
+            '<span class="concern-sev-pill">' + esc(sevPill) + '</span>' +
+            '<span class="concern-title">' + esc(c.concern || '') + '</span>' +
+          '</div>' +
+          (c.evidence ? '<div class="concern-evidence"><span class="ev-label">Evidence</span>' + esc(c.evidence) + '</div>' : '') +
+          '</div>';
+      }).join('');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Concerns (' + s.concerns.length + ')</div><div class="body">' + items + '</div></div>');
+    }
+    // Suggestions
+    if ((s.suggestions || []).length) {
+      const items = s.suggestions.map(sg =>
+        '<div class="suggestion">💡 ' + esc(typeof sg === 'string' ? sg : sg.suggestion || JSON.stringify(sg)) + '</div>'
+      ).join('');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Suggestions</div><div class="body">' + items + '</div></div>');
+    }
+    // Evaluation
+    if (s.evaluation) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Evaluation</div><div class="body">' + esc(s.evaluation) + '</div></div>');
+    }
+    // Analysis
+    if (s.analysis) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Analysis</div><div class="body">' + esc(s.analysis) + '</div></div>');
+    }
+    // Alternative approaches
+    if ((s.alternative_approaches || []).length) {
+      const items = s.alternative_approaches.map(a =>
+        '<div class="alt-approach">' +
+          '<span class="alt-name">' + esc(a.approach || '') + '</span>' +
+          (a.evidence_kind ? '<span class="alt-kind">· ' + esc(a.evidence_kind) + '</span>' : '') +
+          (a.tradeoff_vs_chosen ? '<div class="alt-tradeoff">' + esc(a.tradeoff_vs_chosen) + '</div>' : '') +
+        '</div>'
+      ).join('');
+      extras.push('<div class="focus-section"><div class="focus-section-label">Alternatives</div><div class="body">' + items + '</div></div>');
+    }
+    // Test coverage
+    if (s.test_coverage) {
+      const tc = s.test_coverage;
+      const bits = [];
+      if ((tc.covered_by || []).length) {
+        const items = tc.covered_by.map(t =>
+          '<div class="test-item"><span class="t-file">' + esc(t.file || '') + '</span><span class="t-name">' + esc(t.test_name || '') + '</span>' +
+          (t.what_it_tests ? '<div class="t-what">' + esc(t.what_it_tests) + '</div>' : '') + '</div>'
+        ).join('');
+        bits.push('<div style="margin-bottom:4px"><em style="color:var(--fg-faint);font-size:10.5px">Covered by existing:</em></div>' + items);
+      }
+      if ((tc.added_in_this_pr || []).length) {
+        const items = tc.added_in_this_pr.map(t =>
+          '<div class="test-item"><span class="t-file">' + esc(t.file || '') + '</span><span class="t-name">' + esc(t.test_name || '') + '</span>' +
+          (t.what_it_tests ? '<div class="t-what">' + esc(t.what_it_tests) + '</div>' : '') + '</div>'
+        ).join('');
+        bits.push('<div style="margin: 4px 0 4px"><em style="color:var(--fg-faint);font-size:10.5px">Added in this PR:</em></div>' + items);
+      }
+      if (bits.length) extras.push('<div class="focus-section"><div class="focus-section-label">Test coverage</div><div class="body test-coverage-grid">' + bits.join('') + '</div></div>');
+    }
+    // Prior role
+    if (s.prior_role) {
+      extras.push('<div class="focus-section"><div class="focus-section-label">Prior role</div><div class="body">' + esc(s.prior_role) + '</div></div>');
+    }
+    f('focus-extras').innerHTML = extras.join('');
+
+    // Next hint
+    if (next) {
+      const nb = view.steps.find(x => x.id === next.id);
+      f('focus-next').innerHTML = nb
+        ? '<div class="next-hint"><span class="nh-label">Next step</span>' +
+            '<span class="nh-link" data-go="' + esc(nb.id) + '">#' + nb._step + ' ' + esc(nb.title || nb.id) + '</span></div>'
+        : '';
+      f('focus-next').querySelectorAll('[data-go]').forEach(el => {
+        el.onclick = () => gotoStep(el.getAttribute('data-go'));
+      });
+    } else {
+      f('focus-next').innerHTML = '<div class="next-hint" style="opacity:0.7"><span class="nh-label">End of storyline</span>Last step here. Use tabs to switch storylines.</div>';
+    }
+  }
+
+  // ---------- Main render ----------
+  function renderMain() {
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    const storylines = REVIEW_DATA.storylines || [];
+    const sl = storylines.find(s => s.id === STATE.activeStorylineId);
+    if (!sl) { main.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
+    const slIdx = storylines.indexOf(sl);
+    const view = viewForStoryline(sl);
+
+    if (slIdx === 0) main.appendChild(renderPRIntro());
+    main.appendChild(renderStorylineBanner(sl, slIdx, storylines, view));
+
+    if (!view.perFile.size) {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.innerHTML = '<strong>' + esc(sl.title) + '</strong> — no code changes recorded for this storyline.';
+      main.appendChild(p);
+      return;
+    }
+
+    view.perFile.forEach((changes, file) => {
+      main.appendChild(renderFileSection(file, changes, view));
+    });
+
+    requestAnimationFrame(() => {
+      layoutAnnotations();
+      renderActiveState();
+    });
+  }
+
+  function setStoryline(id) {
+    STATE.activeStorylineId = id;
+    const sl = (REVIEW_DATA.storylines || []).find(s => s.id === id);
+    const v = sl ? viewForStoryline(sl) : null;
+    STATE.activeStepId = v ? v.defaultActive : null;
+    renderTabs();
+    renderMain();
+    renderSidePanel();
+    const main = document.getElementById('main');
+    if (main) main.scrollTop = 0;
+  }
+
+  // ---------- Init ----------
+  function renderTopbar() {
+    const md = REVIEW_DATA.metadata || {};
+    const t = document.getElementById('hdr-title');
+    if (t) t.textContent = '🔍 ' + (md.title || 'Code review');
+    const c = document.getElementById('hdr-crumb');
+    if (c) {
+      const parts = [];
+      if (md.repo) parts.push('<code>' + esc(md.repo) + '</code>');
+      const sm = REVIEW_DATA.summary || {};
+      if (sm.one_line) parts.push(esc(sm.one_line));
+      c.innerHTML = parts.join(' · ');
+    }
+  }
+
+  function init() {
+    if (!REVIEW_DATA || !REVIEW_DATA.storylines) {
+      document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No review data injected.</div>';
+      return;
+    }
+    renderTopbar();
+    const first = (REVIEW_DATA.storylines || [])[0];
+    if (!first) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No storylines.</div>'; return; }
+    setStoryline(first.id);
+    window.addEventListener('resize', () => layoutAnnotations());
+    window.addEventListener('keydown', (ev) => {
+      if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      const sl = (REVIEW_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
+      if (!sl) return;
+      const view = viewForStoryline(sl);
+      if (!STATE.activeStepId) return;
+      const step = ev.key === 'ArrowRight' ? nextStep(view, STATE.activeStepId) : prevStep(view, STATE.activeStepId);
+      if (step) { ev.preventDefault(); gotoStep(step.id); }
+    });
+  }
+  init();
+</script>
+</body>
+</html>

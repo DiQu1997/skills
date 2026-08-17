@@ -3,18 +3,22 @@
 live_server.py — companion server for code-review-narrative skill.
 
 Serves the rendered review HTML and exposes a /ask endpoint that shells
-out to `claude -p` or `codex exec` to answer follow-up questions about
-a specific step. Answers persist in a sidecar `<basename>.followups.json`
-next to the HTML.
+out to `codex exec` (or `claude -p` via --cli claude) to answer
+follow-up questions about a specific step. Answers persist in a sidecar
+`<basename>.followups.json` next to the HTML.
 
 The static HTML (rendered by render.py) still works standalone — the
 server only enables an opt-in "live mode" where the page detects the
 server's presence (via /__alive) and reveals a chat input.
 
+Concurrency is capped (default 2 in-flight subprocesses, configurable
+via --max-concurrent) and at most one question per step can be in
+flight at a time. Excess requests get 429.
+
 Usage:
     python3 live_server.py <path/to/review.html> \
-        [--port 8765] [--cli claude|codex] [--model <id>] \
-        [--repo <repo-path>] [--bare]
+        [--port 8765] [--cli codex|claude] [--model <id>] \
+        [--repo <repo-path>] [--bare] [--max-concurrent 2]
 """
 
 import argparse
@@ -24,6 +28,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -34,8 +39,9 @@ from urllib.parse import urlparse
 # ----- Constants ---------------------------------------------------------
 
 DEFAULT_PORT = 8765
-DEFAULT_CLI = "claude"
-SUBPROCESS_TIMEOUT_S = 300  # 5 min — claude/codex can take their time
+DEFAULT_CLI = "codex"
+DEFAULT_MAX_CONCURRENT = 2
+SUBPROCESS_TIMEOUT_S = 300  # 5 min — codex/claude can take their time
 
 PROMPT_TEMPLATE_PATH = Path(__file__).parent / "prompts" / "followup_prompt.md"
 
@@ -49,6 +55,12 @@ _CLI_BIN: str = None
 _MODEL: str = None
 _REPO: Path = None
 _BARE: bool = False
+
+# Concurrency control for /ask. Initialized in main().
+_ask_semaphore: threading.BoundedSemaphore = None
+_max_concurrent: int = DEFAULT_MAX_CONCURRENT
+_in_flight_lock = threading.Lock()
+_in_flight_steps: set = set()
 
 
 # ----- Walkthrough key ---------------------------------------------------
@@ -446,6 +458,8 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send_html()
         elif path == "/__alive":
+            with _in_flight_lock:
+                in_flight = sorted(_in_flight_steps)
             self._send_json(200, {
                 "ok": True,
                 "cli": _CLI,
@@ -453,6 +467,8 @@ class Handler(BaseHTTPRequestHandler):
                 "bare": _BARE,
                 "html": str(_HTML_PATH),
                 "walkthrough_key": compute_walkthrough_key(_REVIEW_DATA["metadata"]),
+                "max_concurrent": _max_concurrent,
+                "in_flight_steps": in_flight,
             })
         elif path == "/followups":
             self._send_json(200, load_sidecar())
@@ -482,36 +498,64 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": f"unknown step_id: {step_id}"})
             return
 
-        sidecar = load_sidecar()
-        prior_qas = [q for q in sidecar["qa"] if q["step_id"] == step_id]
+        # Gate 1: at most one in-flight question per step. Catches the
+        # browser-retry-on-network-blip case and double-clicks without
+        # spawning a second subprocess for the same question.
+        with _in_flight_lock:
+            if step_id in _in_flight_steps:
+                self._send_json(429, {
+                    "error": "another question is already in flight for this step",
+                    "step_id": step_id,
+                })
+                return
+            _in_flight_steps.add(step_id)
+
         try:
-            prompt = build_prompt(step_id, question, prior_qas)
-        except ValueError as e:
-            self._send_json(400, {"error": str(e)})
-            return
+            # Gate 2: global concurrency cap. Non-blocking — excess
+            # requests get an immediate 429 rather than queueing behind
+            # a multi-minute subprocess.
+            if not _ask_semaphore.acquire(blocking=False):
+                self._send_json(429, {
+                    "error": f"server is at max concurrency ({_max_concurrent}); try again in a moment",
+                    "max_concurrent": _max_concurrent,
+                })
+                return
+            try:
+                sidecar = load_sidecar()
+                prior_qas = [q for q in sidecar["qa"] if q["step_id"] == step_id]
+                try:
+                    prompt = build_prompt(step_id, question, prior_qas)
+                except ValueError as e:
+                    self._send_json(400, {"error": str(e)})
+                    return
 
-        result = run_cli(prompt)
-        if not result["ok"]:
-            self._send_json(502, {
-                "error": "cli call failed",
-                "stderr": result["stderr"],
-                "elapsed_s": result["elapsed_s"],
-            })
-            return
+                result = run_cli(prompt)
+                if not result["ok"]:
+                    self._send_json(502, {
+                        "error": "cli call failed",
+                        "stderr": result["stderr"],
+                        "elapsed_s": result["elapsed_s"],
+                    })
+                    return
 
-        entry = {
-            "id": "qa-" + uuid.uuid4().hex[:12],
-            "step_id": step_id,
-            "storyline_id": storyline["id"],
-            "question": question,
-            "answer_markdown": result["answer"],
-            "asked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "cli": _CLI,
-            "model": _MODEL,
-            "elapsed_s": round(result["elapsed_s"], 2),
-        }
-        append_qa(entry)
-        self._send_json(200, entry)
+                entry = {
+                    "id": "qa-" + uuid.uuid4().hex[:12],
+                    "step_id": step_id,
+                    "storyline_id": storyline["id"],
+                    "question": question,
+                    "answer_markdown": result["answer"],
+                    "asked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "cli": _CLI,
+                    "model": _MODEL,
+                    "elapsed_s": round(result["elapsed_s"], 2),
+                }
+                append_qa(entry)
+                self._send_json(200, entry)
+            finally:
+                _ask_semaphore.release()
+        finally:
+            with _in_flight_lock:
+                _in_flight_steps.discard(step_id)
 
 
 # ----- Bootstrap ---------------------------------------------------------
@@ -532,18 +576,21 @@ def extract_embedded_json(html_path: Path) -> dict:
 
     `render.py` injects the JSON via a literal replacement of
     `/*REVIEW_DATA_PLACEHOLDER*/` with `json.dumps(data, indent=2)`. The
-    resulting line looks like `const REVIEW_DATA = { ... };` near the top
+    resulting block looks like `const REVIEW_DATA = { ... };` near the top
     of the embedded <script>. We find that block, un-escape the `</` →
     `<\\/` guard the renderer applies, and re-parse it as JSON.
+
+    The closing `}` is anchored on `\n}` (a brace at column 0) because
+    `json.dumps(indent=2)` always emits the outermost close-brace at the
+    start of its own line, while any `};` appearing inside a JSON string
+    value (e.g. a code-line being shown to the reader) is indented and
+    therefore won't false-match.
 
     Returns the parsed dict on success; raises ValueError otherwise.
     """
     import re
     text = html_path.read_text(encoding="utf-8")
-    # Match `const REVIEW_DATA = ` followed by a JSON object literal
-    # ending with `};`. The object spans many lines (indent=2), so use a
-    # non-greedy match anchored on the closing `};`.
-    m = re.search(r"const\s+REVIEW_DATA\s*=\s*(\{[\s\S]*?\})\s*;", text)
+    m = re.search(r"const\s+REVIEW_DATA\s*=\s*(\{[\s\S]*?\n\})\s*;", text)
     if not m:
         raise ValueError("could not locate `const REVIEW_DATA = {...}` in HTML")
     raw = m.group(1).replace("<\\/", "</")  # un-escape the </script> guard
@@ -557,17 +604,21 @@ def parse_args():
     p = argparse.ArgumentParser(description="Companion live server for code-review-narrative HTML reviews.")
     p.add_argument("html", type=Path, help="Path to the rendered review HTML.")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
-    p.add_argument("--cli", choices=["claude", "codex"], default=DEFAULT_CLI)
+    p.add_argument("--cli", choices=["codex", "claude"], default=DEFAULT_CLI)
     p.add_argument("--model", default=None, help="Model id passed through to the CLI.")
     p.add_argument("--repo", type=Path, default=None, help="Working dir for the CLI subprocess (defaults to none).")
-    p.add_argument("--bare", action="store_true", help="Pass --bare to claude. Requires ANTHROPIC_API_KEY env (claude --bare does not read OAuth/keychain).")
+    p.add_argument("--bare", action="store_true", help="Pass --bare to claude (only meaningful with --cli claude). Requires ANTHROPIC_API_KEY env.")
     p.add_argument("--json", type=Path, default=None, help="Override the sibling JSON path (default: <html>.json).")
+    p.add_argument("--max-concurrent", type=int, default=DEFAULT_MAX_CONCURRENT,
+                   help=f"Max concurrent /ask subprocess calls (default {DEFAULT_MAX_CONCURRENT}). "
+                        f"Excess requests get 429.")
     return p.parse_args()
 
 
 def main():
     global _HTML_PATH, _JSON_PATH, _SIDECAR_PATH, _REVIEW_DATA
     global _CLI, _CLI_BIN, _MODEL, _REPO, _BARE
+    global _ask_semaphore, _max_concurrent
 
     args = parse_args()
 
@@ -603,10 +654,15 @@ def main():
     _CLI = args.cli
     _CLI_BIN = shutil.which(_CLI)
     if not _CLI_BIN:
-        sys.exit(f"{_CLI} not found on PATH — install it or pass --cli {('codex' if _CLI == 'claude' else 'claude')}.")
+        sys.exit(f"{_CLI} not found on PATH — install it or pass --cli {('claude' if _CLI == 'codex' else 'codex')}.")
     _MODEL = args.model
     _REPO = args.repo.resolve() if args.repo else None
     _BARE = args.bare
+
+    if args.max_concurrent < 1:
+        sys.exit(f"--max-concurrent must be >= 1, got {args.max_concurrent}")
+    _max_concurrent = args.max_concurrent
+    _ask_semaphore = threading.BoundedSemaphore(_max_concurrent)
 
     print(f"[live_server] HTML:     {_HTML_PATH}")
     print(f"[live_server] JSON:     {_JSON_PATH if _JSON_PATH else '(extracted from HTML)'}")
@@ -616,8 +672,11 @@ def main():
         print(f"[live_server] model:    {_MODEL}")
     if _REPO:
         print(f"[live_server] repo cwd: {_REPO}")
+    print(f"[live_server] max concurrent /ask: {_max_concurrent}")
     print(f"[live_server] storylines: {len(_REVIEW_DATA.get('storylines', []))}, steps: {sum(len(s.get('steps') or []) for s in _REVIEW_DATA.get('storylines', []))}")
     print(f"[live_server] listening on http://127.0.0.1:{args.port}/   (Ctrl-C to stop)")
+    print(f"[live_server] WARNING: binds loopback only — do NOT change the bind address. "
+          f"/ask runs the CLI on arbitrary input; exposing this beyond 127.0.0.1 is a cost/exec risk.")
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     try:

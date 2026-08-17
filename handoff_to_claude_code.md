@@ -50,7 +50,7 @@ The skill is not yet a VSCode extension. It produces a standalone HTML file. Ext
 ### The skill folder
 
 ```
-code-review-skill/
+code-review-narrative/
 ├── README.md                  # User-facing readme
 ├── SKILL.md                   # Skill definition: when to trigger, workflow
 ├── render.py                  # Inject JSON into HTML template
@@ -415,7 +415,7 @@ Total to v0.3 dogfood-ready: 14-23 hours of focused work, plus 1-2 weeks intermi
 ### Setup
 
 ```bash
-cd /path/to/code-review-skill
+cd /path/to/code-review-narrative
 ls -la   # README.md, SKILL.md, render.py, prompts/, template/, demo/
 python3 render.py demo/sample_review.json demo/sample_review.html
 # Open demo/sample_review.html in browser to see v0.2 reference output

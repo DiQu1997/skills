@@ -3,9 +3,9 @@ name: code-review-narrative
 description: Analyzes a git diff or PR and produces an interactive HTML review document organized by logical groups (storylines) rather than alphabetically by file. Each storyline contains step-by-step changes with full code context, prerequisite reminders, factual context (behavior delta, callers, test coverage, codebase patterns, alternative approaches), and analytical commentary (summary/evaluation/suggestions/analysis). Use when a user wants help reviewing a PR, commit range, or git diff in a structured way that surfaces logical units of change rather than file-by-file. Triggers include "review this PR", "analyze this diff", "help me review", or being given a diff and asked to walk through it.
 ---
 
-# code-review-narrative skill (v0.3)
+# code-review-narrative skill (v0.4)
 
-Schema v0.3 — see `prompts/schema.md` for full spec. Builds on v0.2's rich factual context per step (behavior_delta, usage_context, test_coverage, codebase_patterns, alternative_approaches) and storyline-level overview (purpose, architectural_context, change_overview, reading_roadmap). v0.3 adds `prior_role` (what an existing function/class did before the change), `function_purpose` and `walkthrough` on FileView (function-level rationale and code-attached annotations), and `concerns` (explicit issues with severity).
+Schema v0.4 — see `prompts/schema.md` for full spec. v0.4 adds a top-level `diff_hunks` field that lists every +/- line in the diff; `render.py` cross-checks it against every step's `code_view` and refuses to render if any line is uncovered. This makes coverage a hard guarantee rather than a hope. Builds on: v0.3's `prior_role` / `function_purpose` / `walkthrough` / `concerns`; v0.2's rich factual context per step (behavior_delta, usage_context, test_coverage, codebase_patterns, alternative_approaches) and storyline-level overview (purpose, architectural_context, change_overview, reading_roadmap).
 
 
 ## Purpose
@@ -41,12 +41,20 @@ If any input is unclear, ask the user before proceeding.
 
 The skill executes these steps:
 
-### 1. Read the diff fully
+### 1. Read the diff fully and materialize `diff_hunks`
 
 Read the entire diff into memory. For each changed file, parse hunks into structured form:
 - file path
 - old_start, old_count, new_start, new_count for each hunk
 - the actual changed lines with +/- markers
+
+**Then immediately emit `diff_hunks`** (the v0.4 top-level field). This is the *truth source* for what changed; subsequent steps must collectively cover every line listed here. Convention:
+
+- `change: "removed"` → `line_num` is the line's position in the OLD file
+- `change: "added"`   → `line_num` is the line's position in the NEW file
+- Don't include unchanged context lines here — only the actual +/- lines
+
+This field gets cross-checked by `render.py` against the rest of the JSON: if any line declared here doesn't appear in some step's `code_view.primary_changes[].lines` with the matching `change`, rendering refuses and lists exactly which lines are missing. The whole point is that the agent **cannot silently summarize a change away** — every +/- line must show up somewhere a reviewer can see it.
 
 ### 2. Read repo context as needed
 
@@ -131,7 +139,7 @@ These fields deliver the context a reviewer needs to judge the change independen
 
 The separation matters for **trust calibration**: readers can take `summary` and the factual context (Phase 6) at face value but should treat `evaluation` / `suggestions` / `analysis` / `concerns` as analytical claims to be checked.
 
-Write in the language the user is using (English or 中文). The template renders Chinese section labels (前情提要/简介/评价/建议/分析) but content can be in either language.
+Write in the language the user is using (English or 中文). Set `metadata.locale: "en"` (default) for English right-pane section labels (Prerequisites/Summary/Prior Role/...) or `"zh"` for Chinese labels (前情提要/简介/前世今生/...). Content language is independent — you can pair English content with Chinese labels or vice versa, but matching them reads more naturally.
 
 ### 8. Identify prerequisites
 
@@ -150,7 +158,8 @@ Aim for prerequisites to be informative without being patronizing. Don't explain
 ### 9. Validate and emit JSON
 
 Construct the final JSON conforming to the schema in `prompts/schema.md`. Validate that:
-- `schema_version` is `"0.3"`
+- `schema_version` is `"0.4"`
+- `diff_hunks` is present and lists every +/- line from the diff (lines: [] is OK only for pure-rename / mode-change files)
 - Every `id` is unique
 - Every `prerequisite.reference_id` of kind `prior_step` resolves to an actual step
 - Every `code_view.primary_changes` has at least one entry (otherwise the step has no code, which is suspicious)
@@ -159,11 +168,20 @@ Construct the final JSON conforming to the schema in `prompts/schema.md`. Valida
 - For every FileView with `function_purpose`, the populated subset matches `structure`: `structure: "single"` uses `problem_solved` + `without_it`; `structure: "multi_section"` uses `sections[]`
 - All required fields are present
 
-### 10. Render to HTML
+### 10. Render to HTML — and iterate on coverage failures
 
-Run `python3 render.py <review.json> <review.html>`. The script reads
-`template/review.html`, replaces `/*REVIEW_DATA_PLACEHOLDER*/` with the JSON,
-and writes the self-contained HTML.
+Run `python3 render.py <review.json> <review.html>`. The script:
+1. Loads the JSON
+2. Runs the **coverage check**: every `(file, change, line_num)` in `diff_hunks` with `change ∈ {added, removed}` must appear in at least one step's `code_view.primary_changes[].lines`
+3. If coverage fails, it exits non-zero and prints which lines are missing, grouped by file. **It does NOT write the HTML when coverage fails.**
+4. If coverage passes, injects JSON into `template/review.html` and writes the self-contained HTML
+
+**When coverage fails, the agent's job is to fix the JSON and re-run — not to bypass the check.** Typical fixes:
+- The missing line falls inside an existing step's hunk window → extend that step's `context_start_line` / `context_end_line` and add the +/- line to `lines[]`
+- The missing line belongs to a different logical group → add (or expand) a step in the appropriate storyline
+- The missing line is in a file the review hasn't touched at all → add a new step (and possibly a new storyline) for it
+
+Only use `--no-coverage-check` as a last-resort escape hatch (e.g. broken `diff_hunks` you need to inspect rendered before fixing); it is NOT the right answer for "I don't want to write more steps."
 
 Default output path: `review.html` in the directory the user specified, or
 the current working directory.
@@ -191,8 +209,14 @@ HTML directly via `file://`.
 To stop the server later: `python3 server/live_review.py --stop` (kills all
 live-review servers) or `--stop <html>` (just one).
 
-The server requires `claude` (or `--cli codex`) on PATH. If neither is
-available, fall back to telling the user to open the HTML directly.
+The server defaults to `codex exec` (use `--cli claude` for `claude -p`
+instead). The chosen CLI must be on PATH; if neither is available, fall
+back to telling the user to open the HTML directly.
+
+The server caps concurrent `/ask` subprocesses (default 2) and rejects
+duplicate questions for the same step with a 429. It binds 127.0.0.1
+only and **must not** be exposed beyond loopback — `/ask` runs the CLI
+on user-supplied input, so external exposure is a cost/exec risk.
 
 ## Constraints
 
@@ -218,7 +242,7 @@ available, fall back to telling the user to open the HTML directly.
 - `prompts/schema.md` — full JSON schema specification
 - `template/review.html` — the HTML/CSS/JS template (with live-mode chat input + Q&A section)
 - `render.py` — helper script to inject JSON into template
-- `server/live_server.py` — companion HTTP server that powers live-mode Q&A (`/__alive`, `/followups`, `/ask` → `claude -p` or `codex exec`); falls back to extracting `REVIEW_DATA` from the HTML if no sibling JSON is found
+- `server/live_server.py` — companion HTTP server that powers live-mode Q&A (`/__alive`, `/followups`, `/ask` → `codex exec` by default, or `claude -p` via `--cli claude`); enforces a global concurrency cap and per-step in-flight gate; falls back to extracting `REVIEW_DATA` from the HTML if no sibling JSON is found
 - `server/live_review.py` — wrapper that starts (or reuses) `live_server.py` in the background and opens the browser; supports `--status` and `--stop`
 - `server/prompts/followup_prompt.md` — prompt template fed to the CLI for each follow-up question
 - `demo/sample_review.json` — reference example of valid JSON
