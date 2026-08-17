@@ -4,10 +4,19 @@ Skill that produces interactive HTML review documents from git diffs,
 organized by **logical groups (storylines)** rather than file-by-file.
 
 **v0.4** adds a top-level `diff_hunks` field listing every +/- line in the
-diff, and a coverage check in `render.py` that refuses to render unless
-every `(file, change, line_num)` triple from `diff_hunks` appears in some
-step's `code_view`. Coverage becomes a hard guarantee — the agent can no
-longer silently summarize a change away.
+diff, and `render.py` enforces two gates before writing HTML:
+
+1. **Real-diff check** (default ON): `diff_hunks` is verified against the
+   actual PR diff — supplied via `--diff pr.patch` or `--repo <clone>`
+   (range from `--git-range` or `metadata.base_commit..head_commit`) —
+   in both directions and on exact content. A dropped change, a
+   fabricated line, or a single character of drift aborts the render.
+2. **Coverage check**: every `(file, change, line_num)` triple from
+   `diff_hunks` must appear in some step's `code_view`.
+
+Chained: **real diff == diff_hunks ⊆ steps** — every line the PR
+actually changed is walked through, verbatim. The agent can no longer
+silently summarize a change away, nor review a diff that never existed.
 
 Keeps v0.3 additions (`prior_role`, `function_purpose`, `walkthrough`,
 `concerns`) and v0.2 rich factual context (behavior_delta, usage_context,
@@ -42,7 +51,15 @@ Keyboard: `j` next step, `k` previous step, `o` PR overview.
 ## Try it
 
 ```bash
-python3 render.py demo/sample_review.json demo/sample_review.html
+# The demo PR is fabricated, so its "real diff" ships as a fixture patch:
+python3 render.py demo/sample_review.json demo/sample_review.html --diff demo/sample_review.patch
+
+# For a real PR, point at the clone (range from metadata commits) …
+python3 render.py review.json review.html --repo /path/to/repo
+# … or a saved patch:
+git diff base..head > pr.patch
+python3 render.py review.json review.html --diff pr.patch
+
 open demo/sample_review.html  # or xdg-open / open in browser manually
 ```
 
@@ -52,15 +69,18 @@ open demo/sample_review.html  # or xdg-open / open in browser manually
 code-review-narrative/
 ├── README.md
 ├── SKILL.md                     ← skill definition
-├── render.py                    ← inject JSON → HTML; enforces coverage check
+├── render.py                    ← inject JSON → HTML; enforces real-diff + coverage gates
 ├── prompts/
 │   ├── schema.md                ← v0.4 JSON schema
 │   └── analyze_diff.md          ← v0.4 analysis prompt
 ├── template/
-│   └── review.html              ← single-file HTML/CSS/JS template
+│   ├── review_source.html       ← default: continuous diff + margin annotations
+│   └── review.html              ← swimlane storyline canvas
 └── demo/
     ├── sample_review.json       ← v0.4 demo data (includes diff_hunks)
-    └── sample_review.html       ← rendered output
+    ├── sample_review.patch      ← fixture "real diff" for the fabricated demo PR
+    ├── sample_review.html       ← rendered output (swimlane)
+    └── sample_review_source.html ← rendered output (source view)
 ```
 
 ## Status
@@ -71,5 +91,6 @@ render uncovered reviews. Keeps v0.3 additions (`prior_role`,
 `function_purpose`, `walkthrough`, `concerns`).
 
 NOT backward-compatible with v0.3 by default: `render.py` requires
-`diff_hunks` to be present and complete. Use `--no-coverage-check` as
-an escape hatch when rendering legacy data.
+`diff_hunks` to be present, complete, AND verified against the real
+diff (`--diff` / `--repo`). Use `--no-diff-check` / `--no-coverage-check`
+as escape hatches when rendering legacy or illustration data.

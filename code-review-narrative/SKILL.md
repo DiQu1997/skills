@@ -5,7 +5,7 @@ description: Analyzes a git diff or PR and produces an interactive HTML review d
 
 # code-review-narrative skill (v0.4)
 
-Schema v0.4 — see `prompts/schema.md` for full spec. v0.4 adds a top-level `diff_hunks` field that lists every +/- line in the diff; `render.py` cross-checks it against every step's `code_view` and refuses to render if any line is uncovered. This makes coverage a hard guarantee rather than a hope. Builds on: v0.3's `prior_role` / `function_purpose` / `walkthrough` / `concerns`; v0.2's rich factual context per step (behavior_delta, usage_context, test_coverage, codebase_patterns, alternative_approaches) and storyline-level overview (purpose, architectural_context, change_overview, reading_roadmap).
+Schema v0.4 — see `prompts/schema.md` for full spec. v0.4 adds a top-level `diff_hunks` field that lists every +/- line in the diff; `render.py` verifies it against the REAL diff (`--diff pr.patch` or `--repo <clone>`, required by default) and then cross-checks it against every step's `code_view`, refusing to render if the real diff and `diff_hunks` disagree anywhere or if any line is uncovered. Chained: real diff == diff_hunks ⊆ steps — no line of the PR left unreviewed, none fabricated. Builds on: v0.3's `prior_role` / `function_purpose` / `walkthrough` / `concerns`; v0.2's rich factual context per step (behavior_delta, usage_context, test_coverage, codebase_patterns, alternative_approaches) and storyline-level overview (purpose, architectural_context, change_overview, reading_roadmap).
 
 
 ## Purpose
@@ -168,20 +168,58 @@ Construct the final JSON conforming to the schema in `prompts/schema.md`. Valida
 - For every FileView with `function_purpose`, the populated subset matches `structure`: `structure: "single"` uses `problem_solved` + `without_it`; `structure: "multi_section"` uses `sections[]`
 - All required fields are present
 
-### 10. Render to HTML — and iterate on coverage failures
+### 10. Render to HTML — and iterate on validation failures
 
-Run `python3 render.py <review.json> <review.html>`. The script:
-1. Loads the JSON
-2. Runs the **coverage check**: every `(file, change, line_num)` in `diff_hunks` with `change ∈ {added, removed}` must appear in at least one step's `code_view.primary_changes[].lines`
-3. If coverage fails, it exits non-zero and prints which lines are missing, grouped by file. **It does NOT write the HTML when coverage fails.**
-4. If coverage passes, injects JSON into `template/review.html` and writes the self-contained HTML
+Run with a real-diff source (REQUIRED by default):
 
-**When coverage fails, the agent's job is to fix the JSON and re-run — not to bypass the check.** Typical fixes:
-- The missing line falls inside an existing step's hunk window → extend that step's `context_start_line` / `context_end_line` and add the +/- line to `lines[]`
-- The missing line belongs to a different logical group → add (or expand) a step in the appropriate storyline
-- The missing line is in a file the review hasn't touched at all → add a new step (and possibly a new storyline) for it
+```bash
+# From the repo clone (range derived from metadata.base_commit..head_commit):
+python3 render.py review.json review.html --repo /path/to/repo
 
-Only use `--no-coverage-check` as a last-resort escape hatch (e.g. broken `diff_hunks` you need to inspect rendered before fixing); it is NOT the right answer for "I don't want to write more steps."
+# Or from a saved patch:
+git diff base..head > pr.patch
+python3 render.py review.json review.html --diff pr.patch
+
+# Or with an explicit range:
+python3 render.py review.json review.html --repo /path/to/repo --git-range main..feature
+```
+
+The script runs TWO gates, in order, and refuses to write HTML if either fails:
+
+1. **Real-diff check** (exit 3 on failure): parses the actual PR diff and
+   compares it against `diff_hunks` in both directions plus content:
+   - every real +/- line must appear in `diff_hunks` — the review cannot
+     silently drop a change the PR made;
+   - every `diff_hunks` line must exist in the real diff — nothing can be
+     fabricated or mis-numbered;
+   - `content` must match the real diff exactly at every line.
+   Running without `--diff` or `--repo` is itself a failure — the agent
+   must supply the diff source it reviewed.
+2. **Coverage check** (exit 2 on failure): every `(file, change, line_num)`
+   in `diff_hunks` with `change ∈ {added, removed}` must appear in at
+   least one step's `code_view.primary_changes[].lines`.
+
+Chained, the gates guarantee **real diff == diff_hunks ⊆ steps**: every
+line the PR actually changed is walked through, verbatim, no line left out.
+
+**When a gate fails, the agent's job is to fix the JSON and re-run — not to bypass the check.** Typical fixes:
+- Real-diff check flags MISSING lines → the review dropped part of the PR;
+  add them to `diff_hunks` AND cover them with steps
+- Real-diff check flags fabricated/content-drift lines → re-lift the lines
+  verbatim from `git diff` (don't retype; copy exactly, including whitespace)
+- Coverage check flags a line inside an existing step's hunk window →
+  extend that step's `context_start_line` / `context_end_line` and add the
+  +/- line to `lines[]`
+- The missing line belongs to a different logical group → add (or expand)
+  a step in the appropriate storyline
+- The missing line is in a file the review hasn't touched at all → add a
+  new step (and possibly a new storyline) for it
+
+`--no-diff-check` and `--no-coverage-check` are last-resort escape hatches
+(hand-authored illustration data; a broken JSON you need to see rendered
+before fixing). They are NOT the right answer for "I don't want to write
+more steps" — a bypassed render carries no guarantee that the review
+reflects the PR.
 
 Default output path: `review.html` in the directory the user specified, or
 the current working directory.

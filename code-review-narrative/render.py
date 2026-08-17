@@ -3,14 +3,34 @@
 render.py — Inject a review JSON into the HTML template to produce a
 self-contained review document.
 
-Also verifies that every +/- line declared in `diff_hunks` appears in
-at least one step's `code_view.primary_changes` (coverage check). Bypass
-with --no-coverage-check.
+Two validation gates run before rendering (both on by default):
+
+1. REAL-DIFF CHECK — the JSON's `diff_hunks` are verified against the
+   actual PR diff, in both directions AND on content:
+     - every +/- line in the real diff must appear in `diff_hunks`
+       (nothing the PR changed can be silently dropped),
+     - every +/- line in `diff_hunks` must exist in the real diff
+       (nothing can be fabricated),
+     - the `content` string must match exactly at every line.
+   The real diff comes from `--diff <file.patch>` (a saved unified
+   diff) or `--repo <path>` (runs `git diff base..head` using
+   `--git-range` or, if omitted, `metadata.base_commit..head_commit`).
+   Rendering without a diff source is an error; bypass ONLY with
+   --no-diff-check (e.g. for hand-authored illustration data).
+
+2. COVERAGE CHECK — every +/- line in `diff_hunks` must appear in at
+   least one step's `code_view.primary_changes` (no reviewed line is
+   left out of the walkthrough). Bypass with --no-coverage-check.
+
+Chained, the two checks guarantee: real diff == diff_hunks ⊆ steps —
+i.e. every line the PR actually changed is walked through, verbatim.
 
 Usage:
-    python3 render.py <input.json> <output.html>                       # source view (default)
-    python3 render.py <input.json> <output.html> --view swimlane       # legacy storyline canvas
-    python3 render.py review.json review.html --no-coverage-check
+    python3 render.py review.json review.html --diff pr.patch
+    python3 render.py review.json review.html --repo /path/to/repo
+    python3 render.py review.json review.html --repo /path/to/repo --git-range main..feature
+    python3 render.py review.json review.html --view swimlane --diff pr.patch
+    python3 render.py review.json review.html --no-diff-check          # escape hatch
 
 Two views on the same schema:
     source   — continuous diff top-to-bottom (file-by-file, +/- coloring)
@@ -26,6 +46,8 @@ Two views on the same schema:
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,6 +57,167 @@ TEMPLATES = {
     "source":   "review_source.html",
     "swimlane": "review.html",
 }
+
+
+# ----- Real-diff check ---------------------------------------------------
+# Parses the ACTUAL PR diff and compares it against the JSON's diff_hunks.
+# This is the gate that makes diff_hunks trustworthy: without it, the
+# coverage check below only proves internal consistency (steps cover
+# whatever the agent CLAIMED the diff was), not fidelity to the real PR.
+
+HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def parse_unified_diff(text):
+    """Parse unified diff text into {(file, change, line_num): content}.
+
+    Line-number convention matches the schema: `added` lines carry the
+    NEW-file line number, `removed` lines carry the OLD-file line number
+    (the same convention `git diff` hunk counters walk).
+    """
+    entries = {}
+    old_path = None
+    file = None
+    old_ln = new_ln = None
+    old_left = new_left = 0  # +/-/context lines still expected in current hunk
+
+    for raw in text.splitlines():
+        in_hunk = (old_left > 0 or new_left > 0)
+        if not in_hunk:
+            if raw.startswith("--- "):
+                p = raw[4:].split("\t")[0].strip()
+                old_path = None if p == "/dev/null" else (p[2:] if p.startswith("a/") else p)
+                continue
+            if raw.startswith("+++ "):
+                p = raw[4:].split("\t")[0].strip()
+                if p == "/dev/null":
+                    file = old_path  # file deletion: key lines by the old path
+                else:
+                    file = p[2:] if p.startswith("b/") else p
+                continue
+            m = HUNK_RE.match(raw)
+            if m:
+                old_ln = int(m.group(1))
+                old_left = int(m.group(2)) if m.group(2) is not None else 1
+                new_ln = int(m.group(3))
+                new_left = int(m.group(4)) if m.group(4) is not None else 1
+            continue
+
+        # Inside a hunk: consume exactly old_left+new_left line slots.
+        if raw.startswith("\\"):
+            continue  # "\ No newline at end of file"
+        if raw.startswith("+"):
+            entries[(file, "added", new_ln)] = raw[1:]
+            new_ln += 1
+            new_left -= 1
+        elif raw.startswith("-"):
+            entries[(file, "removed", old_ln)] = raw[1:]
+            old_ln += 1
+            old_left -= 1
+        else:
+            # context line (starts with ' ' — or is empty for blank context)
+            old_ln += 1
+            new_ln += 1
+            old_left -= 1
+            new_left -= 1
+    return entries
+
+
+def load_real_diff(args, data):
+    """Resolve the real diff text from --diff or --repo. Returns (text, label)
+    or exits with an explanatory error."""
+    if args.diff:
+        if not args.diff.exists():
+            print(f"[diff-check] Diff file not found: {args.diff}", file=sys.stderr)
+            sys.exit(1)
+        return args.diff.read_text(encoding="utf-8", errors="replace"), str(args.diff)
+    if args.repo:
+        md = data.get("metadata") or {}
+        if args.git_range:
+            rng = args.git_range
+        else:
+            base, head = md.get("base_commit"), md.get("head_commit")
+            if not base or not head:
+                print("[diff-check] --repo given but no --git-range, and metadata lacks "
+                      "base_commit/head_commit to derive one.", file=sys.stderr)
+                sys.exit(1)
+            rng = f"{base}..{head}"
+        cmd = ["git", "-C", str(args.repo), "diff", "--no-color", "--no-ext-diff", rng]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"[diff-check] git diff failed: {' '.join(cmd)}", file=sys.stderr)
+            print(e.stderr.strip(), file=sys.stderr)
+            sys.exit(1)
+        return out.stdout, f"git -C {args.repo} diff {rng}"
+    return None, None
+
+
+def validate_against_real_diff(data, real_entries):
+    """Compare diff_hunks against the parsed real diff.
+
+    Returns dict with three problem lists:
+      missing    — real +/- lines absent from diff_hunks (dropped changes)
+      fabricated — diff_hunks +/- lines absent from the real diff
+      content    — matched (file, change, line_num) but content differs
+    """
+    json_entries = {}
+    for hunk in data.get("diff_hunks") or []:
+        f = hunk.get("file")
+        for line in hunk.get("lines") or []:
+            ch = line.get("change")
+            if ch in ("added", "removed") and "line_num" in line:
+                json_entries[(f, ch, line["line_num"])] = line.get("content", "")
+
+    problems = {"missing": [], "fabricated": [], "content": []}
+    for key, content in real_entries.items():
+        if key not in json_entries:
+            problems["missing"].append((key, content))
+        elif json_entries[key] != content:
+            problems["content"].append((key, content, json_entries[key]))
+    for key, content in json_entries.items():
+        if key not in real_entries:
+            problems["fabricated"].append((key, content))
+    return problems
+
+
+def report_diff_check(problems, n_real, source_label):
+    """Print the real-diff report. Returns True if OK to proceed."""
+    bad = sum(len(v) for v in problems.values())
+    if not bad:
+        print(f"[diff-check] OK: diff_hunks match the real diff exactly "
+              f"({n_real} +/- lines, source: {source_label}).")
+        return True
+    print(f"[diff-check] FAIL: diff_hunks do not match the real diff "
+          f"({source_label}):", file=sys.stderr)
+    if problems["missing"]:
+        print(f"  {len(problems['missing'])} real change line(s) MISSING from diff_hunks "
+              f"(the review silently drops them):", file=sys.stderr)
+        for (file, ch, ln), content in sorted(problems["missing"])[:15]:
+            sign = "+" if ch == "added" else "-"
+            print(f"    {file}:{ln}  {sign} {content!r}", file=sys.stderr)
+        if len(problems["missing"]) > 15:
+            print(f"    … +{len(problems['missing']) - 15} more", file=sys.stderr)
+    if problems["fabricated"]:
+        print(f"  {len(problems['fabricated'])} diff_hunks line(s) NOT in the real diff "
+              f"(fabricated or mis-numbered):", file=sys.stderr)
+        for (file, ch, ln), content in sorted(problems["fabricated"])[:15]:
+            sign = "+" if ch == "added" else "-"
+            print(f"    {file}:{ln}  {sign} {content!r}", file=sys.stderr)
+        if len(problems["fabricated"]) > 15:
+            print(f"    … +{len(problems['fabricated']) - 15} more", file=sys.stderr)
+    if problems["content"]:
+        print(f"  {len(problems['content'])} line(s) with CONTENT drift:", file=sys.stderr)
+        for (file, ch, ln), real, claimed in sorted(problems["content"])[:15]:
+            print(f"    {file}:{ln} ({ch})", file=sys.stderr)
+            print(f"      real:    {real!r}", file=sys.stderr)
+            print(f"      claimed: {claimed!r}", file=sys.stderr)
+        if len(problems["content"]) > 15:
+            print(f"    … +{len(problems['content']) - 15} more", file=sys.stderr)
+    print("[diff-check] Fix diff_hunks to mirror the real diff exactly "
+          "(lift lines verbatim from `git diff`), OR pass --no-diff-check "
+          "to bypass (not recommended).", file=sys.stderr)
+    return False
 
 
 # ----- Coverage check ---------------------------------------------------
@@ -127,6 +310,22 @@ def parse_args():
                    help="Which render template to use. 'source' (default) is "
                         "the continuous-diff-with-margin-annotations view; "
                         "'swimlane' is the original storyline canvas + dock.")
+    p.add_argument("--diff", type=Path, default=None,
+                   help="Path to the PR's unified diff (a .patch file, e.g. "
+                        "saved via `git diff base..head > pr.patch`). The "
+                        "JSON's diff_hunks are verified against it exactly.")
+    p.add_argument("--repo", type=Path, default=None,
+                   help="Path to the repo clone; the real diff is produced by "
+                        "running `git diff` there, over --git-range or "
+                        "metadata.base_commit..head_commit.")
+    p.add_argument("--git-range", default=None,
+                   help="Git range for --repo mode, e.g. 'main..feature' or "
+                        "'abc123..def456'. Defaults to metadata commits.")
+    p.add_argument("--no-diff-check", action="store_true",
+                   help="Skip verifying diff_hunks against the real PR diff. "
+                        "Escape hatch for hand-authored illustration data — "
+                        "with this set, nothing guarantees diff_hunks reflect "
+                        "an actual diff.")
     p.add_argument("--no-coverage-check", action="store_true",
                    help="Skip the diff_hunks ↔ code_view coverage check. "
                         "Use only as an escape hatch; the default behavior "
@@ -149,6 +348,26 @@ def main():
     # Load and validate JSON parses.
     with open(args.input, "r", encoding="utf-8") as f:
         data = json.load(f)
+
+    # Real-diff check FIRST: makes diff_hunks trustworthy before the
+    # coverage check builds on it.
+    if not args.no_diff_check:
+        diff_text, source_label = load_real_diff(args, data)
+        if diff_text is None:
+            print("[diff-check] FAIL: no diff source given; cannot verify diff_hunks "
+                  "against the real PR.", file=sys.stderr)
+            print("[diff-check] Provide one of:", file=sys.stderr)
+            print("  --diff <pr.patch>       a saved unified diff "
+                  "(git diff base..head > pr.patch)", file=sys.stderr)
+            print("  --repo <path>           run git diff there over "
+                  "--git-range or metadata commits", file=sys.stderr)
+            print("[diff-check] or pass --no-diff-check to bypass "
+                  "(illustration data only).", file=sys.stderr)
+            sys.exit(3)
+        real_entries = parse_unified_diff(diff_text)
+        problems = validate_against_real_diff(data, real_entries)
+        if not report_diff_check(problems, len(real_entries), source_label):
+            sys.exit(3)
 
     # Coverage check (before rendering, so a failing review never produces an HTML).
     if not args.no_coverage_check:
