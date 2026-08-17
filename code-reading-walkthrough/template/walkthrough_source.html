@@ -104,6 +104,341 @@
     padding: 14px 22px 60px;
   }
 
+  /* -------- Overview tab (the walkthrough's own table-of-contents) -------- */
+  .ov-hero {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+  }
+  .ov-hero .ov-label {
+    font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .ov-hero h1 {
+    font-family: ui-monospace, monospace;
+    font-size: 20px; font-weight: 700;
+    margin: 0 0 8px;
+    color: var(--fg);
+  }
+  .ov-hero .ov-tagline {
+    font-size: 13px; color: var(--fg-soft); line-height: 1.55;
+    margin-bottom: 10px;
+  }
+  .ov-hero .ov-stats {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    font-family: ui-monospace, monospace; font-size: 10.5px;
+  }
+  .ov-hero .ov-stat {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 8px;
+    color: var(--fg-soft);
+  }
+  .ov-hero .ov-stat strong { color: var(--fg); font-weight: 700; margin-right: 3px; }
+
+  .ov-section {
+    margin-bottom: 22px;
+  }
+  .ov-section-head {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .ov-section-head .ov-section-sub {
+    text-transform: none; letter-spacing: 0;
+    color: var(--fg-faint);
+    font-size: 11px;
+  }
+
+  /* Reading-order strip: horizontal chain of storyline nodes */
+  .ov-sequence {
+    display: flex; align-items: center; gap: 6px;
+    padding: 12px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  .ov-seq-node {
+    flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 6px 10px;
+    background: var(--bg-soft);
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: transform 100ms, box-shadow 100ms;
+    min-width: 90px; max-width: 160px;
+  }
+  .ov-seq-node:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .ov-seq-node .seq-id {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-weight: 700;
+  }
+  .ov-seq-node .seq-title {
+    font-size: 11px; color: var(--fg);
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: center;
+    margin-top: 3px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .ov-seq-node .seq-kind-strip {
+    width: 100%; height: 3px; border-radius: 2px;
+    margin-top: 5px;
+  }
+  .ov-seq-arrow {
+    flex-shrink: 0;
+    color: var(--fg-faint);
+    font-size: 18px;
+    user-select: none;
+  }
+
+  /* Storyline card grid */
+  .ov-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+  .ov-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: transform 100ms, box-shadow 100ms;
+    display: flex; flex-direction: column;
+  }
+  .ov-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+  .ov-card.summary { opacity: 0.75; border-left-style: dashed; }
+
+  /* Kind-driven left-border color for each card */
+  .ov-card.k-core_flow       { border-left-color: #5b6cff; }
+  .ov-card.k-data_model      { border-left-color: #2f7a2f; }
+  .ov-card.k-entry_point     { border-left-color: #c98707; }
+  .ov-card.k-algorithm       { border-left-color: #a64798; }
+  .ov-card.k-extension_point { border-left-color: #1f7a78; }
+  .ov-card.k-utility         { border-left-color: #8b949e; }
+  .ov-card.k-glue            { border-left-color: #9c5b3e; }
+  .ov-card.k-config          { border-left-color: #b56a00; }
+  .ov-card.k-mixed           { border-left-color: #57606a; }
+
+  .ov-card-head {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 4px;
+  }
+  .ov-card-id {
+    font-family: ui-monospace, monospace;
+    font-size: 10.5px; color: var(--fg-faint);
+    font-weight: 700;
+    background: var(--bg-soft);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .ov-card-kind {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px;
+    padding: 1px 6px; border-radius: 3px;
+    color: #fff; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .ov-card-kind.k-core_flow       { background: #5b6cff; }
+  .ov-card-kind.k-data_model      { background: #2f7a2f; }
+  .ov-card-kind.k-entry_point     { background: #c98707; }
+  .ov-card-kind.k-algorithm       { background: #a64798; }
+  .ov-card-kind.k-extension_point { background: #1f7a78; }
+  .ov-card-kind.k-utility         { background: #8b949e; }
+  .ov-card-kind.k-glue            { background: #9c5b3e; }
+  .ov-card-kind.k-config          { background: #b56a00; }
+  .ov-card-kind.k-mixed           { background: #57606a; }
+  .ov-card-depth {
+    font-family: ui-monospace, monospace;
+    font-size: 9.5px; color: var(--fg-faint);
+    letter-spacing: 0.04em; text-transform: uppercase;
+    margin-left: auto;
+  }
+  .ov-card-title {
+    font-family: ui-monospace, monospace;
+    font-size: 14px; font-weight: 700;
+    color: var(--fg);
+    line-height: 1.35;
+    margin-bottom: 6px;
+  }
+  .ov-card-anchor {
+    font-size: 11.5px; color: var(--fg-soft);
+    font-style: italic;
+    line-height: 1.5;
+    padding: 6px 10px;
+    background: var(--accent-soft);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .ov-card-summary {
+    font-size: 11.5px; color: var(--fg-soft);
+    line-height: 1.5;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .ov-card-meta {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 10.5px;
+  }
+  .ov-card-imp {
+    display: flex; align-items: center; gap: 3px;
+    font-family: ui-monospace, monospace;
+    color: var(--fg-soft);
+  }
+  .ov-card-imp .imp-label {
+    color: var(--fg-faint);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-right: 3px;
+  }
+  .ov-card-imp .imp-total {
+    color: var(--fg);
+    font-weight: 700;
+  }
+  .ov-card-imp .imp-dots {
+    display: inline-flex; gap: 2px;
+    margin-left: 4px;
+  }
+  .ov-card-imp .imp-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--border);
+  }
+  .ov-card-imp .imp-dot.s1 { background: #c5cdd8; }
+  .ov-card-imp .imp-dot.s2 { background: #85a2c4; }
+  .ov-card-imp .imp-dot.s3 { background: var(--accent); }
+
+  .ov-card-files {
+    display: flex; flex-wrap: wrap; gap: 3px;
+    margin-top: 6px;
+  }
+  .ov-card-file {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--fg-soft);
+  }
+  .ov-card-shares {
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--fg-faint);
+    margin-top: 6px;
+  }
+  .ov-card-shares .sh-link {
+    color: var(--accent);
+    cursor: pointer;
+    margin: 0 2px;
+  }
+  .ov-card-shares .sh-link:hover { text-decoration: underline; }
+
+  /* Reading paths section */
+  .ov-paths {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 10px;
+  }
+  .ov-path {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .ov-path .path-name {
+    font-family: ui-monospace, monospace;
+    font-size: 11.5px; font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 3px;
+  }
+  .ov-path .path-desc {
+    font-size: 11px; color: var(--fg-soft);
+    line-height: 1.45;
+    margin-bottom: 8px;
+  }
+  .ov-path .path-chain {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    align-items: center;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .ov-path .path-node {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 7px;
+    color: var(--fg);
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .ov-path .path-node:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .ov-path .path-arrow {
+    color: var(--fg-faint);
+  }
+
+  /* File-overlap heatmap chip */
+  .ov-file-overlap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11.5px;
+  }
+  .ov-file-overlap .fo-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 3px 0;
+    border-top: 1px dashed var(--border);
+  }
+  .ov-file-overlap .fo-row:first-child { border-top: 0; }
+  .ov-file-overlap .fo-file {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--fg);
+    flex: 1;
+  }
+  .ov-file-overlap .fo-count {
+    font-family: ui-monospace, monospace;
+    color: var(--fg-soft);
+    font-size: 10.5px;
+  }
+  .ov-file-overlap .fo-slcell {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 0 5px;
+    border-radius: 3px;
+    margin-left: 3px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  .ov-file-overlap .fo-slcell:hover { background: var(--accent); color: #fff; }
+
   .storyline-banner {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -736,9 +1071,17 @@
   }
 
   // ---------- Tabs ----------
+  const OVERVIEW_ID = '__overview__';
+
   function renderTabs() {
     const root = document.getElementById('tabs');
     root.innerHTML = '';
+    // Overview tab first — the walkthrough's own table of contents.
+    const ovTab = document.createElement('div');
+    ovTab.className = 'tab' + (STATE.activeStorylineId === OVERVIEW_ID ? ' active' : '');
+    ovTab.innerHTML = '<span class="tab-num">📖</span>Overview';
+    ovTab.onclick = () => setStoryline(OVERVIEW_ID);
+    root.appendChild(ovTab);
     (WALKTHROUGH_DATA.storylines || []).forEach(sl => {
       const t = document.createElement('div');
       t.className = 'tab t-' + sl.id + (sl.id === STATE.activeStorylineId ? ' active' : '');
@@ -1000,11 +1343,26 @@
 
   // ---------- Side panel ----------
   function renderSidePanel() {
+    const f = id => document.getElementById(id);
+    // Overview tab has no active block — clear the side panel.
+    if (STATE.activeStorylineId === OVERVIEW_ID) {
+      f('step-counter').innerHTML = '—';
+      f('btn-prev').disabled = true;
+      f('btn-next').disabled = true;
+      f('btn-prev').onclick = null;
+      f('btn-next').onclick = null;
+      f('focus-tag').textContent = '';
+      f('focus-name').textContent = 'Overview';
+      f('focus-loc').textContent = '';
+      f('focus-purpose').textContent = 'Pick a storyline card, a reading path, or a tab.';
+      f('focus-extras').innerHTML = '';
+      f('focus-next').innerHTML = '';
+      return;
+    }
     const sl = (WALKTHROUGH_DATA.storylines || []).find(s => s.id === STATE.activeStorylineId);
     if (!sl) return;
     const view = viewForStoryline(sl);
     const b = view.blocks.find(b => b.id === STATE.activeBlockId);
-    const f = id => document.getElementById(id);
 
     const total = view.blocks.length;
     const stepNum = b ? b._step : 0;
@@ -1083,10 +1441,224 @@
     }
   }
 
+  // ---------- Overview render ----------
+  // Auto-derives from existing storyline fields — nothing extra required.
+  // Shows: hero (title + tagline + stats), sequence strip, storyline card
+  // grid, reading paths, and file-overlap heatmap.
+  function renderOverview() {
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    const storylines = WALKTHROUGH_DATA.storylines || [];
+    const md = WALKTHROUGH_DATA.metadata || {};
+    const sm = WALKTHROUGH_DATA.summary || {};
+
+    // Hero card
+    const hero = document.createElement('div');
+    hero.className = 'ov-hero';
+    const fullCt = storylines.filter(s => s.depth !== 'summary').length;
+    const sumCt  = storylines.length - fullCt;
+    const allFiles = new Set();
+    storylines.forEach(s => (s.files_touched || []).forEach(f => allFiles.add(f)));
+    const statsHtml =
+      '<span class="ov-stat"><strong>' + storylines.length + '</strong> storylines</span>' +
+      '<span class="ov-stat"><strong>' + fullCt + '</strong> full · <strong>' + sumCt + '</strong> summary</span>' +
+      '<span class="ov-stat"><strong>' + allFiles.size + '</strong> files</span>';
+    hero.innerHTML =
+      '<div class="ov-label">📖 Walkthrough overview</div>' +
+      '<h1>' + esc(md.title || 'Code walkthrough') + '</h1>' +
+      (sm.one_line ? '<div class="ov-tagline">' + esc(sm.one_line) + '</div>' : '') +
+      '<div class="ov-stats">' + statsHtml + '</div>';
+    main.appendChild(hero);
+
+    // Sequence strip — reading order as horizontal chain
+    const seq = document.createElement('div');
+    seq.className = 'ov-section';
+    seq.innerHTML = '<div class="ov-section-head">Reading order <span class="ov-section-sub">natural narrative order</span></div>';
+    const strip = document.createElement('div');
+    strip.className = 'ov-sequence';
+    storylines.forEach((s, i) => {
+      if (i > 0) {
+        const a = document.createElement('span');
+        a.className = 'ov-seq-arrow';
+        a.textContent = '→';
+        strip.appendChild(a);
+      }
+      const node = document.createElement('div');
+      node.className = 'ov-seq-node';
+      node.innerHTML =
+        '<div class="seq-id">' + esc(s.id) + '</div>' +
+        '<div class="seq-title">' + esc(s.title) + '</div>' +
+        '<div class="seq-kind-strip" style="background: ' + kindColor(s.kind) + '"></div>';
+      node.onclick = () => setStoryline(s.id);
+      strip.appendChild(node);
+    });
+    seq.appendChild(strip);
+    main.appendChild(seq);
+
+    // Storyline card grid
+    const gridSection = document.createElement('div');
+    gridSection.className = 'ov-section';
+    gridSection.innerHTML = '<div class="ov-section-head">Storylines <span class="ov-section-sub">click a card to open</span></div>';
+    const grid = document.createElement('div');
+    grid.className = 'ov-grid';
+    // File overlap map: file → list of storyline ids that touch it
+    const fileToSL = new Map();
+    storylines.forEach(s => (s.files_touched || []).forEach(f => {
+      if (!fileToSL.has(f)) fileToSL.set(f, []);
+      fileToSL.get(f).push(s.id);
+    }));
+    storylines.forEach(s => grid.appendChild(renderOverviewCard(s, storylines, fileToSL)));
+    gridSection.appendChild(grid);
+    main.appendChild(gridSection);
+
+    // Reading paths — auto-derived from importance + kind
+    const pathsSection = document.createElement('div');
+    pathsSection.className = 'ov-section';
+    pathsSection.innerHTML = '<div class="ov-section-head">Reading paths <span class="ov-section-sub">curated by different goals</span></div>';
+    const paths = document.createElement('div');
+    paths.className = 'ov-paths';
+    // Path 1: author's order (as JSON declared)
+    paths.appendChild(renderReadingPath(
+      '📖 Author\'s order',
+      'Read the walkthrough top-to-bottom as designed.',
+      storylines.map(s => s.id),
+      storylines
+    ));
+    // Path 2: importance-first (highest total importance descending)
+    const byImportance = storylines.slice().sort((a, b) => {
+      const at = (a.importance_scores || {}).total ?? 0;
+      const bt = (b.importance_scores || {}).total ?? 0;
+      return bt - at;
+    });
+    paths.appendChild(renderReadingPath(
+      '⭐ Most important first',
+      'Read the highest-importance storylines first; use for a fast pass.',
+      byImportance.map(s => s.id),
+      storylines
+    ));
+    // Path 3: full-depth first, summary-only after
+    const fullFirst = storylines.filter(s => s.depth !== 'summary').concat(storylines.filter(s => s.depth === 'summary'));
+    paths.appendChild(renderReadingPath(
+      '🎓 Full-depth first',
+      'Read the four full-depth storylines; skim summaries after.',
+      fullFirst.map(s => s.id),
+      storylines
+    ));
+    pathsSection.appendChild(paths);
+    main.appendChild(pathsSection);
+
+    // File-overlap heatmap: which files are touched by multiple storylines
+    const shared = Array.from(fileToSL.entries())
+      .filter(([, ids]) => ids.length > 1)
+      .sort((a, b) => b[1].length - a[1].length);
+    if (shared.length) {
+      const foSection = document.createElement('div');
+      foSection.className = 'ov-section';
+      foSection.innerHTML = '<div class="ov-section-head">Shared files <span class="ov-section-sub">touched by multiple storylines</span></div>';
+      const fo = document.createElement('div');
+      fo.className = 'ov-file-overlap';
+      shared.forEach(([file, ids]) => {
+        const row = document.createElement('div');
+        row.className = 'fo-row';
+        const chips = ids.map(id => '<span class="fo-slcell" data-go-sl="' + esc(id) + '">' + esc(id) + '</span>').join('');
+        row.innerHTML =
+          '<span class="fo-file">' + esc(file) + '</span>' +
+          '<span class="fo-count">×' + ids.length + '</span>' +
+          '<span>' + chips + '</span>';
+        fo.appendChild(row);
+      });
+      foSection.appendChild(fo);
+      main.appendChild(foSection);
+      foSection.querySelectorAll('[data-go-sl]').forEach(el => {
+        el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+      });
+    }
+  }
+
+  function kindColor(kind) {
+    return ({
+      core_flow: '#5b6cff', data_model: '#2f7a2f', entry_point: '#c98707',
+      algorithm: '#a64798', extension_point: '#1f7a78', utility: '#8b949e',
+      glue: '#9c5b3e', config: '#b56a00', mixed: '#57606a'
+    })[kind] || '#57606a';
+  }
+
+  function renderOverviewCard(sl, allStorylines, fileToSL) {
+    const card = document.createElement('div');
+    const kindCls = 'k-' + (sl.kind || 'mixed');
+    card.className = 'ov-card ' + kindCls + (sl.depth === 'summary' ? ' summary' : '');
+    card.onclick = () => setStoryline(sl.id);
+    const ip = sl.importance_scores || {};
+    const dots = ['centrality', 'conceptual_weight', 'entry_point', 'novelty'].map(k => {
+      const v = ip[k] || 0;
+      return '<span class="imp-dot s' + v + '" title="' + k + ': ' + v + '"></span>';
+    }).join('');
+    const files = (sl.files_touched || []).slice(0, 3).map(f =>
+      '<span class="ov-card-file">' + esc(f) + '</span>'
+    ).join('');
+    const moreFiles = (sl.files_touched || []).length > 3 ? '<span class="ov-card-file">+' + ((sl.files_touched || []).length - 3) + '</span>' : '';
+    // Shared-with computation: which other storylines share any file
+    const sharedIds = new Set();
+    (sl.files_touched || []).forEach(f => {
+      (fileToSL.get(f) || []).forEach(id => { if (id !== sl.id) sharedIds.add(id); });
+    });
+    const sharesHtml = sharedIds.size
+      ? '<div class="ov-card-shares">Shares files with ' +
+        Array.from(sharedIds).slice(0, 5).map(id => '<span class="sh-link" data-go-sl="' + esc(id) + '">' + esc(id) + '</span>').join(', ') +
+        '</div>'
+      : '';
+    card.innerHTML =
+      '<div class="ov-card-head">' +
+        '<span class="ov-card-id">' + esc(sl.id) + '</span>' +
+        '<span class="ov-card-kind ' + kindCls + '">' + esc(sl.kind || 'mixed') + '</span>' +
+        '<span class="ov-card-depth">' + esc(sl.depth || 'full') + '</span>' +
+      '</div>' +
+      '<div class="ov-card-title">' + esc(sl.title) + '</div>' +
+      (sl.mental_model_anchor ? '<div class="ov-card-anchor">💡 ' + esc(sl.mental_model_anchor) + '</div>' : '') +
+      (sl.summary ? '<div class="ov-card-summary">' + esc(sl.summary) + '</div>' : '') +
+      '<div class="ov-card-meta">' +
+        '<span class="ov-card-imp"><span class="imp-label">importance</span>' +
+          '<span class="imp-total">' + (ip.total || 0) + '</span>' +
+          '<span class="imp-dots">' + dots + '</span>' +
+        '</span>' +
+      '</div>' +
+      (files ? '<div class="ov-card-files">' + files + moreFiles + '</div>' : '') +
+      sharesHtml;
+    // Wire shared-with links (don't trigger the whole-card click)
+    card.querySelectorAll('[data-go-sl]').forEach(el => {
+      el.onclick = (ev) => { ev.stopPropagation(); setStoryline(el.getAttribute('data-go-sl')); };
+    });
+    return card;
+  }
+
+  function renderReadingPath(name, desc, ids, storylines) {
+    const path = document.createElement('div');
+    path.className = 'ov-path';
+    const chainHtml = ids.map((id, i) => {
+      const sl = storylines.find(s => s.id === id);
+      const label = sl ? id + ' ' + (sl.title.length > 24 ? sl.title.slice(0, 24) + '…' : sl.title) : id;
+      return (i > 0 ? '<span class="path-arrow">→</span>' : '') +
+        '<span class="path-node" data-go-sl="' + esc(id) + '" title="' + esc(sl?.title || id) + '">' + esc(label) + '</span>';
+    }).join('');
+    path.innerHTML =
+      '<div class="path-name">' + esc(name) + '</div>' +
+      '<div class="path-desc">' + esc(desc) + '</div>' +
+      '<div class="path-chain">' + chainHtml + '</div>';
+    path.querySelectorAll('[data-go-sl]').forEach(el => {
+      el.onclick = () => setStoryline(el.getAttribute('data-go-sl'));
+    });
+    return path;
+  }
+
   // ---------- Main render ----------
   function renderMain() {
     const main = document.getElementById('main');
     main.innerHTML = '';
+    // Overview tab lives outside the storylines array.
+    if (STATE.activeStorylineId === OVERVIEW_ID) {
+      renderOverview();
+      return;
+    }
     const storylines = WALKTHROUGH_DATA.storylines || [];
     const sl = storylines.find(s => s.id === STATE.activeStorylineId);
     if (!sl) { main.innerHTML = '<div class="placeholder">No storyline selected.</div>'; return; }
@@ -1260,9 +1832,9 @@
       return;
     }
     renderTopbar();
-    const firstFull = (WALKTHROUGH_DATA.storylines || []).find(s => s.depth !== 'summary' && s.diagram);
-    if (!firstFull) { document.body.innerHTML = '<div style="padding:40px;font-family:monospace">No full-depth storyline.</div>'; return; }
-    setStoryline(firstFull.id);
+    // Open the overview tab by default — the walkthrough's own table of
+    // contents. The user can dive into any storyline from there.
+    setStoryline(OVERVIEW_ID);
     window.addEventListener('resize', () => layoutAnnotations());
     window.addEventListener('keydown', (ev) => {
       if (ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
