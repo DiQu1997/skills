@@ -37,12 +37,13 @@ def load_exams():
 # ---------------- grading ----------------
 
 def norm(s: str) -> str:
-    # whitespace-insensitive; tolerate `//` continuation markers inserted by
-    # disclosed comment re-wrapping (deleted equally from both sides)
+    # whitespace-insensitive; tolerate disclosed token-preserving rewraps:
+    # Python line-continuation backslashes and `//` comment continuations
+    s = re.sub(r"\\\s*\n", "", s)
     return re.sub(r"\s+", "", s).replace("//", "")
 
 
-def grade(out_dir: Path, repo: Path, mode: str | None) -> dict:
+def grade(out_dir: Path, repo: Path, mode: str | None, commit: str | None = None) -> dict:
     r = {"out": str(out_dir), "checks": [], "verdict": "FAIL"}
 
     def add(name, ok, detail=""):
@@ -63,18 +64,27 @@ def grade(out_dir: Path, repo: Path, mode: str | None) -> dict:
     d = json.loads(cj.read_text(encoding="utf-8"))
     cards = d.get("cards", [])
 
+    def read_source(relpath):
+        # diff 卷的卡片对应提交时点的文件版本，不是工作区
+        if commit:
+            p = subprocess.run(["git", "-C", str(repo), "show", f"{commit}:{relpath}"],
+                               capture_output=True, text=True)
+            return p.stdout if p.returncode == 0 else None
+        fp = repo / relpath
+        return fp.read_text(errors="replace") if fp.exists() else None
+
     traced = missing = broken = 0
     for c in cards:
         m = re.match(r"([^:]+):(\d+)$", c.get("file", "") or "")
         if not m:
             missing += 1
             continue
-        src_path = repo / m.group(1)
-        if not src_path.exists():
+        content = read_source(m.group(1))
+        if content is None:
             broken += 1
             continue
         start = int(m.group(2))
-        src = src_path.read_text(errors="replace").split("\n")
+        src = content.split("\n")
         window = norm("\n".join(src[start - 1: start - 1 + len(c["code"].split("\n")) + 60]))
         if window.startswith(norm(c["code"])):
             traced += 1
@@ -149,7 +159,7 @@ def run_exam(exam: dict, cli: str, dry: bool):
     proc = subprocess.run([*shlex.split(cli), prompt], capture_output=True, text=True, timeout=3600)
     (out_dir / "examinee-report.md").write_text(proc.stdout or "", encoding="utf-8")
     print(f"[exam {exam['id']}] 完成，用时 {int(time.time() - t0)}s；考生报告存 examinee-report.md")
-    r = grade(out_dir, repo_dir, exam.get("mode"))
+    r = grade(out_dir, repo_dir, exam.get("mode"), exam.get("commit"))
     write_report(r, out_dir)
 
 
@@ -164,7 +174,8 @@ def main():
     pg = sub.add_parser("grade")
     pg.add_argument("out_dir", type=Path)
     pg.add_argument("--repo", type=Path, required=True)
-    pg.add_argument("--mode", choices=["orientation", "deep"], default=None)
+    pg.add_argument("--mode", choices=["orientation", "deep", "diff"], default=None)
+    pg.add_argument("--commit", default=None, help="diff 卷：按此提交版本溯源卡片代码")
     a = p.parse_args()
     exams = load_exams()
     if a.cmd == "list":
@@ -173,7 +184,7 @@ def main():
     elif a.cmd == "exam":
         run_exam(exams[a.id], a.cli, a.dry_run)
     else:
-        write_report(grade(a.out_dir, a.repo, a.mode), a.out_dir)
+        write_report(grade(a.out_dir, a.repo, a.mode, a.commit), a.out_dir)
 
 
 if __name__ == "__main__":

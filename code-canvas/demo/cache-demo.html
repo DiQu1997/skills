@@ -631,6 +631,9 @@ function bez(a, c1, c2, b, t) {
 }
 let step = 0;
 const STEPS = DATA.steps && DATA.steps.length ? DATA.steps : [{ title: '总览', caption: '', fit: true }];
+// an explicit empty wires array means "light nothing" — same as omitting it,
+// never "dim everything" (empty arrays are truthy in JS)
+STEPS.forEach(s => { if (s.wires && !s.wires.length) delete s.wires; });
 function drawWires() {
   relayoutColumns(); placeNotes(); fitRegions(); sizeWorld();
   svg.innerHTML = '';
@@ -738,6 +741,10 @@ function setStep(i, animate = true) {
     n.classList.toggle('hot', mine);
     n.classList.toggle('dim', step > 0 && !mine);
   });
+  // settle the layout before computing the camera — a card expanded by this
+  // step changes heights, and framing must use post-relayout positions
+  relayoutColumns();
+  placeNotes();
   if (s.fit || !s.focus) fitAll(animate); else focusOn(s.focus, animate);
   drawWires();
   const reg = (DATA.regions || []).find(r => r.id === s.storyline);

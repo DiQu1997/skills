@@ -73,6 +73,9 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
    输出即卡片的 `diff` 字段（卡内相对行号已换算好）
 4. 纯新增函数：`added` 覆盖全部行；被整段删除的函数：并入邻居卡的
    removed 或开"已删除"说明 note，不为死代码单独开卡
+5. **removed 原文同守行宽规则**（超宽被删行也做 token 保序重排并披露）；
+   diff_map 输出为空（纯上下文卡）时**省略 diff 字段**，避免 +0 −0 徽标
+6. 风险拆成多步时，"focus 覆盖全部 blocker/concern"按**风险段各步合计**执行
 
 ### 评审发现（findings）
 
@@ -128,7 +131,10 @@ blocker/concern；没有任何发现的评审要在末步 caption 明说"没有�
 - note **每次重绘跟随目标卡**：above 位被上方展开的卡挤压时自动下滑，
   实在没空间会退化成挂在目标卡左侧；同一张卡多条 `above` 仍会原地重叠，避免
 - 步骤状态是**累积**的（`expand`/`unfold` 只加不减）：直达 `#s5` 和顺序走到
-  第 5 步画面不同；截图自检以顺序走为准
+  第 5 步画面不同；截图自检以顺序走为准。带 severity 的 note 只在其 `step`
+  精确等于当前步时点亮（非累积）
+- **band 是标称值不是实际 y**：同列下推会拉开卡距，跨列等 band 不保证等高。
+  region 成员尽量占**独立的列区间**，否则矩形可能吞进异 region 的卡
 - 调试尾缀 `q` 依赖块条的「问」按钮，无 blocks 的画布上无效果
 
 ## 截图自检清单
