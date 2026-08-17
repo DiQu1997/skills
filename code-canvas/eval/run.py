@@ -91,6 +91,15 @@ def grade(out_dir: Path, repo: Path, mode: str | None) -> dict:
         add("领航图卡数 ≤9", total <= 9, f"{total} 张")
     elif mode == "deep":
         add("深潜图卡数 ≤16", total <= 16, f"{total} 张")
+    elif mode == "diff":
+        n_diff = sum(1 for c in cards if c.get("diff"))
+        add("有 diff 标记的卡（≥1）", n_diff >= 1, f"{n_diff} 张")
+        has_risk = any("风险" in (s.get("title", "") + s.get("caption", ""))
+                       for s in d.get("steps", []))
+        add("有风险步（标题/caption 含「风险」）", has_risk,
+            "" if has_risk else "diff 画布必须有风险判断")
+        n_sev = sum(1 for nt in d.get("notes", []) if nt.get("severity"))
+        add("有 severity 评审发现（≥1）", n_sev >= 1, f"{n_sev} 条")
 
     shots = list(out_dir.rglob("*.png"))
     add("有自检截图", len(shots) >= 1, f"{len(shots)} 张")
@@ -98,7 +107,8 @@ def grade(out_dir: Path, repo: Path, mode: str | None) -> dict:
     add("canvas.html 已渲染", html.exists())
 
     hard = [c for c in r["checks"] if c["name"] in
-            ("canvas.json 存在", "validate 无 ERROR", "代码可溯源 ≥90%", "canvas.html 已渲染")]
+            ("canvas.json 存在", "validate 无 ERROR", "代码可溯源 ≥90%", "canvas.html 已渲染",
+             "有 diff 标记的卡（≥1）")]
     r["verdict"] = "PASS" if all(c["ok"] for c in hard) else "FAIL"
     if r["verdict"] == "PASS" and not all(c["ok"] for c in r["checks"]):
         r["verdict"] = "PASS (warn)"
@@ -119,7 +129,13 @@ def run_exam(exam: dict, cli: str, dry: bool):
     repo_dir = HERE / ".repos" / exam["id"].split("-")[0]
     if not repo_dir.exists():
         repo_dir.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "clone", "--depth", "1", exam["repo"], str(repo_dir)], check=True)
+        depth = [] if exam.get("commit") else ["--depth", "1"]  # diff 卷要历史
+        subprocess.run(["git", "clone", *depth, exam["repo"], str(repo_dir)], check=True)
+    if exam.get("commit"):
+        ok = subprocess.run(["git", "-C", str(repo_dir), "cat-file", "-e", exam["commit"]])
+        if ok.returncode != 0:
+            subprocess.run(["git", "-C", str(repo_dir), "fetch", "--unshallow"], check=False)
+            subprocess.run(["git", "-C", str(repo_dir), "cat-file", "-e", exam["commit"]], check=True)
     out_dir = HERE / "runs" / f"{exam['id']}-{time.strftime('%m%d-%H%M')}"
     out_dir.mkdir(parents=True, exist_ok=True)
     prompt = (HERE / "prompt-template.md").read_text(encoding="utf-8").format(

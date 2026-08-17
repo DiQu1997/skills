@@ -59,6 +59,29 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
   上色的 diff
 - removed 只放读懂变更所必需的原文，不搬运整个旧版本
 
+### 摄入管线（从真实 diff 到 card.diff，行号必须机械算）
+
+1. 定基与头：`BASE=<sha>^`、`HEAD=<sha>`（PR 则是 merge-base 与分支头）
+2. `git show --stat HEAD` 圈出改动文件；逐文件决定哪些函数开卡
+3. 每张卡：从 HEAD 版文件取函数原文（记下起始行），然后**用 diff_map.py
+   算 diff 字段，不要手工对**：
+   ```bash
+   git show BASE:path/to/file.py > /tmp/base.py
+   git show HEAD:path/to/file.py > /tmp/head.py
+   python3 diff_map.py /tmp/base.py /tmp/head.py --head-start <函数起始行> --head-count <行数>
+   ```
+   输出即卡片的 `diff` 字段（卡内相对行号已换算好）
+4. 纯新增函数：`added` 覆盖全部行；被整段删除的函数：并入邻居卡的
+   removed 或开"已删除"说明 note，不为死代码单独开卡
+
+### 评审发现（findings）
+
+评审意见写成带 `severity` 的 intent note：`blocker`（不改不能合）/
+`concern`（应当处理）/ `nit`（顺手改）。渲染器自动出左上角发现计数器，
+点击逐个跳转。规范：每条发现锚到具体行；风险步的 focus 必须包含全部
+blocker/concern；没有任何发现的评审要在末步 caption 明说"没有拦截意见"
+——沉默不是结论。
+
 ## 规模闸门：大仓库先领航，后深潜
 
 动笔前先估计**这张图要讲的东西**的代码量（不是仓库总行数）：
@@ -137,6 +160,7 @@ description: Turns code reading or diff review into an interactive 2D canvas ins
 - `schema.md` — canvas JSON 格式
 - `template/canvas.html` — 数据驱动的单文件渲染模板（布局引擎在里面）
 - `validate.py` — canvas JSON 验证器：机械错误 + 预算超限（渲染前必过）
+- `diff_map.py` — base/head 两文件 + 卡片行段 → 机械算出 card.diff
 - `render.py` — JSON → HTML 注入脚本
 - `serve.py` — 块级问答服务：serve HTML + `/ask` 桥接 claude/codex CLI
 - `tests/` — Playwright 交互回归 + 个性化端到端测试

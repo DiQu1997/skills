@@ -79,6 +79,9 @@
       "text": "……",
       "anchor": { "card": "handler", "line": 6 },  // 引线锚到具体行
       "place": { "side": "left", "of": "handler" },// 摆放：卡片左/上 (left|above)
+      "severity": "concern",          // 可选（diff 评审用）：blocker|concern|nit
+                                      // 标了即为"评审发现"——note 出徽章，
+                                      // 页面左上自动出发现计数器，点击逐个跳转
       "step": 2 }
   ],
 

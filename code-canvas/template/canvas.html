@@ -119,6 +119,17 @@
     border-left: 3px solid #b08d3f; border-radius: 8px; padding: 9px 12px; font-size: 11.5px;
     line-height: 1.65; color: #d0c3a2; z-index: 4; transition: opacity .35s; }
   .note .tag { font-size: 9.5px; color: #8f7d52; margin-bottom: 3px; letter-spacing: 1px; }
+  .sev { display: inline-block; font-size: 9px; padding: 0 7px; border-radius: 99px;
+    margin-left: 7px; letter-spacing: .5px; vertical-align: 1px; }
+  .sev.blocker { background: rgba(214,90,90,.18); color: #e08b8b; border: 1px solid #7a4343; }
+  .sev.concern { background: rgba(224,162,62,.15); color: #e0b45c; border: 1px solid #6b5a35; }
+  .sev.nit { background: rgba(139,149,165,.12); color: #9aa4b2; border: 1px solid #45505e; }
+  #findings { position: fixed; top: 60px; left: 18px; z-index: 10; display: flex; gap: 8px;
+    align-items: center; font-size: 11px; color: #9aa4b2; background: #1b2027;
+    border: 1px solid #3e4854; border-radius: 99px; padding: 4px 14px; cursor: pointer; }
+  #findings:hover { border-color: #5a6675; color: #d5dbe4; }
+  #findings b.blocker { color: #e08b8b; } #findings b.concern { color: #e0b45c; }
+  #findings b.nit { color: #9aa4b2; }
   .note.hot { border-color: #c8a45a; border-left-color: #e0b45c; color: #ecdfbc;
     box-shadow: 0 0 0 1px rgba(200,164,90,.35), 0 8px 20px rgba(0,0,0,.45); }
   .note.dim { opacity: .32; }
@@ -389,14 +400,38 @@ if (DATA.cards.some(c => c.diff)) {
     + `<span><span class="sw" style="border-color:#d65a5a"></span>删除的原文</span>`);
 }
 
-/* notes */
+/* notes; a severity marks a note as a review finding */
 for (const n of DATA.notes || []) {
   const el = document.createElement('div');
   el.className = 'note' + (n.flavor === 'bg' ? ' bg' : '');
   el.id = 'note-' + n.id;
   el.dataset.step = n.step ?? '';
-  el.innerHTML = `<div class="tag">${esc(n.tag || 'NOTE')}</div>${esc(n.text)}`;
+  const sev = n.severity ? `<span class="sev ${esc(n.severity)}">${esc(n.severity)}</span>` : '';
+  el.innerHTML = `<div class="tag">${esc(n.tag || 'NOTE')}${sev}</div>${esc(n.text)}`;
   world.appendChild(el);
+}
+/* findings tally: click cycles the camera through severity-tagged notes */
+const FINDINGS = (DATA.notes || []).filter(n => n.severity);
+if (FINDINGS.length) {
+  const counts = {};
+  FINDINGS.forEach(n => counts[n.severity] = (counts[n.severity] || 0) + 1);
+  const chip = document.createElement('div');
+  chip.id = 'findings';
+  chip.innerHTML = '发现：' + ['blocker', 'concern', 'nit']
+    .filter(s => counts[s]).map(s => `<b class="${s}">${counts[s]} ${s}</b>`).join(' · ');
+  chip.title = '点击逐个跳转';
+  document.body.appendChild(chip);
+  let fi = -1;
+  chip.addEventListener('click', () => {
+    fi = (fi + 1) % FINDINGS.length;
+    const n = FINDINGS[fi];
+    const el = document.getElementById('note-' + n.id);
+    document.querySelectorAll('.note.hot').forEach(x => x.classList.remove('hot'));
+    el.classList.remove('dim');
+    el.classList.add('hot');
+    focusOn([n.id]);
+    drawWires();
+  });
 }
 
 /* ================= layout ================= */

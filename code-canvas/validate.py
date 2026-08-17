@@ -137,6 +137,11 @@ def main():
         note_ids.add(nid)
         if nt.get("flavor") not in ("intent", "bg"):
             err(f"note {nid}: flavor 必须是 intent | bg")
+        sev = nt.get("severity")
+        if sev is not None and sev not in ("blocker", "concern", "nit"):
+            err(f"note {nid}: severity 必须是 blocker | concern | nit")
+        if sev and nt.get("flavor") == "bg":
+            warn(f"note {nid}: bg note 带 severity——评审发现应是 intent note")
         a = nt.get("anchor")
         if a:
             cid = a.get("card")
