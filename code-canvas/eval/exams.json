@@ -26,5 +26,13 @@
     "mode": "orientation",
     "task": "帮我用 code-canvas 建立对这个库内部结构的整体认识。",
     "audience": "写过 Python 的工程师，想知道 requests 内部怎么组织，中文"
+  },
+  {
+    "id": "nanovllm-diff",
+    "repo": "https://github.com/GeeeekExplorer/nano-vllm",
+    "mode": "diff",
+    "commit": "8d63a98c03805e54e9a422fd83fff7a4780c17dc",
+    "task": "用 code-canvas 给我评审这个提交（在仓库里 git show 8d63a98 可看全部改动，提交信息：support chunked prefill and fix minor bug）。我想搞懂它改了什么、为什么、有什么风险。",
+    "audience": "熟悉这个项目基本结构、要决定是否合入此变更的评审者，中文"
   }
 ]

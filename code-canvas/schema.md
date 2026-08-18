@@ -79,6 +79,9 @@
       "text": "……",
       "anchor": { "card": "handler", "line": 6 },  // 引线锚到具体行
       "place": { "side": "left", "of": "handler" },// 摆放：卡片左/上 (left|above)
+      "severity": "concern",          // 可选（diff 评审用）：blocker|concern|nit
+                                      // 标了即为"评审发现"——note 出徽章，
+                                      // 页面左上自动出发现计数器，点击逐个跳转
       "step": 2 }
   ],
 
@@ -109,7 +112,8 @@
   块条「说明」展开解释、虚线标识符点击展开变元注释、
   ◀▶/←→ 步进、点区域标签跳故事线。
   `#s2` 直达步骤；调试尾缀：`x` 全展开、`e` 开全部说明、`t` 开全部变元注释、
-  `q` 打开问答抽屉。
+  `q` 打开问答抽屉。右上 🌙/☀️ 切换深浅色主题（默认亮色，选择存 localStorage；
+  全部颜色走 CSS token，两主题各有整套值）。
 - **块级问答**：每根块条有「问」按钮，打开侧边抽屉就该块提问。页面通过
   `/__alive` 探测 `serve.py`（`python3 serve.py 画布.html`，桥接 `claude -p`
   或 `codex exec`）；无服务时降级为把「问题 + 块代码 + 上下文」复制到剪贴板。

@@ -247,6 +247,23 @@
         "side": "left",
         "of": "store"
       },
+      "step": 3,
+      "severity": "concern"
+    },
+    {
+      "id": "n-floor",
+      "flavor": "intent",
+      "severity": "nit",
+      "tag": "发现 · cache.py:10",
+      "text": "uniform(0.9, 1.1) 在 ttl 很小时抖动后可能取整成 0（永不缓存）。建议加下界：max(1, …)。",
+      "anchor": {
+        "card": "jittered",
+        "line": 2
+      },
+      "place": {
+        "side": "left",
+        "of": "jittered"
+      },
       "step": 3
     }
   ],
@@ -314,7 +331,7 @@
     {
       "title": "③ 回归风险",
       "storyline": "A",
-      "caption": "两个要盯的点：抖动让 TTL 观测值偏离配置值，相关告警规则要改；keyed_lock 持锁期间包含整个回源耗时，慢上游会让排队请求堆积。",
+      "caption": "三个要盯的点：TTL 观测值偏离配置值，告警规则要改；keyed_lock 持锁含整个回源耗时，慢上游会堆积排队；抖动无下界，极小 ttl 可能归零。",
       "wires": [
         "w-store",
         "w-jit"
@@ -328,7 +345,8 @@
       "focus": [
         "store",
         "n-risk",
-        "handler"
+        "n-floor",
+        "jittered"
       ]
     }
   ]
