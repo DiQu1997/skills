@@ -251,8 +251,27 @@
     line-height: 1.55;
     background: var(--code-bg);
     border-radius: 4px;
-    overflow-x: auto;
+    overflow: visible;
+    position: relative;
   }
+  .block-code-scroll { overflow: auto; }
+  /* resizable code box: drag handles on right/left/bottom edges + bottom corners */
+  .block-code.is-sized { box-sizing: border-box; }
+  .block-code.is-sized > .block-code-scroll { height: 100%; }
+  .block.rz-active { z-index: 30; }
+  .rz-handle { position: absolute; z-index: 5; opacity: 0; transition: opacity 0.15s; touch-action: none; }
+  .block.expanded:hover .rz-handle, .block.rz-active .rz-handle { opacity: 1; }
+  .rz-handle.rz-e  { top: 16px; bottom: 8px; right: -5px; width: 10px; cursor: ew-resize; }
+  .rz-handle.rz-w  { top: 16px; bottom: 8px; left: -5px;  width: 10px; cursor: ew-resize; }
+  .rz-handle.rz-s  { left: 16px; right: 16px; bottom: -5px; height: 10px; cursor: ns-resize; }
+  .rz-handle.rz-se { right: -6px; bottom: -6px; width: 18px; height: 18px; cursor: nwse-resize; }
+  .rz-handle.rz-sw { left: -6px;  bottom: -6px; width: 18px; height: 18px; cursor: nesw-resize; }
+  .rz-handle::after { content: ""; position: absolute; }
+  .rz-handle.rz-e::after, .rz-handle.rz-w::after { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 3px; height: 26px; border-radius: 3px; background: var(--fg-faint); }
+  .rz-handle.rz-s::after { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 26px; height: 3px; border-radius: 3px; background: var(--fg-faint); }
+  .rz-handle.rz-se::after { right: 4px; bottom: 4px; width: 9px; height: 9px; border-right: 2px solid var(--fg-faint); border-bottom: 2px solid var(--fg-faint); }
+  .rz-handle.rz-sw::after { left: 4px;  bottom: 4px; width: 9px; height: 9px; border-left: 2px solid var(--fg-faint); border-bottom: 2px solid var(--fg-faint); }
+  body.rz-dragging, body.rz-dragging * { user-select: none !important; }
   .code-line { display: flex; gap: 12px; padding: 0 8px; }
   .code-line .ln {
     color: var(--fg-faint);
@@ -449,7 +468,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    z-index: 2;
+    z-index: 0;
     overflow: visible;
   }
   .edge-path { fill: none; stroke-width: 1.5; }
@@ -932,6 +951,87 @@
   }
 
   // -------- Rendering: storyline (flow inspector) --------
+  // -------- Resizable code boxes --------
+  const __BS_KEY = 'wt-blocksizes-' + ((WALKTHROUGH_DATA && WALKTHROUGH_DATA.metadata && WALKTHROUGH_DATA.metadata.commit) || 'x');
+  let __blockSizes = {};
+  try { __blockSizes = JSON.parse(localStorage.getItem(__BS_KEY) || '{}'); } catch (e) { __blockSizes = {}; }
+  function saveBlockSizes() { try { localStorage.setItem(__BS_KEY, JSON.stringify(__blockSizes)); } catch (e) {} }
+  function bsKey(id) { return (state.storylineId || '') + '/' + id; }
+  function reflowEdges() { renderEdges(getStoryline(state.storylineId)); }
+
+  function applyBlockSize(blockEl, code, id) {
+    const size = __blockSizes[bsKey(id)];
+    if (!size) return;
+    code.classList.add('is-sized');
+    if (size.w) code.style.width = size.w + 'px';
+    if (size.h) code.style.height = size.h + 'px';
+    blockEl.classList.add('rz-active');
+  }
+
+  function startResize(ev, dir, blockEl, code, id) {
+    ev.preventDefault(); ev.stopPropagation();
+    const rect = code.getBoundingClientRect();
+    const sx = ev.clientX, sy = ev.clientY, sw = rect.width, sh = rect.height;
+    const minW = 220, minH = 80, maxW = 1200;
+    const prev = __blockSizes[bsKey(id)];
+    const hadH = !!(prev && prev.h);
+    const touchedH = dir.indexOf('s') !== -1;
+    code.classList.add('is-sized');
+    blockEl.classList.add('rz-active');
+    document.body.classList.add('rz-dragging');
+    let raf = 0, cur = { w: Math.round(sw), h: Math.round(sh) };
+    const move = (e) => {
+      let w = sw, h = sh;
+      if (dir.indexOf('e') !== -1) w = sw + (e.clientX - sx);
+      if (dir.indexOf('w') !== -1) w = sw - (e.clientX - sx);
+      if (dir.indexOf('s') !== -1) h = sh + (e.clientY - sy);
+      w = Math.max(minW, Math.min(maxW, w));
+      h = Math.max(minH, h);
+      cur = { w: Math.round(w), h: Math.round(h) };
+      code.style.width = cur.w + 'px';
+      if (dir.indexOf('s') !== -1) code.style.height = cur.h + 'px';
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; reflowEdges(); });
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.body.classList.remove('rz-dragging');
+      __blockSizes[bsKey(id)] = { w: cur.w, h: (touchedH || hadH) ? cur.h : null };
+      saveBlockSizes();
+      reflowEdges();
+      // swallow the click that fires right after the drag so the block doesn't toggle
+      const swallow = (e) => { e.stopPropagation(); e.preventDefault(); document.removeEventListener('click', swallow, true); };
+      document.addEventListener('click', swallow, true);
+      setTimeout(() => document.removeEventListener('click', swallow, true), 350);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  }
+
+  function wireResizers() {
+    document.querySelectorAll('#canvas .block.expanded').forEach(blockEl => {
+      const id = blockEl.dataset.blockId;
+      const code = blockEl.querySelector('.block-code');
+      if (!code) return;
+      applyBlockSize(blockEl, code, id);
+      code.querySelectorAll('.rz-handle').forEach(h => {
+        const cls = [...h.classList].find(c => c !== 'rz-handle' && c.indexOf('rz-') === 0);
+        const dir = cls ? cls.slice(3) : 'e';
+        h.onpointerdown = (ev) => startResize(ev, dir, blockEl, code, id);
+        h.onclick = (ev) => ev.stopPropagation();
+        h.ondblclick = (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          delete __blockSizes[bsKey(id)];
+          saveBlockSizes();
+          code.classList.remove('is-sized');
+          code.style.width = ''; code.style.height = '';
+          blockEl.classList.remove('rz-active');
+          reflowEdges();
+        };
+      });
+    });
+  }
+
   function renderStoryline() {
     const canvas = document.getElementById('canvas');
     const storyline = getStoryline(state.storylineId);
@@ -950,6 +1050,7 @@
       </div>
     `;
     bindBlockClicks();
+    wireResizers();
     renderEdges(storyline);
   }
 
@@ -1004,7 +1105,12 @@
       const srcHtml = highlighted[i] ?? escapeHtml(l.content ?? '');
       return `<div class="code-line${inRange ? '' : ' context'}"><span class="ln">${l.line_num}</span><span class="src">${srcHtml}</span></div>`;
     }).join('');
-    return `<div class="block-code">${html}</div>`;
+    return `<div class="block-code">`
+      + `<div class="block-code-scroll">${html}</div>`
+      + `<div class="rz-handle rz-e"></div><div class="rz-handle rz-w"></div>`
+      + `<div class="rz-handle rz-s"></div><div class="rz-handle rz-se"></div>`
+      + `<div class="rz-handle rz-sw"></div>`
+      + `</div>`;
   }
 
   // -------- Syntax highlighter (TS/JS/Python) --------
